@@ -7,6 +7,7 @@ import asyncio
 import logging
 import signal
 import sys
+from urllib.parse import urlparse
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -102,10 +103,14 @@ def main():
         logger.info("Iniciando en modo webhook: %s", config.WEBHOOK_URL)
         app = _build_app()
 
-        logger.info("Iniciando servidor webhook en puerto %s", config.WEBHOOK_PORT)
+        # Extraer el path del webhook_url para que coincida con el servidor local
+        url_path = urlparse(config.WEBHOOK_URL).path.lstrip("/")
+
+        logger.info("Iniciando servidor webhook en puerto %s (path: /%s)", config.WEBHOOK_PORT, url_path)
         app.run_webhook(
             listen="0.0.0.0",
             port=config.WEBHOOK_PORT,
+            url_path=url_path,
             webhook_url=config.WEBHOOK_URL,
             secret_token=config.WEBHOOK_SECRET,
         )
