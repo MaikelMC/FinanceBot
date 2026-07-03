@@ -44,6 +44,11 @@ class AIResponder:
         """
         logger.info("Procesando con IA para %s: %s", usuario["nombre"], mensaje)
 
+        # Primero chequear si es un saludo
+        mensaje_lower = mensaje.lower().strip()
+        if any(word in mensaje_lower for word in ["hola", "hi", "buenas", "buenas tardes", "buenos días", "buenas noches"]):
+            return self._generar_respuesta_fallback(mensaje, usuario)
+
         try:
             respuesta_nativa = self._procesar_con_regex_nativo(mensaje, usuario)
 

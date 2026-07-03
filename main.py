@@ -60,7 +60,13 @@ async def run_bot():
 
     await app.initialize()
     await app.start()
-    await app.updater.start_polling(drop_pending_updates=True)
+    try:
+        await app.updater.start_polling(
+            drop_pending_updates=True
+        )
+    except Exception as e:
+        logger.error("Error starting polling: %s", e)
+        raise
 
     stop_event = asyncio.Event()
 
