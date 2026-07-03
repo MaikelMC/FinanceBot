@@ -4,9 +4,12 @@ Punto de entrada del bot. Configura el bot con inteligencia financiera y arranca
 """
 
 import asyncio
+import json
 import logging
 import signal
 import sys
+import urllib.request
+import urllib.error
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -26,18 +29,35 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def _setup_webhook(app):
-    """Registra el webhook en los servidores de Telegram automáticamente."""
+def _setup_webhook():
+    """
+    Registra el webhook en Telegram vía API REST directamente.
+    Usa urllib (stdlib) para evitar conflictos con el event loop de run_webhook().
+    """
     logger.info("Configurando webhook en Telegram: %s", config.WEBHOOK_URL)
-    success = await app.bot.set_webhook(
-        url=config.WEBHOOK_URL,
-        secret_token=config.WEBHOOK_SECRET,
-        drop_pending_updates=True,
+
+    data = json.dumps({
+        "url": config.WEBHOOK_URL,
+        "secret_token": config.WEBHOOK_SECRET,
+        "drop_pending_updates": True,
+    }).encode()
+
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/setWebhook",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
-    if success:
-        logger.info("✓ Webhook configurado exitosamente en Telegram")
-    else:
-        logger.warning("⚠ No se pudo configurar el webhook en Telegram")
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+            if result.get("ok"):
+                logger.info("✓ Webhook configurado exitosamente en Telegram")
+            else:
+                logger.warning("⚠ Telegram rechazó el webhook: %s", result.get("description", ""))
+    except urllib.error.URLError as e:
+        logger.warning("⚠ No se pudo configurar el webhook (error de red): %s", e)
 
 
 def _build_app():
@@ -117,7 +137,7 @@ def main():
         app = _build_app()
 
         # Auto-configurar webhook en Telegram antes de iniciar el servidor
-        asyncio.run(_setup_webhook(app))
+        _setup_webhook()
 
         logger.info("Iniciando servidor webhook en puerto %s", config.WEBHOOK_PORT)
         app.run_webhook(
