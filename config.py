@@ -18,6 +18,16 @@ PROMPTS_DIR = BASE_DIR / "prompts"
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
+# Backend de base de datos: "sqlite" (default) o "gsheets"
+DB_BACKEND = os.getenv("DB_BACKEND", "sqlite").lower()
+
+# Google Sheets (solo si DB_BACKEND=gsheets)
+# Option 1: File path (local development)
+GOOGLE_SHEETS_CREDENTIALS = os.getenv("GOOGLE_SHEETS_CREDENTIALS", "")
+# Option 2: JSON string (Render.com - set as env var)
+GOOGLE_SHEETS_CREDENTIALS_JSON = os.getenv("GOOGLE_SHEETS_CREDENTIALS_JSON", "")
+GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
+
 AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -43,6 +53,23 @@ def validate_config():
             "Falta TELEGRAM_BOT_TOKEN. "
             "Obtén uno en @BotFather y definilo en el archivo .env"
         )
+    if DB_BACKEND not in ("sqlite", "gsheets"):
+        raise ValueError(
+            f"DB_BACKEND='{DB_BACKEND}' no válido. Usa 'sqlite' o 'gsheets'."
+        )
+    if DB_BACKEND == "gsheets":
+        if not GOOGLE_SHEETS_CREDENTIALS and not GOOGLE_SHEETS_CREDENTIALS_JSON:
+            raise ValueError(
+                "DB_BACKEND=gsheets pero falta GOOGLE_SHEETS_CREDENTIALS o GOOGLE_SHEETS_CREDENTIALS_JSON en .env"
+            )
+        if GOOGLE_SHEETS_CREDENTIALS and not Path(GOOGLE_SHEETS_CREDENTIALS).exists():
+            raise ValueError(
+                f"Archivo de credenciales no encontrado: {GOOGLE_SHEETS_CREDENTIALS}"
+            )
+        if not GOOGLE_SHEETS_SPREADSHEET_ID:
+            raise ValueError(
+                "DB_BACKEND=gsheets pero falta GOOGLE_SHEETS_SPREADSHEET_ID en .env"
+            )
     if AI_PROVIDER == "mistral" and not MISTRAL_API_KEY:
         raise ValueError(
             "AI_PROVIDER es 'mistral' pero falta MISTRAL_API_KEY en .env"

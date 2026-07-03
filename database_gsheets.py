@@ -1,0 +1,522 @@
+"""
+database_gsheets.py - Backend Google Sheets para el bot de finanzas personales
+Reemplaza database.py usando gspread + pandas con caché en memoria.
+
+Misma interfaz pública que database.py para compatibilidad total.
+"""
+
+import logging
+import os
+import json
+import tempfile
+import threading
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, List, Dict, Any
+
+import gspread
+import pandas as pd
+from gspread_dataframe import set_with_dataframe, get_as_dataframe
+
+import config
+
+logger = logging.getLogger(__name__)
+
+# ============================================================
+# CONFIGURACIÓN DE HOJAS (cada "tabla" es una hoja en el spreadsheet)
+# ============================================================
+
+SHEET_NAMES = {
+    "usuarios": "usuarios",
+    "categorias": "categorias",
+    "transacciones": "transacciones",
+    "presupuestos": "presupuestos",
+    "metas_ahorro": "metas_ahorro",
+}
+
+# Columnas de cada hoja (deben coincidir con las claves de los dicts devueltos)
+SHEET_COLUMNS = {
+    "usuarios": ["id", "telegram_user_id", "nombre", "created_at", "updated_at"],
+    "categorias": ["id", "usuario_id", "nombre", "tipo", "descripcion", "icono_color", "created_at"],
+    "transacciones": ["id", "usuario_id", "categoria_id", "tipo", "cantidad", "descripcion", "fecha", "created_at"],
+    "presupuestos": ["id", "usuario_id", "categoria_id", "cantidad_planejada", "cantidad_gastada", "periodo", "fecha_inicio", "fecha_fin", "created_at"],
+    "metas_ahorro": ["id", "usuario_id", "nombre", "objetivo", "cantidad_actual", "fecha_inicio", "fecha_meta", "created_at"],
+}
+
+LOCK = threading.Lock()
+
+
+# ============================================================
+# CLASE PRINCIPAL
+# ============================================================
+
+class GoogleSheetsDB:
+    """Capa de persistencia sobre Google Sheets con caché en memoria."""
+
+    def __init__(self):
+        self._spreadsheet = None
+        self._client = None
+        self._cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._cache_dirty: set = set()
+        self._initialized = False
+        self._next_ids: Dict[str, int] = {}
+
+    # ----------------------------------------------------------
+    # INICIALIZACIÓN
+    # ----------------------------------------------------------
+
+    def init_sheets(self):
+        """Abre o crea el spreadsheet y las hojas. Carga caché inicial."""
+        if self._initialized:
+            return
+
+        creds_file = config.GOOGLE_SHEETS_CREDENTIALS
+        creds_json = config.GOOGLE_SHEETS_CREDENTIALS_JSON
+        sheet_id = config.GOOGLE_SHEETS_SPREADSHEET_ID
+
+        if not sheet_id:
+            raise ValueError("Falta GOOGLE_SHEETS_SPREADSHEET_ID en .env")
+
+        # Support both file path and JSON string
+        actual_creds_file = creds_file
+        if creds_json:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                f.write(creds_json)
+                actual_creds_file = f.name
+            logger.info("Credentials JSON recibido como variable de entorno")
+        elif creds_file and Path(creds_file).exists():
+            actual_creds_file = creds_file
+        else:
+            raise ValueError(
+                "Falta GOOGLE_SHEETS_CREDENTIALS o GOOGLE_SHEETS_CREDENTIALS_JSON en .env"
+            )
+
+        if not actual_creds_file or not Path(actual_creds_file).exists():
+            raise FileNotFoundError(
+                f"Archivo de credenciales Google Sheets no encontrado: {actual_creds_file}"
+            )
+
+        try:
+            gc = gspread.service_account(filename=actual_creds_file)
+            self._client = gc
+            self._spreadsheet = gc.open_by_key(sheet_id)
+            logger.info("Conectado a spreadsheet: %s", self._spreadsheet.title)
+        except gspread.SpreadsheetNotFound:
+            raise ValueError(
+                f"No se encontró el spreadsheet con ID: {sheet_id}. "
+                "Verifica que el ID sea correcto y que el service account tenga acceso."
+            )
+        except Exception as e:
+            raise ConnectionError(f"Error conectando a Google Sheets: {e}")
+
+        self._ensure_sheets()
+        self._load_all_cache()
+        self._initialized = True
+        logger.info("Google Sheets DB inicializada correctamente.")
+
+    def _ensure_sheets(self):
+        """Crea las hojas con sus encabezados si no existen."""
+        existing = {ws.title for ws in self._spreadsheet.worksheets()}
+
+        for name, cols in SHEET_COLUMNS.items():
+            if name not in existing:
+                ws = self._spreadsheet.add_worksheet(title=name, rows=1000, cols=len(cols))
+                ws.append_row(cols)
+                logger.info("Hoja creada: %s", name)
+            else:
+                ws = self._spreadsheet.worksheet(name)
+                header = ws.row_values(1)
+                if header != cols:
+                    logger.warning(
+                        "Hoja '%s' tiene encabezados distintos: %s. Se esperaba: %s",
+                        name, header, cols
+                    )
+
+    def _load_all_cache(self):
+        """Carga todas las hojas a la caché en memoria."""
+        for name in SHEET_COLUMNS:
+            self._load_sheet(name)
+
+    def _load_sheet(self, name: str):
+        """Carga una hoja a la caché."""
+        try:
+            ws = self._spreadsheet.worksheet(name)
+            records = ws.get_all_records()
+            # Normalizar: asegurar que todos los campos existen
+            rows = []
+            for r in records:
+                row = {col: r.get(col, "") for col in SHEET_COLUMNS[name]}
+                rows.append(row)
+            self._cache[name] = rows
+
+            # Calcular próximo ID
+            if rows:
+                ids = [int(r["id"]) for r in rows if str(r.get("id", "")).isdigit()]
+                self._next_ids[name] = max(ids) + 1 if ids else 1
+            else:
+                self._next_ids[name] = 1
+        except Exception as e:
+            logger.error("Error cargando hoja '%s': %s", name, e)
+            self._cache[name] = []
+            self._next_ids[name] = 1
+
+    def _flush_sheet(self, name: str):
+        """Escribe la caché modificada de vuelta a la hoja."""
+        if name not in self._cache_dirty:
+            return
+        try:
+            ws = self._spreadsheet.worksheet(name)
+            cols = SHEET_COLUMNS[name]
+            df = pd.DataFrame(self._cache[name], columns=cols)
+            ws.clear()
+            set_with_dataframe(ws, df, include_column_header=True, resize=True)
+            self._cache_dirty.discard(name)
+        except Exception as e:
+            logger.error("Error escribiendo hoja '%s': %s", name, e)
+
+    def flush_all(self):
+        """Fuerza escritura de todas las hojas sucias a Google Sheets."""
+        for name in list(self._cache_dirty):
+            self._flush_sheet(name)
+
+    def _now(self) -> str:
+        """Retorna timestamp actual en formato ISO."""
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _today(self) -> str:
+        return datetime.now().strftime("%Y-%m-%d")
+
+    def _next_id(self, sheet: str) -> int:
+        """Genera el próximo ID secuencial para una hoja."""
+        nid = self._next_ids.get(sheet, 1)
+        self._next_ids[sheet] = nid + 1
+        return nid
+
+    # ----------------------------------------------------------
+    # USUARIOS
+    # ----------------------------------------------------------
+
+    def obtener_o_crear_usuario(self, telegram_user_id: int, nombre: str) -> Dict[str, Any]:
+        with LOCK:
+            users = self._cache.get("usuarios", [])
+            for u in users:
+                if str(u.get("telegram_user_id", "")) == str(telegram_user_id):
+                    return dict(u)
+
+            now = self._now()
+            uid = self._next_id("usuarios")
+            nuevo = {
+                "id": uid,
+                "telegram_user_id": telegram_user_id,
+                "nombre": nombre,
+                "created_at": now,
+                "updated_at": now,
+            }
+            users.append(nuevo)
+            self._cache_dirty.add("usuarios")
+            self._flush_sheet("usuarios")
+            logger.info("Usuario creado: %s (ID %d)", nombre, uid)
+            return dict(nuevo)
+
+    def obtener_usuario(self, telegram_user_id: int) -> Optional[Dict[str, Any]]:
+        users = self._cache.get("usuarios", [])
+        for u in users:
+            if str(u.get("telegram_user_id", "")) == str(telegram_user_id):
+                return dict(u)
+        return None
+
+    # ----------------------------------------------------------
+    # CATEGORÍAS
+    # ----------------------------------------------------------
+
+    def crear_categoria(self, usuario_id: int, nombre: str, tipo: str, descripcion: str = "", icono_color: str = "") -> Dict[str, Any]:
+        with LOCK:
+            cats = self._cache.get("categorias", [])
+            cid = self._next_id("categorias")
+            nueva = {
+                "id": cid,
+                "usuario_id": usuario_id,
+                "nombre": nombre,
+                "tipo": tipo,
+                "descripcion": descripcion,
+                "icono_color": icono_color or "#3498db",
+                "created_at": self._now(),
+            }
+            cats.append(nueva)
+            self._cache_dirty.add("categorias")
+            self._flush_sheet("categorias")
+            logger.info("Categoría creada: %s (tipo=%s) para usuario %d", nombre, tipo, usuario_id)
+            return dict(nueva)
+
+    def obtener_categorias(self, usuario_id: int, tipo: Optional[str] = None) -> List[Dict[str, Any]]:
+        cats = self._cache.get("categorias", [])
+        resultado = []
+        for c in cats:
+            if int(c.get("usuario_id", 0)) != usuario_id:
+                continue
+            if tipo and c.get("tipo") != tipo:
+                continue
+            resultado.append(dict(c))
+        resultado.sort(key=lambda x: (x.get("tipo", ""), x.get("nombre", "")))
+        return resultado
+
+    # ----------------------------------------------------------
+    # TRANSACCIONES
+    # ----------------------------------------------------------
+
+    def agregar_transaccion(self, usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "") -> Dict[str, Any]:
+        with LOCK:
+            trans = self._cache.get("transacciones", [])
+            tid = self._next_id("transacciones")
+            now = self._now()
+            nueva = {
+                "id": tid,
+                "usuario_id": usuario_id,
+                "categoria_id": categoria_id,
+                "tipo": tipo,
+                "cantidad": cantidad,
+                "descripcion": descripcion,
+                "fecha": now,
+                "created_at": now,
+            }
+            trans.append(nueva)
+            self._cache_dirty.add("transacciones")
+
+            # Si es gasto, actualizar presupuesto correspondiente
+            if tipo == "gasto" and categoria_id:
+                self._actualizar_gasto_presupuesto(usuario_id, categoria_id, cantidad)
+
+            self._flush_sheet("transacciones")
+            logger.info("Transacción registrada: %s $%.2f (usuario %d)", tipo, cantidad, usuario_id)
+            return dict(nueva)
+
+    def _actualizar_gasto_presupuesto(self, usuario_id: int, categoria_id: int, cantidad: float):
+        """Actualiza cantidad_gastada en el presupuesto activo de la categoría."""
+        pres = self._cache.get("presupuestos", [])
+        candidatos = [
+            p for p in pres
+            if int(p.get("usuario_id", 0)) == usuario_id
+            and str(p.get("categoria_id", "")) == str(categoria_id)
+        ]
+        if not candidatos:
+            return
+        # Ordenar por fecha_inicio descendente, tomar el más reciente
+        candidatos.sort(key=lambda x: str(x.get("fecha_inicio", "")), reverse=True)
+        target = candidatos[0]
+        actual = float(target.get("cantidad_gastada", 0))
+        target["cantidad_gastada"] = actual + cantidad
+        self._cache_dirty.add("presupuestos")
+
+    def obtener_transacciones(self, usuario_id: int, limite: int = 50, tipo: Optional[str] = None) -> List[Dict[str, Any]]:
+        trans = self._cache.get("transacciones", [])
+        cats = self._cache.get("categorias", [])
+
+        # Build categoria lookup
+        cat_lookup = {str(c["id"]): c for c in cats}
+
+        resultado = []
+        for t in trans:
+            uid = int(t.get("usuario_id", 0))
+            if uid != usuario_id:
+                continue
+            if tipo and t.get("tipo") != tipo:
+                continue
+
+            # Enriquecer con datos de categoría (JOIN manual)
+            cat = cat_lookup.get(str(t.get("categoria_id", "")))
+            row = dict(t)
+            if cat:
+                row["categoria_nombre"] = cat.get("nombre", "")
+                row["categoria_tipo"] = cat.get("tipo", "")
+                row["categoria_descripcion"] = cat.get("descripcion", "")
+            else:
+                row["categoria_nombre"] = ""
+                row["categoria_tipo"] = ""
+                row["categoria_descripcion"] = ""
+
+            resultado.append(row)
+
+        # Ordenar por fecha descendente
+        resultado.sort(key=lambda x: str(x.get("fecha", "")), reverse=True)
+        return resultado[:limite]
+
+    def obtener_balance(self, usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:
+        trans = self._cache.get("transacciones", [])
+        ingresos = 0.0
+        gastos = 0.0
+
+        for t in trans:
+            if int(t.get("usuario_id", 0)) != usuario_id:
+                continue
+            if fecha_inicio and str(t.get("fecha", "")) < fecha_inicio:
+                continue
+            if t.get("tipo") == "ingreso":
+                ingresos += float(t.get("cantidad", 0))
+            elif t.get("tipo") == "gasto":
+                gastos += float(t.get("cantidad", 0))
+
+        return {"ingresos": ingresos, "gastos": gastos, "neto": ingresos - gastos}
+
+    def contar_transacciones(self, usuario_id: int) -> Dict[str, Any]:
+        trans = self._cache.get("transacciones", [])
+        cats = self._cache.get("categorias", [])
+        cat_lookup = {str(c["id"]): c for c in cats}
+
+        total = 0
+        por_tipo: Dict[str, int] = {}
+
+        for t in trans:
+            if int(t.get("usuario_id", 0)) != usuario_id:
+                continue
+            total += 1
+            cat = cat_lookup.get(str(t.get("categoria_id", "")))
+            if cat:
+                ct = cat.get("tipo", "otros")
+                por_tipo[ct] = por_tipo.get(ct, 0) + 1
+
+        return {"total": total, **por_tipo}
+
+    # ----------------------------------------------------------
+    # PRESUPUESTOS
+    # ----------------------------------------------------------
+
+    def crear_presupuesto(self, usuario_id: int, categoria_id: int, cantidad_planejada: float, periodo: str, fecha_inicio: str, fecha_fin: Optional[str] = None) -> Dict[str, Any]:
+        with LOCK:
+            pres = self._cache.get("presupuestos", [])
+            pid = self._next_id("presupuestos")
+            nuevo = {
+                "id": pid,
+                "usuario_id": usuario_id,
+                "categoria_id": categoria_id,
+                "cantidad_planejada": cantidad_planejada,
+                "cantidad_gastada": 0.0,
+                "periodo": periodo,
+                "fecha_inicio": fecha_inicio,
+                "fecha_fin": fecha_fin or "",
+                "created_at": self._now(),
+            }
+            pres.append(nuevo)
+            self._cache_dirty.add("presupuestos")
+            self._flush_sheet("presupuestos")
+            logger.info("Presupuesto creado: $%.2f para categoría %d", cantidad_planejada, categoria_id)
+            return dict(nuevo)
+
+    def obtener_presupuestos(self, usuario_id: int) -> List[Dict[str, Any]]:
+        pres = self._cache.get("presupuestos", [])
+        cats = self._cache.get("categorias", [])
+        cat_lookup = {str(c["id"]): c for c in cats}
+
+        resultado = []
+        for p in pres:
+            if int(p.get("usuario_id", 0)) != usuario_id:
+                continue
+            row = dict(p)
+            cat = cat_lookup.get(str(p.get("categoria_id", "")))
+            row["categoria_nombre"] = cat.get("nombre", "") if cat else ""
+            resultado.append(row)
+
+        resultado.sort(key=lambda x: str(x.get("fecha_inicio", "")), reverse=True)
+        return resultado
+
+    # ----------------------------------------------------------
+    # METAS DE AHORRO
+    # ----------------------------------------------------------
+
+    def obtener_metas_ahorro(self, usuario_id: int) -> List[Dict[str, Any]]:
+        metas = self._cache.get("metas_ahorro", [])
+        resultado = []
+        for m in metas:
+            if int(m.get("usuario_id", 0)) == usuario_id:
+                resultado.append(dict(m))
+        resultado.sort(key=lambda x: str(x.get("fecha_meta", "")))
+        return resultado
+
+    def actualizar_meta_ahorro(self, meta_id: int, cantidad: float) -> bool:
+        with LOCK:
+            metas = self._cache.get("metas_ahorro", [])
+            for m in metas:
+                if int(m.get("id", 0)) == meta_id:
+                    actual = float(m.get("cantidad_actual", 0))
+                    m["cantidad_actual"] = actual + cantidad
+                    self._cache_dirty.add("metas_ahorro")
+                    self._flush_sheet("metas_ahorro")
+                    logger.info("Meta %d actualizada: +$%.2f", meta_id, cantidad)
+                    return True
+            return False
+
+    # ----------------------------------------------------------
+    # TABLAS (init compat)
+    # ----------------------------------------------------------
+
+    def crear_tablas(self):
+        """Alias de init_sheets para compatibilidad con código existente."""
+        self.init_sheets()
+
+
+# ============================================================
+# SINGLETON & FUNCIONES DE MÓDULO (misma interfaz que database.py)
+# ============================================================
+
+_db_instance: Optional[GoogleSheetsDB] = None
+
+
+def _get_db() -> GoogleSheetsDB:
+    """Retorna la instancia singleton, inicializándola si es necesario."""
+    global _db_instance
+    if _db_instance is None:
+        _db_instance = GoogleSheetsDB()
+    if not _db_instance._initialized:
+        _db_instance.init_sheets()
+    return _db_instance
+
+
+def crear_tablas():
+    _get_db().crear_tablas()
+
+
+def obtener_o_crear_usuario(telegram_user_id: int, nombre: str) -> Dict[str, Any]:
+    return _get_db().obtener_o_crear_usuario(telegram_user_id, nombre)
+
+
+def obtener_usuario(telegram_user_id: int) -> Optional[Dict[str, Any]]:
+    return _get_db().obtener_usuario(telegram_user_id)
+
+
+def crear_categoria(usuario_id: int, nombre: str, tipo: str, descripcion: str = "", icono_color: str = "") -> Dict[str, Any]:
+    return _get_db().crear_categoria(usuario_id, nombre, tipo, descripcion, icono_color)
+
+
+def obtener_categorias(usuario_id: int, tipo: Optional[str] = None) -> List[Dict[str, Any]]:
+    return _get_db().obtener_categorias(usuario_id, tipo)
+
+
+def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "") -> Dict[str, Any]:
+    return _get_db().agregar_transaccion(usuario_id, categoria_id, tipo, cantidad, descripcion)
+
+
+def obtener_transacciones(usuario_id: int, limite: int = 50, tipo: Optional[str] = None) -> List[Dict[str, Any]]:
+    return _get_db().obtener_transacciones(usuario_id, limite, tipo)
+
+
+def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:
+    return _get_db().obtener_balance(usuario_id, fecha_inicio)
+
+
+def obtener_presupuestos(usuario_id: int) -> List[Dict[str, Any]]:
+    return _get_db().obtener_presupuestos(usuario_id)
+
+
+def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: float, periodo: str, fecha_inicio: str, fecha_fin: Optional[str] = None) -> Dict[str, Any]:
+    return _get_db().crear_presupuesto(usuario_id, categoria_id, cantidad_planejada, periodo, fecha_inicio, fecha_fin)
+
+
+def obtener_metas_ahorro(usuario_id: int) -> List[Dict[str, Any]]:
+    return _get_db().obtener_metas_ahorro(usuario_id)
+
+
+def actualizar_meta_ahorro(meta_id: int, cantidad: float) -> bool:
+    return _get_db().actualizar_meta_ahorro(meta_id, cantidad)
+
+
+def contar_transacciones(usuario_id: int) -> Dict[str, Any]:
+    return _get_db().contar_transacciones(usuario_id)

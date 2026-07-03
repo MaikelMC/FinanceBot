@@ -125,15 +125,59 @@ python verify_system.py
 python check_structure.py
 ```
 
+## Database Backends
+
+**SQLite (default):** `database.py` → `database_sqlite.py`
+- Local file at `data/finanzas.db`
+- No extra config needed
+
+**Google Sheets:** `database.py` → `database_gsheets.py`
+- Requires `.env`: `DB_BACKEND=gsheets`, `GOOGLE_SHEETS_CREDENTIALS`, `GOOGLE_SHEETS_SPREADSHEET_ID`
+- Install: `venv\Scripts\python.exe -m pip install gspread pandas gspread-dataframe`
+- Setup: Create GCP service account, share sheet with its email, place JSON key at `data/finanzas-sa.json`
+
+**Switching:**
+- Change `DB_BACKEND` in `.env` — zero code changes needed
+- All 14 public DB functions have identical signatures in both backends
+
 ## Monorepo Notes
 
 Single package structure with clear boundaries:
 - `main.py` - Orchestrates bot
 - `config.py` - Central config
-- `database.py` - Data access layer
+- `database.py` - Proxy backend (routes to sqlite/gsheets)
+- `database_sqlite.py` - SQLite data access layer
+- `database_gsheets.py` - Google Sheets data access layer
 - `handlers.py` - Message parsing (EN)
 - `knowledge.py` - AI processing (ES)
 - `ai_client.py` - AI integration
 - `setup_environment.py` - Dev environment setup
 
 All dependencies in virtual environment - no global installs.
+
+## Deployment (Render.com)
+
+**1. Push to GitHub**
+- Create new repo in GitHub
+- Push code (credentials.json y .env estarán en .gitignore)
+
+**2. Deploy en Render**
+- New + → Web Service → Connect GitHub repo
+- Build Command: `pip install -r requirements.txt`
+- Start Command: `python main.py`
+
+**3. Environment Variables in Render Dashboard**
+- `TELEGRAM_BOT_TOKEN` (from @BotFather)
+- `AI_PROVIDER` = `mistral`
+- `MISTRAL_API_KEY` (from Mistral AI dashboard)
+- `DB_BACKEND` = `gsheets` (opcional, default es sqlite)
+- `GOOGLE_SHEETS_CREDENTIALS_JSON` = [JSON content of credentials file]
+- `GOOGLE_SHEETS_SPREADSHEET_ID` = [your spreadsheet ID]
+
+**Para subir el credentials.json a Render:**
+1. Abrí el archivo `credentials.json`
+2. Copiá todo el contenido JSON
+3. En Render Dashboard → Environment → Add Variable
+4. Clave: `GOOGLE_SHEETS_CREDENTIALS_JSON`, Valor: el JSON completo
+
+**Nota:** Google Sheets funciona en Render con esta configuración.
