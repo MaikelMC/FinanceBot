@@ -8,13 +8,16 @@ Misma interfaz pública que database.py para compatibilidad total.
 import logging
 import os
 import json
+import random
 import tempfile
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 import gspread
+from gspread.exceptions import APIError
 import pandas as pd
 from gspread_dataframe import set_with_dataframe, get_as_dataframe
 
@@ -96,18 +99,46 @@ class GoogleSheetsDB:
                 f"Archivo de credenciales Google Sheets no encontrado: {actual_creds_file}"
             )
 
-        try:
-            gc = gspread.service_account(filename=actual_creds_file)
-            self._client = gc
-            self._spreadsheet = gc.open_by_key(sheet_id)
-            logger.info("Conectado a spreadsheet: %s", self._spreadsheet.title)
-        except gspread.SpreadsheetNotFound:
-            raise ValueError(
-                f"No se encontró el spreadsheet con ID: {sheet_id}. "
-                "Verifica que el ID sea correcto y que el service account tenga acceso."
-            )
-        except Exception as e:
-            raise ConnectionError(f"Error conectando a Google Sheets: {e}")
+        max_retries = 5
+        base_delay = 1.0
+
+        for attempt in range(max_retries):
+            try:
+                gc = gspread.service_account(filename=actual_creds_file)
+                self._client = gc
+                self._spreadsheet = gc.open_by_key(sheet_id)
+                logger.info("Conectado a spreadsheet: %s", self._spreadsheet.title)
+                break
+            except gspread.SpreadsheetNotFound:
+                raise ValueError(
+                    f"No se encontró el spreadsheet con ID: {sheet_id}. "
+                    "Verifica que el ID sea correcto y que el service account tenga acceso."
+                )
+            except APIError as e:
+                status = e.response.status_code if e.response else 0
+                if status in (429, 500, 502, 503) and attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    logger.warning(
+                        "Google Sheets temporalmente no disponible (HTTP %d, intento %d/%d). "
+                        "Reintentando en %.1fs...",
+                        status, attempt + 1, max_retries, delay,
+                    )
+                    time.sleep(delay)
+                else:
+                    raise ConnectionError(f"Error conectando a Google Sheets: {e}")
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    logger.warning(
+                        "Error conectando a Google Sheets (intento %d/%d): %s. "
+                        "Reintentando en %.1fs...",
+                        attempt + 1, max_retries, e, delay,
+                    )
+                    time.sleep(delay)
+                else:
+                    raise ConnectionError(
+                        f"Error conectando a Google Sheets después de {max_retries} intentos: {e}"
+                    )
 
         self._ensure_sheets()
         self._load_all_cache()
