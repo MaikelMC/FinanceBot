@@ -38,6 +38,12 @@ MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
 
 SYSTEM_PROMPT_PATH = PROMPTS_DIR / "system_prompt.txt"
 
+# Webhook (para despliegue en Render.com)
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
+WEBHOOK_PORT = int(os.getenv("PORT", 8000))
+
 
 def get_system_prompt() -> str:
     """Lee y retorna el prompt del sistema desde el archivo de texto."""

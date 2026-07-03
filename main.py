@@ -7,8 +7,6 @@ import asyncio
 import logging
 import signal
 import sys
-from pathlib import Path
-
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -28,8 +26,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def run_bot():
-    """Configura y ejecuta el bot de finanzas de forma asíncrona."""
+async def _setup_webhook(app):
+    """Registra el webhook en los servidores de Telegram automáticamente."""
+    logger.info("Configurando webhook en Telegram: %s", config.WEBHOOK_URL)
+    success = await app.bot.set_webhook(
+        url=config.WEBHOOK_URL,
+        secret_token=config.WEBHOOK_SECRET,
+        drop_pending_updates=True,
+    )
+    if success:
+        logger.info("✓ Webhook configurado exitosamente en Telegram")
+    else:
+        logger.warning("⚠ No se pudo configurar el webhook en Telegram")
+
+
+def _build_app():
+    """Construye y configura la aplicación del bot con todos los handlers."""
     config.validate_config()
     logger.info("Configuración validada correctamente.")
 
@@ -57,6 +69,13 @@ async def run_bot():
         config.AI_PROVIDER,
         config.OLLAMA_MODEL if config.AI_PROVIDER == "ollama" else config.MISTRAL_MODEL,
     )
+
+    return app
+
+
+async def run_bot():
+    """Ejecuta el bot en modo polling (desarrollo local)."""
+    app = _build_app()
 
     await app.initialize()
     await app.start()
@@ -91,7 +110,25 @@ async def run_bot():
 
 def main():
     logger.info("Iniciando finanzas-mypime...")
-    asyncio.run(run_bot())
+
+    if config.WEBHOOK_URL:
+        # Modo webhook (producción en Render.com)
+        logger.info("Iniciando en modo webhook: %s", config.WEBHOOK_URL)
+        app = _build_app()
+
+        # Auto-configurar webhook en Telegram antes de iniciar el servidor
+        asyncio.run(_setup_webhook(app))
+
+        logger.info("Iniciando servidor webhook en puerto %s", config.WEBHOOK_PORT)
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=config.WEBHOOK_PORT,
+            webhook_url=config.WEBHOOK_URL,
+            secret_token=config.WEBHOOK_SECRET,
+        )
+    else:
+        # Modo polling (desarrollo local)
+        asyncio.run(run_bot())
 
 
 if __name__ == "__main__":
