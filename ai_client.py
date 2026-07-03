@@ -248,10 +248,25 @@ Si no puedes determinar una categoría, usa 'null'.
 
     def _generar_respuesta_fallback(self, mensaje: str, usuario: Dict[str, Any]) -> str:
         """Genera una respuesta de fallback cuando IA no está disponible."""
-        mensaje_lower = mensaje.lower()
+        from database import contar_transacciones
 
-        if any(word in mensaje_lower for word in ["hola", "hi", "buenas"]):
-            return f"¡Hola {usuario['nombre']}! 👋 Soy FinanzasBot. ¿Cómo puedo ayudarte con tus finanzas hoy?"
+        mensaje_lower = mensaje.lower()
+        nombre = usuario.get("nombre", "amigo")
+
+        if any(word in mensaje_lower for word in ["hola", "hi", "buenas", "buenas tardes", "buenos días", "buenas noches"]):
+            estadisticas = contar_transacciones(usuario.get("telegram_user_id", 0))
+            return (
+                f"¡Hola {nombre}! 👋 Soy **FinanzasBot**, tu asistente financiero personal.\n\n"
+                f"📊 Tengo **{estadisticas.get('total', 0)} transacciones** registradas:\n"
+                f"  💸 Gastos: {estadisticas.get('gastos', 0)}\n"
+                f"  💰 Ingresos: {estadisticas.get('ingresos', 0)}\n\n"
+                f"🏦 *Qué puedo ayudarte hoy:*\n"
+                f"• Registrar un gasto o ingreso (ej: \"Gasté $50 en comida para el desayuno\")\n"
+                f"• Configurar presupuestos por categoría\n"
+                f"• Hacer un seguimiento de metas de ahorro e inversión\n"
+                f"• Consultar tu balance y transacciones recientes\n"
+                f"• Ver tus categorías financieras\n"
+            )
 
         if any(word in mensaje_lower for word in ["ayuda", "help", "comandos"]):
             return "\n".join([
@@ -268,7 +283,7 @@ Si no puedes determinar una categoría, usa 'null'.
             ])
 
         return (
-            f"👋 Hola {usuario['nombre']}! No entendí completamente tu mensaje: \"{mensaje}\".\n\n"
+            f"👋 Hola {nombre}! No entendí completamente tu mensaje: \"{mensaje}\".\n\n"
             "¿Podrías ser más específico? Por ejemplo:\n"
             "• 'Gasté $50 en comida' para registrar un gasto\n"
             "• 'Mi presupuesto es $300 para el mes' para configurar un presupuesto\n"
