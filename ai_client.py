@@ -248,13 +248,20 @@ Si no puedes determinar una categoría, usa 'null'.
 
     def _generar_respuesta_fallback(self, mensaje: str, usuario: Dict[str, Any]) -> str:
         """Genera una respuesta de fallback cuando IA no está disponible."""
-        from database import contar_transacciones
+        from database import contar_transacciones, obtener_usuario
 
         mensaje_lower = mensaje.lower()
         nombre = usuario.get("nombre", "amigo")
+        telegram_user_id = usuario.get("telegram_user_id", 0)
+
+        try:
+            db_user = obtener_usuario(telegram_user_id)
+            usuario_id = db_user["id"] if db_user else 0
+            estadisticas = contar_transacciones(usuario_id)
+        except Exception:
+            estadisticas = {"total": 0, "gastos": 0, "ingresos": 0}
 
         if any(word in mensaje_lower for word in ["hola", "hi", "buenas", "buenas tardes", "buenos días", "buenas noches"]):
-            estadisticas = contar_transacciones(usuario.get("telegram_user_id", 0))
             return (
                 f"¡Hola {nombre}! 👋 Soy **FinanzasBot**, tu asistente financiero personal.\n\n"
                 f"📊 Tengo **{estadisticas.get('total', 0)} transacciones** registradas:\n"
