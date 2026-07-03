@@ -62,10 +62,12 @@ def validate_config():
             raise ValueError(
                 "DB_BACKEND=gsheets pero falta GOOGLE_SHEETS_CREDENTIALS o GOOGLE_SHEETS_CREDENTIALS_JSON en .env"
             )
-        if GOOGLE_SHEETS_CREDENTIALS and not Path(GOOGLE_SHEETS_CREDENTIALS).exists():
-            raise ValueError(
-                f"Archivo de credenciales no encontrado: {GOOGLE_SHEETS_CREDENTIALS}"
-            )
+        # Only check file existence if GOOGLE_SHEETS_CREDENTIALS looks like a path (not JSON)
+        if GOOGLE_SHEETS_CREDENTIALS and not GOOGLE_SHEETS_CREDENTIALS_JSON:
+            if not Path(GOOGLE_SHEETS_CREDENTIALS).exists():
+                raise ValueError(
+                    f"Archivo de credenciales no encontrado: {GOOGLE_SHEETS_CREDENTIALS}"
+                )
         if not GOOGLE_SHEETS_SPREADSHEET_ID:
             raise ValueError(
                 "DB_BACKEND=gsheets pero falta GOOGLE_SHEETS_SPREADSHEET_ID en .env"
