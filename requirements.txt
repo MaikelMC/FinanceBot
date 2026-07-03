@@ -1,4 +1,4 @@
-python-telegram-bot>=22.8
+python-telegram-bot[webhooks]>=22.8
 python-dotenv>=1.2.2
 mistralai>=2.5.0
 gspread>=6.2.0
