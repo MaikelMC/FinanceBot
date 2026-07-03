@@ -44,22 +44,24 @@ class AIResponder:
         """
         logger.info("Procesando con IA para %s: %s", usuario["nombre"], mensaje)
 
-        # Primero intentar con el procesamiento nativo existente (regex-based)
-        respuesta_nativa = self._procesar_con_regex_nativo(mensaje, usuario)
+        try:
+            respuesta_nativa = self._procesar_con_regex_nativo(mensaje, usuario)
 
-        # Si la respuesta nativa es completa (tiene una intención clara), usarla
-        if respuesta_nativa and not respuesta_nativa.startswith("👋 Hola!"):
-            return respuesta_nativa
+            if respuesta_nativa and not respuesta_nativa.startswith("👋 Hola!"):
+                return respuesta_nativa
 
-        # Si no es claro, intentar con Mistral AI para mejor procesamiento
-        if self.mistral_client and config.AI_PROVIDER == "mistral":
-            try:
-                return await self._consultar_mistral(mensaje, usuario)
-            except Exception as e:
-                logger.error("Error consultando Mistral AI: %s", e)
+            if self.mistral_client and config.AI_PROVIDER == "mistral":
+                try:
+                    return await self._consultar_mistral(mensaje, usuario)
+                except Exception as e:
+                    logger.error("Error consultando Mistral AI: %s", e)
+                    return self._generar_respuesta_error(usuario, "IA")
 
-        # Fallback si Mistral no está disponible
-        return self._generar_respuesta_fallback(mensaje, usuario)
+            return self._generar_respuesta_fallback(mensaje, usuario)
+
+        except Exception as e:
+            logger.error("Error inesperado procesando mensaje: %s", e)
+            return self._generar_respuesta_error(usuario, "sistema")
 
     def _procesar_con_regex_nativo(self, mensaje: str, usuario: Dict[str, Any]) -> str:
         """
@@ -226,6 +228,23 @@ Si no puedes determinar una categoría, usa 'null'.
         except Exception as e:
             logger.error("Error procesando respuesta de Mistral: %s", e)
             return respuesta_ia
+
+    def _generar_respuesta_error(self, usuario: Dict[str, Any], tipo_error: str) -> str:
+        """Genera una respuesta de error amigable."""
+        nombre = usuario.get("nombre", "amigo")
+        if tipo_error == "IA":
+            return (
+                f"😔 Lo siento {nombre}, estoy teniendo problemas con el servicio de IA en este momento.\n\n"
+                "💡 **Alternativas:**\n"
+                "• Usá comandos en inglés: 'gasté $50 en comida', 'balance', 'presupuesto'\n"
+                "• Intentá nuevamente en unos segundos\n"
+                "• Usá `/help` para ver los comandos disponibles"
+            )
+        else:
+            return (
+                f"⚠️ Ocurrió un error inesperado, {nombre}.\n\n"
+                "Por favor intentá de nuevo o usá `/help` para ver los comandos disponibles."
+            )
 
     def _generar_respuesta_fallback(self, mensaje: str, usuario: Dict[str, Any]) -> str:
         """Genera una respuesta de fallback cuando IA no está disponible."""
