@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from telegram import Update, InputFile
+from telegram import Update, InputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 import database
@@ -231,6 +231,53 @@ def _parsear_transaccion(texto: str) -> tuple[Optional[str], Optional[float], Op
     return categoria_tipo, cantidad, descripcion, fecha
 
 
+def _crear_botones_rapidos() -> InlineKeyboardMarkup:
+    """Crea el teclado inline con botones de acciones rápidas."""
+    botones = [
+        [
+            InlineKeyboardButton("💰 Consultar balance", callback_data="accion_balance"),
+            InlineKeyboardButton("📋 Ver transacciones", callback_data="accion_transacciones"),
+        ],
+    ]
+    return InlineKeyboardMarkup(botones)
+
+
+async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja los callbacks de los botones inline."""
+    query = update.callback_query
+    await query.answer()
+
+    user = update.effective_user
+
+    if "usuario_id" not in context.user_data:
+        context.user_data["telegram_user_id"] = user.id
+        context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, user.first_name)["id"]
+
+    usuario_id = context.user_data["usuario_id"]
+
+    if query.data == "accion_balance":
+        balance = database.obtener_balance(usuario_id)
+        mensaje = (
+            f"💰 **Tu balance actual:**\n\n"
+            f"  📈 Ingresos: ${balance['ingresos']:.2f}\n"
+            f"  📉 Gastos: ${balance['gastos']:.2f}\n"
+            f"  💵 Neto: ${balance['neto']:.2f}"
+        )
+        await query.edit_message_text(mensaje, parse_mode="Markdown")
+
+    elif query.data == "accion_transacciones":
+        transacciones = database.obtener_transacciones(usuario_id, 5)
+        if not transacciones:
+            mensaje = "📝 No tienes transacciones registradas aún."
+        else:
+            mensaje = "📝 **Tus últimas transacciones:**\n\n"
+            for t in transacciones:
+                tipo_icono = "📈" if t["tipo"] == "ingreso" else "📉"
+                fecha = t.get("fecha", "N/A")
+                mensaje += f"{tipo_icono} ${t['monto']:.2f} - {t.get('descripcion', 'Sin descripción')} ({fecha})\n"
+        await query.edit_message_text(mensaje, parse_mode="Markdown")
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja el comando /start."""
     user = update.effective_user
@@ -254,7 +301,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Ver tus categorías financieras\n"
     )
 
-    await update.message.reply_text(mensaje, parse_mode="Markdown")
+    botones = _crear_botones_rapidos()
+    await update.message.reply_text(mensaje, parse_mode="Markdown", reply_markup=botones)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -270,7 +318,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     usuario = database.obtener_usuario(user.id) or {"id": usuario_id, "nombre": user.first_name}
 
     respuesta = await ai_client.AIResponder().responder(mensaje, usuario)
-    await update.message.reply_text(respuesta, parse_mode="Markdown")
+    botones = _crear_botones_rapidos()
+    await update.message.reply_text(respuesta, parse_mode="Markdown", reply_markup=botones)
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -8,17 +8,19 @@ import logging
 import signal
 import sys
 from urllib.parse import urlparse
+from telegram import Bot
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
 )
 
 import config
 import database
 from handlers import start, handle_message, error_handler
-from handlers import consultar_usuario, consultar_comandos
+from handlers import consultar_usuario, consultar_comandos, handle_callback_query
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -45,6 +47,9 @@ def _build_app():
     app.add_handler(CommandHandler("user", consultar_usuario))
     app.add_handler(CommandHandler("help", consultar_comandos))
 
+    # === BOTONES INLINE ===
+    app.add_handler(CallbackQueryHandler(handle_callback_query))
+
     # === MANEJO DE MENSAJES EN LENGUAJE NATURAL ===
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
@@ -65,6 +70,12 @@ async def run_bot():
     app = _build_app()
 
     await app.initialize()
+
+    # Forzar deleteWebhook para evitar conflictos si hay un webhook activo
+    bot = Bot(config.TELEGRAM_BOT_TOKEN)
+    await bot.delete_webhook(drop_pending_updates=True)
+    logger.info("Webhook eliminado (si existía). Iniciando polling...")
+
     await app.start()
     try:
         await app.updater.start_polling(
