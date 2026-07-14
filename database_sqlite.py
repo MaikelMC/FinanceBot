@@ -362,3 +362,14 @@ def contar_transacciones(usuario_id: int) -> Dict[str, Any]:
 
     conn.close()
     return {"total": total, **por_tipo}
+
+
+def eliminar_transacciones(usuario_id: int) -> int:
+    """Elimina todas las transacciones de un usuario. Retorna la cantidad eliminada."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM transacciones WHERE usuario_id = ?", (usuario_id,))
+    eliminadas = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return eliminadas

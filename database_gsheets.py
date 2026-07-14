@@ -551,3 +551,22 @@ def actualizar_meta_ahorro(meta_id: int, cantidad: float) -> bool:
 
 def contar_transacciones(usuario_id: int) -> Dict[str, Any]:
     return _get_db().contar_transacciones(usuario_id)
+
+
+def eliminar_transacciones(usuario_id: int) -> int:
+    """Elimina todas las transacciones de un usuario. Retorna la cantidad eliminada."""
+    with LOCK:
+        db = _get_db()
+        trans = db._cache.get("transacciones", [])
+        eliminadas = 0
+        nueva_lista = []
+        for t in trans:
+            if int(t.get("usuario_id", 0)) == usuario_id:
+                eliminadas += 1
+            else:
+                nueva_lista.append(t)
+        if eliminadas > 0:
+            db._cache["transacciones"] = nueva_lista
+            db._cache_dirty.add("transacciones")
+            db._flush_sheet("transacciones")
+        return eliminadas

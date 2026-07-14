@@ -376,7 +376,8 @@ async def consultar_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "🤖 **Comandos disponibles:**\n\n"
         "• `/start` - Iniciar/Reiniciar el bot\n"
         "• `/user` - Ver información de usuario\n"
-        "• `/help` - Ver esta ayuda\n\n"
+        "• `/help` - Ver esta ayuda\n"
+        "• `/delete` - Borrar todo el historial de transacciones\n\n"
         "📝 **Ejemplos de lenguaje natural:**\n"
         "• 'Gasté $50 en comida para el desayuno'\n"
         "• 'Recibí $2000 de salario'\n"
@@ -385,6 +386,22 @@ async def consultar_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "• '¿Cuál es mi balance actual?'"
     )
     await update.message.reply_text(mensaje, parse_mode="Markdown")
+
+
+async def eliminar_historial(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja el comando /delete para borrar todo el historial."""
+    user = update.effective_user
+
+    if "usuario_id" not in context.user_data:
+        context.user_data["telegram_user_id"] = user.id
+        context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, user.first_name)["id"]
+
+    usuario_id = context.user_data["usuario_id"]
+    eliminadas = database.eliminar_transacciones(usuario_id)
+
+    botones = _crear_botones_rapidos()
+    mensaje = f"🗑️ **Historial eliminado.** Se borraron **{eliminadas}** transacciones.\n\nTu balance ahora está en $0.00."
+    await update.message.reply_text(mensaje, parse_mode="Markdown", reply_markup=botones)
 
 
 async def _procesar_transaccion_finanzas(fecha, tipo, cantidad, descripcion):

@@ -20,7 +20,7 @@ from telegram.ext import (
 import config
 import database
 from handlers import start, handle_message, error_handler
-from handlers import consultar_usuario, consultar_comandos, handle_callback_query
+from handlers import consultar_usuario, consultar_comandos, handle_callback_query, eliminar_historial
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -46,6 +46,7 @@ def _build_app():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("user", consultar_usuario))
     app.add_handler(CommandHandler("help", consultar_comandos))
+    app.add_handler(CommandHandler("delete", eliminar_historial))
 
     # === BOTONES INLINE ===
     app.add_handler(CallbackQueryHandler(handle_callback_query))
