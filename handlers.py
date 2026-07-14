@@ -248,12 +248,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
 
     user = update.effective_user
+    usuario = database.obtener_usuario(user.id)
+    if not usuario:
+        usuario = database.obtener_o_crear_usuario(user.id, user.first_name)
+    usuario_id = usuario["id"]
 
-    if "usuario_id" not in context.user_data:
-        context.user_data["telegram_user_id"] = user.id
-        context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, user.first_name)["id"]
-
-    usuario_id = context.user_data["usuario_id"]
+    botones = _crear_botones_rapidos()
 
     if query.data == "accion_balance":
         balance = database.obtener_balance(usuario_id)
@@ -263,7 +263,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             f"  📉 Gastos: ${balance['gastos']:.2f}\n"
             f"  💵 Neto: ${balance['neto']:.2f}"
         )
-        await query.edit_message_text(mensaje, parse_mode="Markdown")
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=mensaje,
+            parse_mode="Markdown",
+            reply_markup=botones,
+        )
 
     elif query.data == "accion_transacciones":
         transacciones = database.obtener_transacciones(usuario_id, 5)
@@ -274,8 +279,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             for t in transacciones:
                 tipo_icono = "📈" if t["tipo"] == "ingreso" else "📉"
                 fecha = t.get("fecha", "N/A")
-                mensaje += f"{tipo_icono} ${t['monto']:.2f} - {t.get('descripcion', 'Sin descripción')} ({fecha})\n"
-        await query.edit_message_text(mensaje, parse_mode="Markdown")
+                mensaje += f"{tipo_icono} ${t['cantidad']:.2f} - {t.get('descripcion', 'Sin descripción')} ({fecha})\n"
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=mensaje,
+            parse_mode="Markdown",
+            reply_markup=botones,
+        )
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
