@@ -91,7 +91,8 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any]) -> str:
     descripcion = ""
 
     # Buscar cantidad
-    cantidad_match = re.search(r"\$?(\d+(?:\.\d+)?)", mensaje)
+    texto_normalizado = re.sub(r'[\$\€\£\¥\¢]', '', mensaje).replace(',', '.')
+    cantidad_match = re.search(r"(\d+(?:\.\d+)?)", texto_normalizado)
     if cantidad_match:
         cantidad = float(cantidad_match.group(1))
 
@@ -137,7 +138,8 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any]) -> str:
     descripcion = ""
 
     # Buscar cantidad
-    cantidad_match = re.search(r"\$?(\d+(?:\.\d+)?)", mensaje)
+    texto_normalizado = re.sub(r'[\$\€\£\¥\¢]', '', mensaje).replace(',', '.')
+    cantidad_match = re.search(r"(\d+(?:\.\d+)?)", texto_normalizado)
     if cantidad_match:
         cantidad = float(cantidad_match.group(1))
 

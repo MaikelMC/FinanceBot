@@ -187,7 +187,9 @@ def _parsear_transaccion(texto: str) -> tuple[Optional[str], Optional[float], Op
 
     # Extraer cantidad
     cantidad = None
-    numero_match = re.search(r'(\d+(?:\.\d+)?)', texto_lower)
+    texto_sin_moneda = re.sub(r'[\$\€\£\¥\¢]', '', texto_lower)
+    texto_normalizado = texto_sin_moneda.replace(',', '.')
+    numero_match = re.search(r'(\d+(?:\.\d+)?)', texto_normalizado)
     if numero_match:
         try:
             cantidad = float(numero_match.group(1))
@@ -294,9 +296,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     nombre = user.first_name if user.first_name else "amigo"
 
     context.user_data["telegram_user_id"] = user.id
-    context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, nombre)["id"]
+    usuario = database.obtener_o_crear_usuario(user.id, nombre)
+    context.user_data["usuario_id"] = usuario["id"]
 
-    estadisticas = database.contar_transacciones(user.id)
+    estadisticas = database.contar_transacciones(usuario["id"])
 
     mensaje = (
         f"¡Hola {nombre}! 👋 Soy **FinanzasBot**, tu asistente financiero personal.\n\n"
