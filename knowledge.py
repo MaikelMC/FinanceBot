@@ -711,10 +711,20 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
             cat_info = database.crear_categoria(usuario["id"], "otros", nuevo_tipo_cat)
             nueva_categoria_id = cat_info["id"]
 
+        # Actualizar descripción para reflejar el nuevo tipo
+        desc_actual = transaccion.get("descripcion", "") or ""
+        if desc_actual.lower().startswith("gasto:"):
+            nueva_descripcion = "Ingreso: " + desc_actual[len("gasto:"):].strip()
+        elif desc_actual.lower().startswith("ingreso:"):
+            nueva_descripcion = "Gasto: " + desc_actual[len("ingreso:"):].strip()
+        else:
+            nueva_descripcion = desc_actual
+
         actualizada = database.actualizar_transaccion(
             usuario["id"], tid,
             tipo=nuevo_tipo,
-            categoria_id=nueva_categoria_id
+            categoria_id=nueva_categoria_id,
+            descripcion=nueva_descripcion
         )
 
         if actualizada:
