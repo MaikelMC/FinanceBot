@@ -268,7 +268,7 @@ def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Opt
             icono = emoji.get(t["tipo"], "🔹")
             tipo_label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
             desc = _limpiar_descripcion(t.get("descripcion", "") or "")
-            fecha = t.get("fecha", "")[:19]
+            fecha = t.get("fecha", "")[:10]
             lineas.append(f"{icono} ${t['cantidad']:.2f} - {tipo_label}: {desc} ({fecha})")
 
         total = sum(t["cantidad"] for t in transacciones)

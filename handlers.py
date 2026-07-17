@@ -303,7 +303,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             for t in transacciones:
                 tipo_icono = "📈" if t["tipo"] == "ingreso" else "📉"
                 tipo_label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
-                fecha = t.get("fecha", "N/A")
+                fecha = t.get("fecha", "N/A")[:10]
                 desc = t.get("descripcion", "Sin descripción")
                 if desc.lower().startswith("gasto: "):
                     desc = desc[7:].strip()
