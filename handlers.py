@@ -266,6 +266,22 @@ def _crear_botones_rapidos() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(botones)
 
 
+def _crear_botones_multi_transacciones(cantidad: int) -> InlineKeyboardMarkup:
+    """Crea botones de confirmación para múltiples transacciones."""
+    botones = [
+        [
+            InlineKeyboardButton("✅ Guardar todo", callback_data="multi_confirm"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="multi_cancel"),
+        ],
+    ]
+    for i in range(cantidad):
+        botones.append([
+            InlineKeyboardButton(f"✏️ Editar #{i+1}", callback_data=f"multi_edit_{i}"),
+            InlineKeyboardButton(f"🗑️ Quitar #{i+1}", callback_data=f"multi_remove_{i}"),
+        ])
+    return InlineKeyboardMarkup(botones)
+
+
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja los callbacks de los botones inline."""
     query = update.callback_query
@@ -321,6 +337,76 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=botones,
         )
 
+    # === CALLBACKS DE MÚLTIPLES TRANSACCIONES ===
+    elif query.data == "multi_confirm":
+        transacciones_pendientes = context.user_data.get("multi_transacciones", [])
+        if not transacciones_pendientes:
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="⚠️ No hay transacciones pendientes para guardar.",
+            )
+            return
+        resultado = knowledge._guardar_multi_transacciones(transacciones_pendientes, usuario)
+        context.user_data.pop("multi_transacciones", None)
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=resultado,
+            parse_mode="Markdown",
+            reply_markup=botones,
+        )
+
+    elif query.data == "multi_cancel":
+        context.user_data.pop("multi_transacciones", None)
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="❌ Transacciones canceladas. No se guardó nada.",
+            reply_markup=botones,
+        )
+
+    elif query.data.startswith("multi_remove_"):
+        idx = int(query.data.split("_")[-1])
+        transacciones_pendientes = context.user_data.get("multi_transacciones", [])
+        if 0 <= idx < len(transacciones_pendientes):
+            eliminada = transacciones_pendientes.pop(idx)
+            context.user_data["multi_transacciones"] = transacciones_pendientes
+
+            if not transacciones_pendientes:
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="❌ No quedan transacciones. Proceso cancelado.",
+                    reply_markup=botones,
+                )
+                return
+
+            # Regenerar preview
+            preview = knowledge._formatear_preview_transacciones(transacciones_pendientes)
+            botones_multi = _crear_botones_multi_transacciones(len(transacciones_pendientes))
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=f"🗑️ Eliminada: ${eliminada['cantidad']:.2f} - {eliminada.get('descripcion', '')}\n\n{preview}",
+                parse_mode="Markdown",
+                reply_markup=botones_multi,
+            )
+
+    elif query.data.startswith("multi_edit_"):
+        idx = int(query.data.split("_")[-1])
+        transacciones_pendientes = context.user_data.get("multi_transacciones", [])
+        if 0 <= idx < len(transacciones_pendientes):
+            t = transacciones_pendientes[idx]
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=(
+                    f"✏️ **Editando transacción {idx+1}:**\n"
+                    f"{'📈' if t['tipo'] == 'ingreso' else '📉'} ${t['cantidad']:.2f} - {t.get('descripcion', '')}\n\n"
+                    f"Envíame la transacción corregida, por ejemplo:\n"
+                    f"• `$50 en comida`\n"
+                    f"• `Recibí $200 de salario`\n\n"
+                    f"La reemplazaré en la lista."
+                ),
+                parse_mode="Markdown",
+            )
+            context.user_data["editando_multi_idx"] = idx
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja el comando /start."""
@@ -362,6 +448,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     usuario_id = context.user_data["usuario_id"]
     usuario = database.obtener_usuario(user.id) or {"id": usuario_id, "nombre": user.first_name}
 
+    # Verificar si el usuario está editando una transacción multi
+    if "editando_multi_idx" in context.user_data:
+        idx = context.user_data.pop("editando_multi_idx")
+        transacciones_pendientes = context.user_data.get("multi_transacciones", [])
+        if 0 <= idx < len(transacciones_pendientes):
+            # Parsear la nueva transacción
+            nueva = knowledge._parsear_multi_transaccion(mensaje)
+            if nueva:
+                transacciones_pendientes[idx] = nueva[0]
+                context.user_data["multi_transacciones"] = transacciones_pendientes
+                preview = knowledge._formatear_preview_transacciones(transacciones_pendientes)
+                botones_multi = _crear_botones_multi_transacciones(len(transacciones_pendientes))
+                await update.message.reply_text(
+                    f"✅ Transacción #{idx+1} actualizada.\n\n{preview}",
+                    parse_mode="Markdown",
+                    reply_markup=botones_multi,
+                )
+                return
+            else:
+                await update.message.reply_text(
+                    "❌ No pude entender la transacción. Intenta de nuevo con un formato como:\n"
+                    "`$50 en comida`\n`Recibí $200 de salario`",
+                    parse_mode="Markdown",
+                )
+                return
+
+    # Detectar múltiples transacciones: más de 2 montos en el mensaje
+    montos_en_mensaje = re.findall(r'\$[\d\.,]+', mensaje)
+    if len(montos_en_mensaje) >= 2:
+        transacciones = knowledge._parsear_multi_transaccion(mensaje)
+        if len(transacciones) >= 2:
+            context.user_data["multi_transacciones"] = transacciones
+            preview = knowledge._formatear_preview_transacciones(transacciones)
+            botones_multi = _crear_botones_multi_transacciones(len(transacciones))
+            await update.message.reply_text(
+                preview,
+                parse_mode="Markdown",
+                reply_markup=botones_multi,
+            )
+            return
+
+    # Flujo normal: una sola transacción o consulta
     respuesta = await ai_client.AIResponder().responder(mensaje, usuario)
     botones = _crear_botones_rapidos()
     await update.message.reply_text(respuesta, parse_mode="Markdown", reply_markup=botones)

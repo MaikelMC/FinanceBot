@@ -5,7 +5,7 @@ Maneja la lógica de IA para preguntas en lenguaje natural relacionadas con fina
 
 import logging
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import database
 
@@ -407,6 +407,228 @@ def _generar_respuesta_ia_finanzas(mensaje: str, usuario: Dict[str, Any]) -> str
         "• 'Cambia el gasto a ingreso' para modificar datos\n"
         "¿Cómo puedo ayudarte mejor?"
     )
+
+
+# ============================================================
+# PARSING DE MÚLTIPLES TRANSACCIONES
+# ============================================================
+
+# Separadores de oración en español
+SEPARADORES = [
+    r'\by\b', r'\by también\b', r'\by además\b', r'\btambién\b',
+    r'\bademás\b', r'\bpero\b', r'\be\b', r',\s*', r';\s*',
+    r'\bcon\b', r'\bde\s+manera\s+que\b',
+]
+
+
+def _detectar_cantidad_en_texto(texto: str) -> Optional[float]:
+    """Detecta una cantidad monetaria en un fragmento de texto."""
+    return _parsear_cantidad(texto)
+
+
+def _detectar_tipo_en_texto(texto: str) -> Optional[str]:
+    """Detecta si un fragmento describe un gasto o ingreso."""
+    t = texto.lower()
+    if any(w in t for w in ["gasté", "gaste", "compré", "compre", "pagué", "pague",
+                             "costó", "costo", "pagar", "gasto", "salí", "salio",
+                             "perdí", "perdi", "pérdida", "perdida"]):
+        return "gasto"
+    if any(w in t for w in ["recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
+                             "gané", "gane", "salario", "ingreso", "bonus", "bono",
+                             "regalo", "ganancia", "cobré", "ingresó", "ingreso"]):
+        return "ingreso"
+    return None
+
+
+def _detectar_categoria_en_texto(texto: str, tipo: str) -> str:
+    """Detecta la categoría de un fragmento de texto."""
+    t = texto.lower()
+
+    if tipo == "gasto":
+        cats = {
+            "comida": ["comida", "comer", "almuerzo", "cena", "desayuno", "restaurante",
+                       "restaurant", "mcdo", "mcdonald", "burger", "pizza", "supermercado",
+                       "super", "mercado", "almacén", "almacen"],
+            "transporte": ["transporte", "gasolina", "gas", "uber", "taxi", "bus", "peaje",
+                          "estacionamiento", "parking", "mecánico", "mekaniko"],
+            "servicio": ["servicio", "servicios", "luz", "agua", "internet", "teléfono",
+                        "telefono", "cable", "electricidad"],
+            "hogar": ["hogar", "casa", "alquiler", "renta", "hipoteca", "mantenimiento",
+                     "reparación", "reparacion", "mueble"],
+            "salud": ["salud", "médico", "medico", "farmacia", "medicina", "doctor",
+                     "hospital", "clínica", "clinica", "dentista"],
+            "ocio": ["ocio", "entretenimiento", "diversión", "diversion", "juego",
+                    "juegos", "cinema", "cine", "teatro", "concierto", "música",
+                    "musica", "netflix", "spotify", "streaming"],
+            "educación": ["educación", "educacion", "curso", "clase", "universidad",
+                         "colegio", "escuela", "libro", "libros", "uteniles", "útiles"],
+            "ropa": ["ropa", "vestido", "camisa", "pantalón", "zapato", "calzado",
+                    "tienda"],
+            "tecnología": ["tecnología", "tecnologia", "computadora", "celular",
+                          "teléfono", "telefono", "electrónica", "electronica", "equipo"],
+            "suscripción": ["suscripción", "suscripcion", "mensualidad", "abono"],
+        }
+        for cat, keywords in cats.items():
+            if any(kw in t for kw in keywords):
+                return cat
+
+    elif tipo == "ingreso":
+        cats = {
+            "salario": ["salario", "sueldo", "remuneración", "remuneracion", "pago",
+                       "nómina", "nomina"],
+            "bonus": ["bonus", "bono", "bonificación", "bonificacion", "prima",
+                     "comisión", "comision"],
+            "inversiones": ["inversión", "inversion", "inversiones", "dividendos",
+                          "intereses", "bitcoin", "crypto", "staking", "acciones"],
+            "regalos": ["regalo", "regalos", "herencia", "donación", "donacion"],
+            "ventas": ["venta", "ventas", "vendí", "vendi", "cobro"],
+        }
+        for cat, keywords in cats.items():
+            if any(kw in t for kw in keywords):
+                return cat
+
+    return "otros"
+
+
+def _extraer_descripcion_limpia(texto: str, cantidad_texto: str = "") -> str:
+    """Extrae la descripción limpia de un fragmento, removiendo montos y verbos."""
+    desc = texto
+    # Remover el texto del monto si está
+    if cantidad_texto:
+        desc = desc.replace(cantidad_texto, "")
+    # Remover verbos comunes al inicio
+    for verb in ["gasté", "gaste", "recibí", "recibi", "compré", "compre",
+                 "pagué", "pague", "costó", "costo", "cobré", "cobro",
+                 "gané", "gane", "perdí", "perdi", "ingresé", "ingrese"]:
+        if desc.lower().startswith(verb + " "):
+            desc = desc[len(verb):].strip()
+    # Remover símbolos de moneda y espacios
+    desc = re.sub(r'[\$\€\£\¥\¢]', '', desc).strip()
+    # Limpiar palabras de relleno al inicio
+    palabras = desc.split()
+    relleno = {"el", "la", "los", "las", "un", "una", "de", "del", "en", "por",
+               "para", "que", "y", "o", "con", "a", "al", "lo", "le", "se",
+               "su", "mis", "tus", "sus", "mi", "tu"}
+    while palabras and palabras[0].lower() in relleno:
+        palabras.pop(0)
+    return " ".join(palabras).strip() if palabras else ""
+
+
+def _parsear_multi_transaccion(mensaje: str) -> List[Dict[str, Any]]:
+    """
+    Parsea un mensaje que puede contener múltiples transacciones.
+    Retorna una lista de dicts con: {tipo, cantidad, descripcion, categoria}
+    """
+    mensaje_limpio = re.sub(r'[\$\€\£\¥\¢]', ' $ ', mensaje)
+    # Separar por conectores y comas
+    patreon_separador = re.compile(r'\s*(?:\by\b|\by también\b|\btambién\b|\bademás\b|\be\b|,\s*;)\s*', re.IGNORECASE)
+    fragmentos = patreon_separador.split(mensaje_limpio)
+    # Filtrar fragmentos vacíos
+    fragmentos = [f.strip() for f in fragmentos if f.strip()]
+
+    # Si no hay separadores claros, intentar splitting por "$" como indicador de nueva transacción
+    if len(fragmentos) <= 1 and mensaje.count('$') > 1:
+        fragmentos = re.split(r'\$\s*', mensaje)
+        fragmentos = [f"${f.strip()}" for f in fragmentos if f.strip()]
+
+    transacciones = []
+    for frag in fragmentos:
+        cantidad = _detectar_cantidad_en_texto(frag)
+        if cantidad is None or cantidad <= 0:
+            continue
+
+        tipo = _detectar_tipo_en_texto(frag)
+        if not tipo:
+            # Inferir por contexto: si hay "en" podría ser gasto, "de" podría ser ingreso
+            if any(w in frag.lower() for w in ["en ", "para "]):
+                tipo = "gasto"
+            else:
+                tipo = "gasto"  # default
+
+        categoria = _detectar_categoria_en_texto(frag, tipo)
+        descripcion = _extraer_descripcion_limpia(frag)
+
+        transacciones.append({
+            "tipo": tipo,
+            "cantidad": cantidad,
+            "descripcion": descripcion or f"Transacción de ${cantidad:.2f}",
+            "categoria": categoria,
+        })
+
+    return transacciones
+
+
+def _formatear_preview_transacciones(transacciones: List[Dict[str, Any]]) -> str:
+    """Formatea una lista de transacciones como preview para confirmación."""
+    if not transacciones:
+        return "❌ No pude detectar ninguna transacción en tu mensaje."
+
+    lineas = ["📋 **Transacciones detectadas:**", "━━━━━━━━━━━━━━━━━"]
+    total_ingresos = 0
+    total_gastos = 0
+
+    for i, t in enumerate(transacciones, 1):
+        emoji = "📈" if t["tipo"] == "ingreso" else "📉"
+        label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
+        desc = t.get("descripcion", "Sin descripción")
+        cat = t.get("categoria", "otros")
+        lineas.append(f"{emoji} **{i}.** ${t['cantidad']:.2f} - {label}: {desc} ({cat})")
+        if t["tipo"] == "ingreso":
+            total_ingresos += t["cantidad"]
+        else:
+            total_gastos += t["cantidad"]
+
+    lineas.append("━━━━━━━━━━━━━━━━━")
+    neto = total_ingresos - total_gastos
+    if total_ingresos > 0:
+        lineas.append(f"📈 Total ingresos: ${total_ingresos:.2f}")
+    if total_gastos > 0:
+        lineas.append(f"📉 Total gastos: ${total_gastos:.2f}")
+    lineas.append(f"💵 Neto: ${neto:.2f}")
+    lineas.append("")
+    lineas.append("¿Quieres guardar estas transacciones?")
+
+    return "\n".join(lineas)
+
+
+def _guardar_multi_transacciones(transacciones: List[Dict[str, Any]], usuario: Dict[str, Any]) -> str:
+    """Guarda una lista de transacciones en la base de datos."""
+    guardadas = 0
+    errores = 0
+
+    for t in transacciones:
+        try:
+            # Obtener o crear categoría
+            tipo_cat = "ingresos" if t["tipo"] == "ingreso" else "gastos"
+            categorias = database.obtener_categorias(usuario["id"], tipo_cat)
+            categoria_id = None
+
+            for cat in categorias:
+                if cat["nombre"].lower() == t["categoria"].lower():
+                    categoria_id = cat["id"]
+                    break
+
+            if not categoria_id:
+                cat_info = database.crear_categoria(usuario["id"], t["categoria"], tipo_cat)
+                categoria_id = cat_info["id"]
+
+            database.agregar_transaccion(
+                usuario["id"], categoria_id, t["tipo"],
+                t["cantidad"], t["descripcion"]
+            )
+            guardadas += 1
+        except Exception as e:
+            logger.error("Error guardando transacción: %s", e)
+            errores += 1
+
+    if guardadas == 0:
+        return "❌ No pude guardar ninguna transacción. Intenta de nuevo."
+
+    resultado = f"✅ **{guardadas} transacción(es) guardada(s)**"
+    if errores > 0:
+        resultado += f"\n⚠️ {errores} no se pudieron guardar"
+
+    return resultado
 
 
 # ============================================================
