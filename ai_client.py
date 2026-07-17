@@ -44,9 +44,45 @@ class AIResponder:
         """
         logger.info("Procesando con IA para %s: %s", usuario["nombre"], mensaje)
 
-        # Primero chequear si es un saludo
         mensaje_lower = mensaje.lower().strip()
-        if any(word in mensaje_lower for word in ["hola", "hi", "buenas", "buenas tardes", "buenos días", "buenas noches"]):
+
+        # Palabras clave de modificación y eliminación (prioridad máxima)
+        MOD_KEYWORDS = [
+            "cambiar", "cambia", "modificar", "modifica", "editar", "edita",
+            "actualizar", "actualiza", "corregir", "corrije", "mover", "mueve",
+            "pasar", "pasa", "convertir", "convierte", "cambio", "modificalo",
+        ]
+        DEL_KEYWORDS = [
+            "eliminar", "elimina", "borrar", "borra", "quitar", "quita",
+            "remover", "remueve", "suprimir", "delet",
+        ]
+        MOD_TARGETS = [
+            "transacción", "transaccion", "gasto", "ingreso", "registro",
+            "movimiento", "tipo", "monto", "cantidad", "descripción",
+            "descripcion", "categoría", "categoria", "fecha",
+        ]
+
+        es_modificacion = any(kw in mensaje_lower for kw in MOD_KEYWORDS)
+        es_eliminacion = any(kw in mensaje_lower for kw in DEL_KEYWORDS)
+        tiene_objetivo = any(t in mensaje_lower for t in MOD_TARGETS)
+
+        # Si es modificación/eliminación con objetivo claro, procesar directamente
+        if (es_modificacion or es_eliminacion) and tiene_objetivo:
+            try:
+                from knowledge import _procesar_modificar_transaccion, _procesar_eliminar_transaccion
+                if es_eliminacion:
+                    return _procesar_eliminar_transaccion(mensaje, usuario)
+                return _procesar_modificar_transaccion(mensaje, usuario)
+            except Exception as e:
+                logger.error("Error procesando modificación nativa: %s", e)
+
+        # Detección de saludo: solo si el mensaje ES un saludo (no lo contiene)
+        es_solo_saludo = mensaje_lower in [
+            "hola", "hi", "hey", "buenas", "buenas tardes",
+            "buenos días", "buenas noches", "buen dia", "buenas dias",
+        ] or mensaje_lower.startswith(("hola ", "hi ", "hey ", "buenas ", "buenos "))
+
+        if es_solo_saludo:
             return self._generar_respuesta_fallback(mensaje, usuario)
 
         try:

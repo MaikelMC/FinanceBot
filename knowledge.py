@@ -398,13 +398,29 @@ def _detectar_modificacion(mensaje: str) -> Dict[str, Any]:
         return resultado
 
     # --- CAMBIAR TIPO (gasto <-> ingreso) ---
-    if any(w in mensaje_lower for w in ["a ingreso", "a ingresos", "como ingreso", "tipo ingreso"]):
+    # Patrones amplios: "de gasto a ingreso", "a ingreso", "como ingreso", "que sea ingreso"
+    patron_tipo = re.search(
+        r'(?:de|desde|que\s+(?:era|fue|es|esta))?\s*(?:gasto|gastos|ingreso|ingresos)'
+        r'\s+(?:a|al|para|por|como|que\s+(?:sea|pase|quede|pueda\s+ser))\s*'
+        r'(?:un?\s*)?(ingreso|gasto|ingresos|gastos)',
+        mensaje_lower
+    )
+    if patron_tipo:
+        nuevo_tipo_raw = patron_tipo.group(1)
+        nuevo_tipo = "ingreso" if "ingreso" in nuevo_tipo_raw else "gasto"
+        resultado["accion"] = "cambiar_tipo"
+        resultado["valor_nuevo"] = nuevo_tipo
+        resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
+        return resultado
+
+    # Patrones simples: "a ingreso", "a gasto"
+    if any(w in mensaje_lower for w in ["a ingreso", "a ingresos", "como ingreso", "tipo ingreso", "que sea ingreso"]):
         resultado["accion"] = "cambiar_tipo"
         resultado["valor_nuevo"] = "ingreso"
         resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
         return resultado
 
-    if any(w in mensaje_lower for w in ["a gasto", "a gastos", "como gasto", "tipo gasto"]):
+    if any(w in mensaje_lower for w in ["a gasto", "a gastos", "como gasto", "tipo gasto", "que sea gasto"]):
         resultado["accion"] = "cambiar_tipo"
         resultado["valor_nuevo"] = "gasto"
         resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
