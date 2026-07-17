@@ -476,9 +476,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx = context.user_data.pop("editando_multi_idx")
         transacciones_pendientes = context.user_data.get("multi_transacciones", [])
         if 0 <= idx < len(transacciones_pendientes):
+            original = transacciones_pendientes[idx]
+            tipo_original = original.get("tipo", "gasto")
             # Parsear la nueva transacción
             nueva = knowledge._parsear_multi_transaccion(mensaje)
             if nueva:
+                # Preservar el tipo de la transacción original
+                nueva[0]["tipo"] = tipo_original
                 transacciones_pendientes[idx] = nueva[0]
                 context.user_data["multi_transacciones"] = transacciones_pendientes
                 preview = knowledge._formatear_preview_transacciones(transacciones_pendientes)

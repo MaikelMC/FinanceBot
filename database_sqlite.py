@@ -174,6 +174,18 @@ def obtener_categorias(usuario_id: int, tipo: Optional[str] = None) -> List[Dict
 
 def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "") -> Dict[str, Any]:
     """Agrega una nueva transacción para un usuario."""
+    # Validar monto
+    try:
+        cantidad = round(float(cantidad), 2)
+    except (TypeError, ValueError):
+        cantidad = 0.0
+    if cantidad <= 0:
+        raise ValueError("La cantidad debe ser mayor a 0")
+
+    # Validar tipo
+    if tipo not in ("gasto", "ingreso"):
+        tipo = "gasto"
+
     conn = get_connection()
     cursor = conn.cursor()
 

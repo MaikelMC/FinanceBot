@@ -12,48 +12,6 @@ import database
 logger = logging.getLogger(__name__)
 
 
-def _parsear_cantidad(texto: str) -> Optional[float]:
-    """
-    Parser robusto de cantidades monetarias.
-    Maneja: $248.50, 248,50, 1.248,50, $1,248.50, 248 50, etc.
-    Retorna float o None si no encuentra número.
-    """
-    # Eliminar espacios que separan miles: "1 248" -> "1248"
-    texto = re.sub(r'(?<=\d)\s(?=\d{3})', '', texto)
-    # Eliminar símbolos de moneda
-    texto = re.sub(r'[\$\€\£\¥\¢]', '', texto)
-
-    # Caso 1: coma como decimal (248,50 o 1.248,50)
-    # Detectar si hay coma seguida de 1-2 dígitos al final
-    match_coma = re.search(r'(\d{1,3}(?:\.\d{3})*,\d{1,2})\b', texto)
-    if match_coma:
-        num_str = match_coma.group(1).replace('.', '').replace(',', '.')
-        try:
-            return float(num_str)
-        except ValueError:
-            pass
-
-    # Caso 2: punto como decimal (248.50 o 1,248.50)
-    match_punto = re.search(r'(\d{1,3}(?:,\d{3})*\.\d{1,2})\b', texto)
-    if match_punto:
-        num_str = match_punto.group(1).replace(',', '')
-        try:
-            return float(num_str)
-        except ValueError:
-            pass
-
-    # Caso 3: número entero (248 o 1.248 o 1,248)
-    match_entero = re.search(r'(\d+(?:[.,]\d+)*)', texto)
-    if match_entero:
-        num_str = match_entero.group(1).replace(',', '').replace('.', '')
-        try:
-            return float(num_str)
-        except ValueError:
-            pass
-
-    return None
-
-
 def consultar_ia_finanzas(user_message: str, usuario: Dict[str, Any]) -> str:
     """
     Consulta la IA para interpretar y procesar mensajes financieros.
@@ -457,12 +415,29 @@ def _parsear_cantidad(texto: str) -> Optional[float]:
         except ValueError:
             pass
 
-    # Caso 3: número entero (248 o 1.248 o 1,248)
-    match_entero = re.search(r'(\d+(?:[.,]\d+)*)', texto_limpio)
-    if match_entero:
-        num_str = match_entero.group(1).replace(',', '').replace('.', '')
+    # Caso 3: punto como separador de miles sin decimal (1.500 o 1.248.000)
+    match_miles_punto = re.search(r'(\d{1,3}(?:\.\d{3})+)\b', texto_limpio)
+    if match_miles_punto:
+        num_str = match_miles_punto.group(1).replace('.', '')
         try:
             return float(num_str)
+        except ValueError:
+            pass
+
+    # Caso 4: coma como separador de miles sin decimal (1,500 o 1,248,000)
+    match_miles_coma = re.search(r'(\d{1,3}(?:,\d{3})+)\b', texto_limpio)
+    if match_miles_coma:
+        num_str = match_miles_coma.group(1).replace(',', '')
+        try:
+            return float(num_str)
+        except ValueError:
+            pass
+
+    # Caso 5: número simple (248, 50, 100)
+    match_simple = re.search(r'(\d+)', texto_limpio)
+    if match_simple:
+        try:
+            return float(match_simple.group(1))
         except ValueError:
             pass
 
@@ -575,7 +550,8 @@ def _detectar_tipo_en_texto(texto: str) -> Optional[str]:
     if any(w in t for w in ["recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
                              "gané", "gane", "salario", "ingreso", "bonus", "bono",
                              "regalo", "ganancia", "ingresó", "cobramos", "ganamos",
-                             "recibimos", "ingresamos"]):
+                             "recibimos", "ingresamos", "inversión", "inversion",
+                             "dividendos", "intereses"]):
         return "ingreso"
     return None
 
