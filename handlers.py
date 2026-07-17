@@ -313,6 +313,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     desc = desc[7:].strip()
                 elif desc.lower().startswith("ingreso: "):
                     desc = desc[9:].strip()
+                for pv in ["gasté ", "gaste ", "recibí ", "recibi ", "compré ", "compre ", "pagué ", "pague "]:
+                    if desc.lower().startswith(pv):
+                        desc = desc[len(pv):].strip()
+                        break
                 mensaje += f"{tipo_icono} ${t['cantidad']:.2f} - {tipo_label}: {desc} ({fecha})\n"
         await context.bot.send_message(
             chat_id=query.message.chat_id,
