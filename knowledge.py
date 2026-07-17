@@ -79,6 +79,10 @@ def _procesar_intencion_finanzas(intencion: str, mensaje: str, usuario: Dict[str
         return _procesar_balance(usuario)
     elif intencion == "categorias":
         return _procesar_categorias(usuario)
+    elif intencion == "modificar_transaccion":
+        return _procesar_modificar_transaccion(mensaje, usuario)
+    elif intencion == "eliminar_transaccion":
+        return _procesar_eliminar_transaccion(mensaje, usuario)
 
     return _generar_respuesta_ia_finanzas(mensaje, usuario)
 
@@ -348,6 +352,11 @@ def _generar_respuesta_ia_finanzas(mensaje: str, usuario: Dict[str, Any]) -> str
             "• 'Mi presupuesto para comida es $500 este mes'",
             "• 'Quiero ahorrar $2000 para unas vacaciones'",
             "• '¿Cuál es mi balance actual?'",
+            "",
+            "✏️ Modificar datos:",
+            "• 'Cambia el gasto de $50 a ingreso'",
+            "• 'Modifica la descripción de mi último gasto'",
+            "• 'Elimina la transacción de $30'",
         ])
 
     # Para mensajes no reconocidos, intentar un último intento de parseo
@@ -362,5 +371,461 @@ def _generar_respuesta_ia_finanzas(mensaje: str, usuario: Dict[str, Any]) -> str
         "• 'Gasté $50 en comida' para registrar un gasto\n"
         "• 'Mi presupuesto es $300 para el mes' para configurar un presupuesto\n"
         "• '¿Cuál es mi balance?' para consultar tu saldo\n"
+        "• 'Cambia el gasto a ingreso' para modificar datos\n"
         "¿Cómo puedo ayudarte mejor?"
     )
+
+
+# ============================================================
+# FUNCIONES DE MODIFICACIÓN DE TRANSACCIONES
+# ============================================================
+
+def _detectar_modificacion(mensaje: str) -> Dict[str, Any]:
+    """
+    Detecta qué quiere modificar el usuario y extrae los parámetros.
+    Retorna un dict con:
+      - accion: "cambiar_tipo" | "cambiar_monto" | "cambiar_descripcion" | "cambiar_categoria" | "cambiar_fecha" | "eliminar" | "desconocido"
+      - valor_nuevo: el nuevo valor (si aplica)
+      - referencia: texto para buscar la transacción (ej: "último gasto", "$50")
+    """
+    mensaje_lower = mensaje.lower().strip()
+    resultado = {"accion": "desconocido", "valor_nuevo": None, "referencia": None}
+
+    # --- ELIMINAR ---
+    if any(w in mensaje_lower for w in ["eliminar", "elimina", "borrar", "borra", "quitar", "quita", "remover", "remueve"]):
+        resultado["accion"] = "eliminar"
+        resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
+        return resultado
+
+    # --- CAMBIAR TIPO (gasto <-> ingreso) ---
+    if any(w in mensaje_lower for w in ["a ingreso", "a ingresos", "como ingreso", "tipo ingreso"]):
+        resultado["accion"] = "cambiar_tipo"
+        resultado["valor_nuevo"] = "ingreso"
+        resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
+        return resultado
+
+    if any(w in mensaje_lower for w in ["a gasto", "a gastos", "como gasto", "tipo gasto"]):
+        resultado["accion"] = "cambiar_tipo"
+        resultado["valor_nuevo"] = "gasto"
+        resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
+        return resultado
+
+    # --- CAMBIAR MONTO ---
+    if any(w in mensaje_lower for w in ["monto", "cantidad", "importe", "precio"]):
+        nuevo_monto = _extraer_nuevo_valor(mensaje_lower)
+        if nuevo_monto is not None:
+            resultado["accion"] = "cambiar_monto"
+            resultado["valor_nuevo"] = nuevo_monto
+            resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
+            return resultado
+
+    # Detectar patrón "de $X a $Y"
+    patron_de_a = re.search(r'de\s+\$?(\d+(?:\.\d+)?)\s+a\s+\$?(\d+(?:\.\d+)?)', mensaje_lower)
+    if patron_de_a:
+        resultado["accion"] = "cambiar_monto"
+        resultado["valor_nuevo"] = float(patron_de_a.group(2))
+        resultado["referencia"] = f"${patron_de_a.group(1)}"
+        return resultado
+
+    # --- CAMBIAR DESCRIPCIÓN ---
+    if any(w in mensaje_lower for w in ["descripción", "descripcion", "nombre", "texto", "detalle"]):
+        nueva_desc = _extraer_nueva_descripcion(mensaje_lower)
+        if nueva_desc:
+            resultado["accion"] = "cambiar_descripcion"
+            resultado["valor_nuevo"] = nueva_desc
+            resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
+            return resultado
+
+    # --- CAMBIAR CATEGORÍA ---
+    if any(w in mensaje_lower for w in ["categoría", "categoria", "clasificar", "clasificacion"]):
+        nueva_cat = _extraer_nueva_categoria(mensaje_lower)
+        if nueva_cat:
+            resultado["accion"] = "cambiar_categoria"
+            resultado["valor_nuevo"] = nueva_cat
+            resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
+            return resultado
+
+    # --- CAMBIAR FECHA ---
+    if any(w in mensaje_lower for w in ["fecha", "día", "dia", "cuándo", "cuando"]):
+        nueva_fecha = _extraer_nueva_fecha(mensaje_lower)
+        if nueva_fecha:
+            resultado["accion"] = "cambiar_fecha"
+            resultado["valor_nuevo"] = nueva_fecha
+            resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
+            return resultado
+
+    return resultado
+
+
+def _extraer_referencia_transaccion(mensaje_lower: str) -> Optional[str]:
+    """
+    Extrae una referencia para identificar qué transacción modificar.
+    Puede ser: 'último gasto', '$50', 'la de ayer', etc.
+    """
+    # "el último gasto/ingreso"
+    for w in ["último", "ultimo", "ultima", "última", "mas reciente", "más reciente", "reciente"]:
+        if w in mensaje_lower:
+            if "gasto" in mensaje_lower:
+                return "ultimo_gasto"
+            if "ingreso" in mensaje_lower:
+                return "ultimo_ingreso"
+            return "ultimo"
+
+    # "el gasto de $X"
+    monto_ref = re.search(r'(?:de|por)\s+\$?(\d+(?:\.\d+)?)', mensaje_lower)
+    if monto_ref:
+        return f"${monto_ref.group(1)}"
+
+    # "el gasto/ingreso de ayer/hoy"
+    for fecha in ["ayer", "hoy", "anteayer"]:
+        if fecha in mensaje_lower:
+            if "gasto" in mensaje_lower:
+                return f"gasto_{fecha}"
+            if "ingreso" in mensaje_lower:
+                return f"ingreso_{fecha}"
+            return fecha
+
+    # genérico
+    if "gasto" in mensaje_lower:
+        return "gasto"
+    if "ingreso" in mensaje_lower:
+        return "ingreso"
+
+    return None
+
+
+def _extraer_nuevo_valor(mensaje_lower: str) -> Optional[float]:
+    """Extrae el nuevo valor/monto del mensaje."""
+    # Buscar "$X" o "a $X"
+    match = re.search(r'(?:a|de|por|son|valor)\s+\$?(\d+(?:\.\d+)?)', mensaje_lower)
+    if match:
+        return float(match.group(1))
+
+    # Buscar patrón "$X"
+    match = re.search(r'\$(\d+(?:\.\d+)?)', mensaje_lower)
+    if match:
+        return float(match.group(1))
+
+    return None
+
+
+def _extraer_nueva_descripcion(mensaje_lower: str) -> Optional[str]:
+    """Extrae la nueva descripción del mensaje."""
+    # "cambia la descripción a X" / "ponle descripción X"
+    match = re.search(r'(?:a|como|poner?|ponle?|que diga|que sea)\s+(.+)', mensaje_lower)
+    if match:
+        desc = match.group(1).strip()
+        palabras = desc.split()
+        desc_limpia = [p for p in palabras if p not in {
+            "el", "la", "los", "las", "un", "una", "de", "del", "por", "para",
+            "que", "y", "o", "pero", "también", "tambien",
+        } and len(p) > 1]
+        return " ".join(desc_limpia) if desc_limpia else None
+
+    return None
+
+
+def _extraer_nueva_categoria(mensaje_lower: str) -> Optional[str]:
+    """Extrae la nueva categoría del mensaje."""
+    categorias_conocidas = [
+        "comida", "supermercado", "restaurante", "transporte", "gasolina",
+        "servicio", "hogar", "salud", "ocio", "educación", "educacion",
+        "ropa", "tecnología", "tecnologia", "suscripción", "suscripcion",
+        "salario", "bonus", "inversiones", "regalos", "otros",
+    ]
+
+    # "a la categoría X" / "en categoría X"
+    match = re.search(r'(?:a|en|de|categoría?|categoria?)\s+(?:la\s+)?(?:categoría?\s+)?(\w+)', mensaje_lower)
+    if match:
+        cat = match.group(1)
+        if cat in categorias_conocidas:
+            return cat
+
+    # Buscar directamente una categoría conocida
+    for cat in categorias_conocidas:
+        if cat in mensaje_lower:
+            return cat
+
+    return None
+
+
+def _extraer_nueva_fecha(mensaje_lower: str) -> Optional[str]:
+    """Extrae la nueva fecha del mensaje."""
+    from datetime import datetime, timedelta
+
+    hoy = datetime.now()
+
+    textos_fecha = {
+        "hoy": hoy.strftime("%Y-%m-%d"),
+        "ayer": (hoy - timedelta(days=1)).strftime("%Y-%m-%d"),
+        "anteayer": (hoy - timedelta(days=2)).strftime("%Y-%m-%d"),
+        "el lunes": (hoy - timedelta(days=(hoy.weekday() + 7) % 7 or 7)).strftime("%Y-%m-%d"),
+        "el martes": (hoy - timedelta(days=(hoy.weekday() - 1 + 7) % 7 or 7)).strftime("%Y-%m-%d"),
+        "el miércoles": (hoy - timedelta(days=(hoy.weekday() - 2 + 7) % 7 or 7)).strftime("%Y-%m-%d"),
+        "el jueves": (hoy - timedelta(days=(hoy.weekday() - 3 + 7) % 7 or 7)).strftime("%Y-%m-%d"),
+        "el viernes": (hoy - timedelta(days=(hoy.weekday() - 4 + 7) % 7 or 7)).strftime("%Y-%m-%d"),
+    }
+
+    for key, fecha in textos_fecha.items():
+        if key in mensaje_lower:
+            return fecha
+
+    # Buscar formato YYYY-MM-DD
+    match = re.search(r'(\d{4}-\d{2}-\d{2})', mensaje_lower)
+    if match:
+        return match.group(1)
+
+    # Buscar formato DD/MM/YYYY o DD-MM-YYYY
+    match = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', mensaje_lower)
+    if match:
+        return f"{match.group(3)}-{match.group(2).zfill(2)}-{match.group(1).zfill(2)}"
+
+    return None
+
+
+def _buscar_transaccion(usuario: Dict[str, Any], referencia: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    Busca una transacción del usuario basándose en una referencia.
+    Retorna la transacción encontrada o None.
+    """
+    if not referencia:
+        # Sin referencia: tomar la última transacción
+        transacciones = database.obtener_transacciones(usuario["id"], 1)
+        return transacciones[0] if transacciones else None
+
+    # "ultimo_gasto"
+    if referencia == "ultimo_gasto":
+        transacciones = database.obtener_transacciones(usuario["id"], 10, "gasto")
+        return transacciones[0] if transacciones else None
+
+    # "ultimo_ingreso"
+    if referencia == "ultimo_ingreso":
+        transacciones = database.obtener_transacciones(usuario["id"], 10, "ingreso")
+        return transacciones[0] if transacciones else None
+
+    # "ultimo" (cualquiera)
+    if referencia == "ultimo":
+        transacciones = database.obtener_transacciones(usuario["id"], 1)
+        return transacciones[0] if transacciones else None
+
+    # "$X" - buscar por monto
+    if referencia.startswith("$"):
+        monto_str = referencia[1:]
+        try:
+            monto = float(monto_str)
+        except ValueError:
+            return None
+        transacciones = database.obtener_transacciones(usuario["id"], 50)
+        for t in transacciones:
+            if abs(t["cantidad"] - monto) < 0.01:
+                return t
+        return None
+
+    # "gasto_ayer" / "ingreso_ayer" etc
+    if "_ayer" in referencia or "_hoy" in referencia:
+        partes = referencia.split("_")
+        tipo = partes[0] if partes[0] in ("gasto", "ingreso") else None
+        fecha_ref = partes[1] if len(partes) > 1 else None
+
+        transacciones = database.obtener_transacciones(usuario["id"], 50, tipo)
+        if fecha_ref == "ayer":
+            from datetime import datetime, timedelta
+            fecha_ayer = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            for t in transacciones:
+                if t.get("fecha", "").startswith(fecha_ayer):
+                    return t
+        elif fecha_ref == "hoy":
+            fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+            for t in transacciones:
+                if t.get("fecha", "").startswith(fecha_hoy):
+                    return t
+
+        return transacciones[0] if transacciones else None
+
+    # "gasto" o "ingreso" genérico
+    if referencia in ("gasto", "ingreso"):
+        transacciones = database.obtener_transacciones(usuario["id"], 1, referencia)
+        return transacciones[0] if transacciones else None
+
+    # "ayer" genérico
+    if referencia == "ayer":
+        from datetime import datetime, timedelta
+        fecha_ayer = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        transacciones = database.obtener_transacciones(usuario["id"], 50)
+        for t in transacciones:
+            if t.get("fecha", "").startswith(fecha_ayer):
+                return t
+        return None
+
+    return None
+
+
+def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> str:
+    """Procesa una solicitud de modificación de transacción."""
+    mod = _detectar_modificacion(mensaje)
+    accion = mod["accion"]
+
+    if accion == "desconocido":
+        return (
+            "🤔 No pude entender qué querés modificar.\n\n"
+            "Podés hacer cosas como:\n"
+            "• 'Cambia el gasto a ingreso'\n"
+            "• 'Modifica el monto a $100'\n"
+            "• 'Cambia la descripción a almuerzo'\n"
+            "• 'Cambia la categoría a transporte'\n"
+            "• 'Elimina el último gasto'"
+        )
+
+    # Buscar la transacción objetivo
+    transaccion = _buscar_transaccion(usuario, mod["referencia"])
+
+    if not transaccion:
+        return "❌ No encontré la transacción que querés modificar. ¿Podés especificar cuál?"
+
+    tid = transaccion["id"]
+
+    # --- ELIMINAR ---
+    if accion == "eliminar":
+        confirmado = database.eliminar_transaccion(usuario["id"], tid)
+        if confirmado:
+            tipo_icono = "💸" if transaccion["tipo"] == "gasto" else "💰"
+            return (
+                f"🗑️ **Transacción eliminada:**\n"
+                f"{tipo_icono} ${transaccion['cantidad']:.2f} - "
+                f"{transaccion.get('descripcion', 'Sin descripción')}"
+            )
+        return "❌ No pude eliminar la transacción. Intenta de nuevo."
+
+    # --- CAMBIAR TIPO ---
+    if accion == "cambiar_tipo":
+        nuevo_tipo = mod["valor_nuevo"]
+        if nuevo_tipo == transaccion["tipo"]:
+            return f"ℹ️ La transacción ya es un **{nuevo_tipo}**. No hay cambios necesarios."
+
+        # Buscar o crear categoría del nuevo tipo
+        nuevo_tipo_cat = "ingresos" if nuevo_tipo == "ingreso" else "gastos"
+        categorias = database.obtener_categorias(usuario["id"], nuevo_tipo_cat)
+        nueva_categoria_id = categorias[0]["id"] if categorias else None
+
+        if not nueva_categoria_id:
+            cat_info = database.crear_categoria(usuario["id"], "otros", nuevo_tipo_cat)
+            nueva_categoria_id = cat_info["id"]
+
+        actualizada = database.actualizar_transaccion(
+            usuario["id"], tid,
+            tipo=nuevo_tipo,
+            categoria_id=nueva_categoria_id
+        )
+
+        if actualizada:
+            emoji = "💰" if nuevo_tipo == "ingreso" else "💸"
+            return (
+                f"✅ **Tipo cambiado:** {emoji}\n"
+                f"Tu transacción de ${transaccion['cantidad']:.2f} ahora es un **{nuevo_tipo}**.\n"
+                f"Antes era: {'gasto' if nuevo_tipo == 'ingreso' else 'ingreso'}"
+            )
+        return "❌ No pude cambiar el tipo. Intenta de nuevo."
+
+    # --- CAMBIAR MONTO ---
+    if accion == "cambiar_monto":
+        nuevo_monto = mod["valor_nuevo"]
+        if nuevo_monto is None or nuevo_monto <= 0:
+            return "❌ El monto nuevo no es válido. Especificá un número positivo."
+
+        actualizada = database.actualizar_transaccion(
+            usuario["id"], tid, cantidad=nuevo_monto
+        )
+        if actualizada:
+            return (
+                f"✅ **Monto actualizado:**\n"
+                f"De ${transaccion['cantidad']:.2f} → **${nuevo_monto:.2f}**"
+            )
+        return "❌ No pude actualizar el monto. Intenta de nuevo."
+
+    # --- CAMBIAR DESCRIPCIÓN ---
+    if accion == "cambiar_descripcion":
+        nueva_desc = mod["valor_nuevo"]
+        if not nueva_desc:
+            return "❌ No pude entender la nueva descripción. Especificá el texto."
+
+        actualizada = database.actualizar_transaccion(
+            usuario["id"], tid, descripcion=nueva_desc
+        )
+        if actualizada:
+            return (
+                f"✅ **Descripción actualizada:**\n"
+                f"De '{transaccion.get('descripcion', 'Sin descripción')}' → **'{nueva_desc}'**"
+            )
+        return "❌ No pude actualizar la descripción. Intenta de nuevo."
+
+    # --- CAMBIAR CATEGORÍA ---
+    if accion == "cambiar_categoria":
+        nueva_cat_nombre = mod["valor_nuevo"]
+        if not nueva_cat_nombre:
+            return "❌ No pude entender la nueva categoría."
+
+        tipo_cat = "ingresos" if transaccion["tipo"] == "ingreso" else "gastos"
+        categorias = database.obtener_categorias(usuario["id"], tipo_cat)
+
+        cat_encontrada = None
+        for c in categorias:
+            if c["nombre"].lower() == nueva_cat_nombre.lower():
+                cat_encontrada = c
+                break
+
+        if not cat_encontrada:
+            cat_info = database.crear_categoria(usuario["id"], nueva_cat_nombre, tipo_cat)
+            cat_encontrada = cat_info
+
+        actualizada = database.actualizar_transaccion(
+            usuario["id"], tid, categoria_id=cat_encontrada["id"]
+        )
+        if actualizada:
+            return (
+                f"✅ **Categoría cambiada:**\n"
+                f"De '{transaccion.get('categoria_nombre', 'Sin categoría')}' → **'{nueva_cat_nombre}'**"
+            )
+        return "❌ No pude cambiar la categoría. Intenta de nuevo."
+
+    # --- CAMBIAR FECHA ---
+    if accion == "cambiar_fecha":
+        nueva_fecha = mod["valor_nuevo"]
+        if not nueva_fecha:
+            return "❌ No pude entender la nueva fecha."
+
+        actualizada = database.actualizar_transaccion(
+            usuario["id"], tid, fecha=nueva_fecha
+        )
+        if actualizada:
+            fecha_ant = transaccion.get("fecha", "N/A")[:10]
+            return (
+                f"✅ **Fecha actualizada:**\n"
+                f"De {fecha_ant} → **{nueva_fecha}**"
+            )
+        return "❌ No pude actualizar la fecha. Intenta de nuevo."
+
+    return "❌ Ocurrió un error al procesar la modificación. Intenta de nuevo."
+
+
+def _procesar_eliminar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> str:
+    """Procesa una solicitud de eliminación de transacción."""
+    mod = _detectar_modificacion(mensaje)
+    referencia = mod.get("referencia")
+
+    transaccion = _buscar_transaccion(usuario, referencia)
+
+    if not transaccion:
+        return "❌ No encontré la transacción que querés eliminar. ¿Podés especificar cuál?"
+
+    tid = transaccion["id"]
+    confirmado = database.eliminar_transaccion(usuario["id"], tid)
+
+    if confirmado:
+        tipo_icono = "💸" if transaccion["tipo"] == "gasto" else "💰"
+        return (
+            f"🗑️ **Transacción eliminada:**\n"
+            f"{tipo_icono} ${transaccion['cantidad']:.2f} - "
+            f"{transaccion.get('descripcion', 'Sin descripción')} "
+            f"({transaccion.get('categoria_nombre', 'Sin categoría')})"
+        )
+    return "❌ No pude eliminar la transacción. Intenta de nuevo."

@@ -570,3 +570,80 @@ def eliminar_transacciones(usuario_id: int) -> int:
             db._cache_dirty.add("transacciones")
             db._flush_sheet("transacciones")
         return eliminadas
+
+
+def obtener_transaccion_por_id(usuario_id: int, transaccion_id: int) -> Optional[Dict[str, Any]]:
+    """Obtiene una transacción específica por ID, verificando que pertenezca al usuario."""
+    db = _get_db()
+    trans = db._cache.get("transacciones", [])
+    cats = db._cache.get("categorias", [])
+    cat_lookup = {str(c["id"]): c for c in cats}
+
+    for t in trans:
+        if int(t.get("id", 0)) == transaccion_id and int(t.get("usuario_id", 0)) == usuario_id:
+            row = dict(t)
+            cat = cat_lookup.get(str(t.get("categoria_id", "")))
+            if cat:
+                row["categoria_nombre"] = cat.get("nombre", "")
+                row["categoria_tipo"] = cat.get("tipo", "")
+            else:
+                row["categoria_nombre"] = ""
+                row["categoria_tipo"] = ""
+            return row
+    return None
+
+
+def actualizar_transaccion(usuario_id: int, transaccion_id: int, **kwargs) -> Optional[Dict[str, Any]]:
+    """
+    Actualiza campos de una transacción. Campos soportados:
+    tipo, cantidad, descripcion, categoria_id, fecha.
+    Retorna la transacción actualizada o None si no se encontró.
+    """
+    with LOCK:
+        db = _get_db()
+        trans = db._cache.get("transacciones", [])
+
+        campos_permitidos = {"tipo", "cantidad", "descripcion", "categoria_id", "fecha"}
+        campos = {k: v for k, v in kwargs.items() if k in campos_permitidos and v is not None}
+
+        if not campos:
+            return None
+
+        for t in trans:
+            if int(t.get("id", 0)) == transaccion_id and int(t.get("usuario_id", 0)) == usuario_id:
+                for k, v in campos.items():
+                    t[k] = v
+                db._cache_dirty.add("transacciones")
+                db._flush_sheet("transacciones")
+
+                cats = db._cache.get("categorias", [])
+                cat_lookup = {str(c["id"]): c for c in cats}
+                row = dict(t)
+                cat = cat_lookup.get(str(t.get("categoria_id", "")))
+                if cat:
+                    row["categoria_nombre"] = cat.get("nombre", "")
+                    row["categoria_tipo"] = cat.get("tipo", "")
+                else:
+                    row["categoria_nombre"] = ""
+                    row["categoria_tipo"] = ""
+                return row
+        return None
+
+
+def eliminar_transaccion(usuario_id: int, transaccion_id: int) -> bool:
+    """Elimina una transacción específica por ID. Retorna True si se eliminó."""
+    with LOCK:
+        db = _get_db()
+        trans = db._cache.get("transacciones", [])
+        nueva_lista = []
+        eliminada = False
+        for t in trans:
+            if int(t.get("id", 0)) == transaccion_id and int(t.get("usuario_id", 0)) == usuario_id:
+                eliminada = True
+            else:
+                nueva_lista.append(t)
+        if eliminada:
+            db._cache["transacciones"] = nueva_lista
+            db._cache_dirty.add("transacciones")
+            db._flush_sheet("transacciones")
+        return eliminada

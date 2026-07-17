@@ -373,3 +373,83 @@ def eliminar_transacciones(usuario_id: int) -> int:
     conn.commit()
     conn.close()
     return eliminadas
+
+
+def obtener_transaccion_por_id(usuario_id: int, transaccion_id: int) -> Optional[Dict[str, Any]]:
+    """Obtiene una transacción específica por ID, verificando que pertenezca al usuario."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT t.id, t.tipo, t.cantidad, t.descripcion, t.fecha, t.categoria_id,
+               c.nombre as categoria_nombre, c.tipo as categoria_tipo
+        FROM transacciones t
+        LEFT JOIN categorias c ON t.categoria_id = c.id
+        WHERE t.id = ? AND t.usuario_id = ?
+        """,
+        (transaccion_id, usuario_id)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def actualizar_transaccion(usuario_id: int, transaccion_id: int, **kwargs) -> Optional[Dict[str, Any]]:
+    """
+    Actualiza campos de una transacción. Campos soportados:
+    tipo, cantidad, descripcion, categoria_id, fecha.
+    Retorna la transacción actualizada o None si no se encontró.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT id FROM transacciones WHERE id = ? AND usuario_id = ?",
+        (transaccion_id, usuario_id)
+    )
+    if not cursor.fetchone():
+        conn.close()
+        return None
+
+    campos_permitidos = {"tipo", "cantidad", "descripcion", "categoria_id", "fecha"}
+    campos = {k: v for k, v in kwargs.items() if k in campos_permitidos and v is not None}
+
+    if not campos:
+        conn.close()
+        return None
+
+    sets = ", ".join(f"{k} = ?" for k in campos)
+    valores = list(campos.values()) + [transaccion_id, usuario_id]
+    cursor.execute(
+        f"UPDATE transacciones SET {sets} WHERE id = ? AND usuario_id = ?",
+        valores
+    )
+    conn.commit()
+
+    cursor.execute(
+        """
+        SELECT t.id, t.tipo, t.cantidad, t.descripcion, t.fecha, t.categoria_id,
+               c.nombre as categoria_nombre, c.tipo as categoria_tipo
+        FROM transacciones t
+        LEFT JOIN categorias c ON t.categoria_id = c.id
+        WHERE t.id = ? AND t.usuario_id = ?
+        """,
+        (transaccion_id, usuario_id)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def eliminar_transaccion(usuario_id: int, transaccion_id: int) -> bool:
+    """Elimina una transacción específica por ID. Retorna True si se eliminó."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM transacciones WHERE id = ? AND usuario_id = ?",
+        (transaccion_id, usuario_id)
+    )
+    eliminada = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return eliminada

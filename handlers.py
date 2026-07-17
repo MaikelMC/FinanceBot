@@ -49,6 +49,17 @@ CATEGORIA_KEYWORDS = [
     "categoria", "categoría", "tipo", "tipo de", "clase",
 ]
 
+MODIFICAR_KEYWORDS = [
+    "modificar", "modifica", "cambiar", "cambia", "editar", "edita",
+    "actualizar", "actualiza", "corregir", "corrije", "rectificar",
+    "mover", "mueve", "pasar", "pasa", "convertir", "convierte",
+]
+
+ELIMINAR_KEYWORDS = [
+    "eliminar", "elimina", "borrar", "borra", "quitar", "quita",
+    "remover", "remueve", "suprimir", "suprime", "delet",
+]
+
 # === NÚMEROS EN TEXTO ===
 
 NUMEROS = {
@@ -137,6 +148,21 @@ def _detectar_intencion(texto: str) -> str:
     texto_lower = texto.lower().strip()
     es_consulta = any(kw in texto_lower for kw in CONSULTAR_KEYWORDS)
     es_registro = any(kw in texto_lower for kw in REGISTRAR_KEYWORDS)
+    es_modificacion = any(kw in texto_lower for kw in MODIFICAR_KEYWORDS)
+    es_eliminacion = any(kw in texto_lower for kw in ELIMINAR_KEYWORDS)
+
+    # Detectar eliminación de transacción específica
+    if es_eliminacion:
+        if any(w in texto_lower for w in ["transacción", "transaccion", "gasto", "ingreso", "registro", "movimiento"]):
+            return "eliminar_transaccion"
+
+    # Detectar modificación de transacción
+    if es_modificacion:
+        if any(w in texto_lower for w in ["transacción", "transaccion", "gasto", "ingreso", "registro", "movimiento"]):
+            return "modificar_transaccion"
+        # "cambia el gasto a ingreso" / "pasa ese gasto a ingreso"
+        if any(w in texto_lower for w in ["a ingreso", "a gasto", "tipo", "categoría", "categoria", "monto", "cantidad", "descripción", "descripcion", "fecha"]):
+            return "modificar_transaccion"
 
     if es_consulta or "como" in texto_lower or "cual" in texto_lower:
         if any(w in texto_lower for w in ["balance", "saldo", "resumen"]):
@@ -383,7 +409,13 @@ async def consultar_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "• 'Recibí $2000 de salario'\n"
         "• 'Mi presupuesto para comida es $500 este mes'\n"
         "• 'Quiero ahorrar $5000 para unas vacaciones'\n"
-        "• '¿Cuál es mi balance actual?'"
+        "• '¿Cuál es mi balance actual?'\n\n"
+        "✏️ **Modificar datos:**\n"
+        "• 'Cambia el gasto de $50 a ingreso'\n"
+        "• 'Modifica la descripción de mi último gasto'\n"
+        "• 'Cambia el monto de $100 a $150'\n"
+        "• 'Elimina la transacción de $30'\n"
+        "• 'Pasa ese gasto a la categoría transporte'"
     )
     await update.message.reply_text(mensaje, parse_mode="Markdown")
 
