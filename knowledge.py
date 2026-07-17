@@ -1127,7 +1127,156 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
                 f"🗑️ **Transacción eliminada:**\n"
                 f"{tipo_icono} ${transaccion['cantidad']:.2f} - {tipo_label}: {desc}"
             )
-        return "❌ No pude eliminar la transacción. Intenta de nuevo."
+    return "❌ No pude eliminar la transacción. Intenta de nuevo."
+
+
+# ============================================================
+# RESPUESTAS CONTEXTUALES CUANDO NO ENTIENDE
+# ============================================================
+
+_ACCIONES_FINANCIERAS = [
+    "gasté", "gaste", "compré", "compre", "pagué", "pague", "costó", "costo",
+    "recibí", "recibi", "cobré", "cobro", "gané", "gane", "ingresé", "ingrese",
+    "invertí", "inverti", "ahorré", "ahorre", "pagué", "pague",
+    "compramos", "gastamos", "cobramos", "ganamos", "recibimos",
+]
+
+_CONSULTAS = [
+    "cuánto", "cuanto", "cuántos", "cuantos", "cuál", "cual", "cuáles", "cuales",
+    "balance", "saldo", "cuenta", "tengo", "dónde", "donde", "qué tengo",
+    "mostrar", "ver", "listar", "resumen", "consulta", "consultar",
+]
+
+_CONFIGURACION = [
+    "presupuesto", "meta", "ahorro", "ahorrar", "inversión", "inversion",
+    "objetivo", "plan", "categoría", "categoria", "configurar", "establecer",
+    "definir", "fijar", "asignar",
+]
+
+_MODIFICACION = [
+    "cambiar", "modificar", "editar", "actualizar", "corregir", "mover",
+    "convertir", "eliminar", "borrar", "quitar", "suprimir",
+]
+
+
+def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> str:
+    """
+    Genera una respuesta contextual cuando el bot no entiende el mensaje.
+    Analiza parcialmente la intención y guía al usuario con ejemplos específicos.
+    """
+    msg = mensaje.lower().strip()
+    nombre = usuario.get("nombre", "amigo")
+
+    # Señal 1: Tiene número pero no se detectó transacción
+    tiene_numero = bool(re.search(r'\d+', msg))
+    # Señal 2: Tiene palabras de acción financiera
+    tiene_accion = any(w in msg for w in _ACCIONES_FINANCIERAS)
+    # Señal 3: Tiene palabras de consulta
+    tiene_consulta = any(w in msg for w in _CONSULTAS)
+    # Señal 4: Tiene palabras de configuración
+    tiene_config = any(w in msg for w in _CONFIGURACION)
+    # Señal 5: Tiene palabras de modificación
+    tiene_mod = any(w in msg for w in _MODIFICACION)
+    # Señal 6: Saludo
+    es_saludo = any(w in msg for w in ["hola", "hi", "hey", "buenas", "buenos", "buen"])
+
+    # --- CASOS ESPECÍFICOS ---
+
+    if es_saludo and len(msg.split()) <= 3:
+        return (
+            f"¡Hola {nombre}! 👋 ¿En qué te puedo ayudar?\n\n"
+            "Podés:\n"
+            "• 💸 Registrar un gasto: `Gasté $50 en comida`\n"
+            "• 💰 Registrar un ingreso: `Recibí $300 de salario`\n"
+            "• 📊 Ver tu balance: `¿Cuánto tengo?`\n"
+            "• 📋 Ver transacciones: `¿Qué gasté hoy?`\n"
+            "• ⚙️ Configurar presupuesto: `Mi presupuesto es $500 para comida`"
+        )
+
+    if tiene_consulta and not tiene_accion:
+        return (
+            f"🤔 {nombre}, parece que querés **consultar** algo sobre tus finanzas.\n\n"
+            "¿Qué te gustaría saber?\n"
+            "• `¿Cuánto tengo?` — Ver balance general\n"
+            "• `¿Qué gasté hoy?` — Ver transacciones recientes\n"
+            "• `¿Cuánto gasté en comida?` — Gastos por categoría\n"
+            "• `¿Cuánto ingresé?` — Ver ingresos\n"
+            "• `¿Cómo va mi presupuesto?` — Ver presupuestos"
+        )
+
+    if tiene_config:
+        return (
+            f"⚙️ {nombre}, veo que querés **configurar** algo.\n\n"
+            "¿Qué necesitás?\n"
+            "• `Mi presupuesto para comida es $500 este mes`\n"
+            "• `Quiero ahorrar $2000 para vacaciones`\n"
+            "• `Crear categoría: Suscripciones`\n"
+            "• `Mi meta de ahorro es $5000 para diciembre`"
+        )
+
+    if tiene_mod:
+        return (
+            f"✏️ {nombre}, parece que querés **modificar** algo.\n\n"
+            "¿Qué necesitás cambiar?\n"
+            "• `Cambiar el monto de mi último gasto a $75`\n"
+            "• `Eliminar mi último gasto`\n"
+            "• `Cambiar la categoría de mi último ingreso a bonus`\n"
+            "• `Editar mi último gasto: descripción a uber`"
+        )
+
+    if tiene_accion and tiene_numero:
+        # Intentó registrar algo pero no se entendió
+        return (
+            f"💡 {nombre}, veo que mencionás un **monto** pero no pude procesar tu registro.\n\n"
+            "¿Podés intentar con este formato?\n"
+            "• `Gasté $50 en comida` —Registrar un gasto\n"
+            "• `Recibí $300 de salario` — Registrar un ingreso\n"
+            "• `Pagué $20 de transporte` — Registrar un pago\n"
+            "• `$100 en supermercado` — Formato corto\n\n"
+            "También podés incluir la fecha:\n"
+            "• `Gasté $50 en comida ayer`\n"
+            "• `Recibí $300 el lunes`"
+        )
+
+    if tiene_accion and not tiene_numero:
+        return (
+            f"💡 {nombre}, mencionás una **acción financiera** pero no veo un monto.\n\n"
+            "Para registrar necesito el monto:\n"
+            "• `Gasté $50 en comida`\n"
+            "• `Recibí $300 de salario`\n"
+            "• `$100 de uber`"
+        )
+
+    if tiene_numero and not tiene_accion:
+        return (
+            f"💡 {nombre}, veo un **monto** pero no sé qué hacer con él.\n\n"
+            "¿Querés registrarlo?\n"
+            "• `Gasté ${re.search(r'\\d+', msg).group()} en comida`\n"
+            "• `Recibí ${re.search(r'\\d+', msg).group()} de salario`\n\n"
+            "¿O es parte de una consulta?\n"
+            "• `¿Cuánto gasté en ${re.search(r'\\d+', msg).group()}?`"
+        )
+
+    # --- RESPUESTA GENÉRICA CON EJEMPLOS ---
+    return (
+        f"🤔 {nombre}, no estoy seguro de qué querés hacer con: \"{mensaje}\"\n\n"
+        "¿Podés decirme algo como?\n\n"
+        "💸 **Registrar:**\n"
+        "• `Gasté $50 en comida`\n"
+        "• `Recibí $300 de salario`\n"
+        "• `$20 en transporte`\n\n"
+        "📊 **Consultar:**\n"
+        "• `¿Cuánto tengo?`\n"
+        "• `¿Qué gasté hoy?`\n"
+        "• `¿Cuánto gasté en comida?`\n\n"
+        "⚙️ **Configurar:**\n"
+        "• `Mi presupuesto es $500 para comida`\n"
+        "• `Quiero ahorrar $2000`\n\n"
+        "✏️ **Modificar:**\n"
+        "• `Cambiar mi último gasto a $75`\n"
+        "• `Eliminar mi último gasto`\n\n"
+        "¿Qué necesitás? 😊"
+    )
 
     # --- CAMBIAR TIPO ---
     if accion == "cambiar_tipo":

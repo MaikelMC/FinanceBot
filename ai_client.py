@@ -314,6 +314,11 @@ Si no puedes determinar una categoría, usa 'null'.
                 from knowledge import _procesar_presupuestos
                 return _procesar_presupuestos(usuario)
 
+            # --- NO ENTENDIÓ (general) ---
+            elif datos.get('INTENTION') == 'general' or not datos.get('INTENTION'):
+                from knowledge import _generar_respuesta_no_entendido
+                return _generar_respuesta_no_entendido(datos.get('DESCRIPCION', '') or '', usuario)
+
             return respuesta_ia
 
         except Exception as e:
@@ -361,70 +366,66 @@ Si no puedes determinar una categoría, usa 'null'.
         return " ".join(partes)
 
     def _generar_respuesta_error(self, usuario: Dict[str, Any], tipo_error: str) -> str:
-        """Genera una respuesta de error amigable."""
+        """Genera una respuesta de error amigable con guía específica."""
         nombre = usuario.get("nombre", "amigo")
         if tipo_error == "IA":
             return (
-                f"😔 Lo siento {nombre}, estoy teniendo problemas con el servicio de IA en este momento.\n\n"
-                "💡 **Alternativas:**\n"
-                "• Usá comandos en inglés: 'gasté $50 en comida', 'balance', 'presupuesto'\n"
-                "• Intentá nuevamente en unos segundos\n"
-                "• Usá `/help` para ver los comandos disponibles"
+                f"😔 Disculpá {nombre}, el servicio de IA no está disponible ahora mismo.\n\n"
+                "Mientras tanto, podés usar **lenguaje natural** directamente:\n\n"
+                "• 💸 `Gasté $50 en comida` —Registrar gasto\n"
+                "• 💰 `Recibí $300 de salario` — Registrar ingreso\n"
+                "• 📊 `¿Cuánto tengo?` — Ver balance\n"
+                "• 📋 `¿Qué gasté hoy?` — Ver transacciones\n"
+                "• ⚙️ `Mi presupuesto es $500 para comida` — Configurar\n\n"
+                "Intentá de nuevo en unos segundos si querés usar la IA."
             )
         else:
             return (
-                f"⚠️ Ocurrió un error inesperado, {nombre}.\n\n"
-                "Por favor intentá de nuevo o usá `/help` para ver los comandos disponibles."
+                f"⚠️ {nombre}, algo salió mal.\n\n"
+                "Intentá con estos comandos:\n"
+                "• `Gasté $50 en comida`\n"
+                "• `¿Cuánto tengo?`\n"
+                "• `¿Qué gasté hoy?`\n\n"
+                "Si el problema persiste, escribí `/help` para ver todos los comandos."
             )
 
     def _generar_respuesta_fallback(self, mensaje: str, usuario: Dict[str, Any]) -> str:
         """Genera una respuesta de fallback cuando IA no está disponible."""
-        from database import contar_transacciones, obtener_usuario
+        from knowledge import _generar_respuesta_no_entendido
 
         mensaje_lower = mensaje.lower()
         nombre = usuario.get("nombre", "amigo")
-        telegram_user_id = usuario.get("telegram_user_id", 0)
 
-        try:
-            db_user = obtener_usuario(telegram_user_id)
-            usuario_id = db_user["id"] if db_user else 0
-            estadisticas = contar_transacciones(usuario_id)
-        except Exception:
-            estadisticas = {"total": 0, "gastos": 0, "ingresos": 0}
-
-        if any(word in mensaje_lower for word in ["hola", "hi", "buenas", "buenas tardes", "buenos días", "buenas noches"]):
-            return (
-                f"¡Hola {nombre}! 👋 Soy **FinanzasBot**, tu asistente financiero personal.\n\n"
-                f"📊 Tengo **{estadisticas.get('total', 0)} transacciones** registradas:\n"
-                f"  💸 Gastos: {estadisticas.get('gastos', 0)}\n"
-                f"  💰 Ingresos: {estadisticas.get('ingresos', 0)}\n\n"
-                f"🏦 *Qué puedo ayudarte hoy:*\n"
-                f"• Registrar un gasto o ingreso (ej: \"Gasté $50 en comida para el desayuno\")\n"
-                f"• Configurar presupuestos por categoría\n"
-                f"• Hacer un seguimiento de metas de ahorro e inversión\n"
-                f"• Consultar tu balance y transacciones recientes\n"
-                f"• Ver tus categorías financieras\n"
-            )
-
+        # Saludos y ayuda: respuestas específicas
         if any(word in mensaje_lower for word in ["ayuda", "help", "comandos"]):
             return "\n".join([
                 "🤖 **COMANDOS DE FINANZAS BOT:**",
-                "• /start - Iniciar/Reiniciar el bot",
-                "• /user - Ver tu información de usuario",
-                "• /help - Ver esta lista de comandos",
                 "",
-                "📝 Ejemplos de comandos en lenguaje natural:",
-                "• 'Gasté $50 en comida para el desayuno'",
-                "• 'Mi presupuesto para comida es $500 este mes'",
-                "• 'Quiero ahorrar $2000 para unas vacaciones'",
-                "• '¿Cuál es mi balance actual?'",
+                "📝 **Registrar:**",
+                "• `Gasté $50 en comida` —Registrar gasto",
+                "• `Recibí $300 de salario` — Registrar ingreso",
+                "• `$20 en transporte` — Formato corto",
+                "• `Pagué $100 de alquiler` — Pago registrado",
+                "",
+                "📊 **Consultar:**",
+                "• `¿Cuánto tengo?` — Balance general",
+                "• `¿Qué gasté hoy?` — Transacciones recientes",
+                "• `¿Cuánto gasté en comida?` — Por categoría",
+                "• `¿Cuánto ingresé?` — Ver ingresos",
+                "",
+                "⚙️ **Configurar:**",
+                "• `Mi presupuesto es $500 para comida`",
+                "• `Quiero ahorrar $2000 para vacaciones`",
+                "",
+                "✏️ **Modificar:**",
+                "• `Cambiar mi último gasto a $75`",
+                "• `Eliminar mi último gasto`",
+                "",
+                "📋 **Comandos del bot:**",
+                "• /start — Iniciar el bot",
+                "• /user — Ver tu información",
+                "• /help — Ver esta ayuda",
             ])
 
-        return (
-            f"👋 Hola {nombre}! No entendí completamente tu mensaje: \"{mensaje}\".\n\n"
-            "¿Podrías ser más específico? Por ejemplo:\n"
-            "• 'Gasté $50 en comida' para registrar un gasto\n"
-            "• 'Mi presupuesto es $300 para el mes' para configurar un presupuesto\n"
-            "• '¿Cuál es mi balance?' para consultar tu saldo\n"
-            "¿Cómo puedo ayudarte mejor?"
-        )
+        # Todo lo demás: respuesta contextual inteligente
+        return _generar_respuesta_no_entendido(mensaje, usuario)
