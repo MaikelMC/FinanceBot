@@ -474,9 +474,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-    # Detectar múltiples transacciones: más de 2 montos en el mensaje
-    montos_en_mensaje = re.findall(r'\$[\d\.,]+', mensaje)
-    if len(montos_en_mensaje) >= 2:
+    # Detectar múltiples transacciones en lenguaje natural
+    if knowledge._esensaje_multi_transaccion(mensaje):
         transacciones = knowledge._parsear_multi_transaccion(mensaje)
         if len(transacciones) >= 2:
             context.user_data["multi_transacciones"] = transacciones

@@ -413,12 +413,150 @@ def _generar_respuesta_ia_finanzas(mensaje: str, usuario: Dict[str, Any]) -> str
 # PARSING DE MÚLTIPLES TRANSACCIONES
 # ============================================================
 
-# Separadores de oración en español
-SEPARADORES = [
-    r'\by\b', r'\by también\b', r'\by además\b', r'\btambién\b',
-    r'\bademás\b', r'\bpero\b', r'\be\b', r',\s*', r';\s*',
-    r'\bcon\b', r'\bde\s+manera\s+que\b',
-]
+# Palabras que indican separación entre transacciones
+SEPARADORES_MENSAJE = re.compile(
+    r'\s*(?:'
+    r'\by\s+también\b|\by\s+además\b|\by\b'
+    r'|\btambién\b|\bademás\b'
+    r'|\bluego\b|\bdespués\b|\bdespues\b'
+    r'|\bes\s+todo\b|\bes\s+todo\s+lo\s+que\b'
+    r'|,\s*;?\s*'
+    r')\s*',
+    re.IGNORECASE
+)
+
+
+def _parsear_cantidad(texto: str) -> Optional[float]:
+    """
+    Parser robusto de cantidades monetarias.
+    Maneja: $248.50, 248,50, 1.248,50, 10 dólares, 50 de, 200 pesos, etc.
+    Retorna float o None si no encuentra número.
+    """
+    # Eliminar espacios que separan miles: "1 248" -> "1248"
+    texto = re.sub(r'(?<=\d)\s(?=\d{3})', '', texto)
+    # Normalizar "dólares"/"dolares"/"pesos" a "$"
+    texto = re.sub(r'\b(dólares?|dolares?|pesos?|bs?\.?)\b', '$', texto, flags=re.IGNORECASE)
+    # Eliminar símbolos de moneda
+    texto_limpio = re.sub(r'[\$\€\£\¥\¢]', '', texto)
+
+    # Caso 1: coma como decimal (248,50 o 1.248,50)
+    match_coma = re.search(r'(\d{1,3}(?:\.\d{3})*,\d{1,2})\b', texto_limpio)
+    if match_coma:
+        num_str = match_coma.group(1).replace('.', '').replace(',', '.')
+        try:
+            return float(num_str)
+        except ValueError:
+            pass
+
+    # Caso 2: punto como decimal (248.50 o 1,248.50)
+    match_punto = re.search(r'(\d{1,3}(?:,\d{3})*\.\d{1,2})\b', texto_limpio)
+    if match_punto:
+        num_str = match_punto.group(1).replace(',', '')
+        try:
+            return float(num_str)
+        except ValueError:
+            pass
+
+    # Caso 3: número entero (248 o 1.248 o 1,248)
+    match_entero = re.search(r'(\d+(?:[.,]\d+)*)', texto_limpio)
+    if match_entero:
+        num_str = match_entero.group(1).replace(',', '').replace('.', '')
+        try:
+            return float(num_str)
+        except ValueError:
+            pass
+
+    return None
+
+
+def _esensaje_multi_transaccion(mensaje: str) -> bool:
+    """
+    Detecta si un mensaje contiene múltiples transacciones.
+    Usa múltiples señales: varios montos, conectores temporales, verbos de acción repetidos.
+    """
+    msg = mensaje.lower()
+
+    # Señal 1: Dos o más montos con símbolo $
+    montos_dolar = re.findall(r'\$[\d\.,]+', mensaje)
+    if len(montos_dolar) >= 2:
+        return True
+
+    # Señal 2: Dos o más números seguidos de palabras de moneda o contexto monetario
+    montos_texto = re.findall(
+        r'\d+(?:[.,]\d+)?\s*(?:dólares?|dolares?|pesos?|bs?\.?|en\s|de\s|para\s)',
+        msg
+    )
+    if len(montos_texto) >= 2:
+        return True
+
+    # Señal 3: Números + conectores temporales que indican secuencia de acciones
+    tiene_conector = any(w in msg for w in [
+        "luego", "después", "despues", "y también", "y tambien",
+        "además", "ademas", "es todo lo que", "es todo"
+    ])
+    tiene_numero = bool(re.search(r'\d+', msg))
+    tiene_verbo_accion = any(w in msg for w in [
+        "gasté", "gaste", "compré", "compre", "pagué", "pague",
+        "recibí", "recibi", "cobré", "cobro", "gané", "gane",
+        "ingresé", "ingrese", "costó", "costo", "perdí", "perdi"
+    ])
+    if tiene_conector and tiene_numero and tiene_verbo_accion:
+        return True
+
+    return False
+
+
+def _split_transacciones(mensaje: str) -> List[str]:
+    """
+    Divide un mensaje en fragmentos, cada uno conteniendo una transacción.
+    Maneja conectores naturales: 'y', 'luego', 'después', comas, etc.
+    """
+    # Paso 1: Normalizar separadores fuertes a marcador
+    msg = mensaje
+    for sep in [r'\bluego\b', r'\bdespués\b', r'\bdespues\b', r'\bes\s+todo\b']:
+        msg = re.sub(sep, ' ||| ', msg, flags=re.IGNORECASE)
+
+    # Paso 2: Separar por marcador fuerte
+    fragmentos = [f.strip() for f in re.split(r'\|\|\|', msg) if f.strip()]
+
+    # Paso 3: Para cada fragmento, intentar separar por comas si hay acción múltiple
+    fragmentos_expandidos = []
+    for frag in fragmentos:
+        # Proteger comas dentro de números decimales (248,50 → 248{COMA}50)
+        frag_protegido = re.sub(r'(\d),(\d)', r'\1{COMA}\2', frag)
+        partes_coma = re.split(r',\s*', frag_protegido)
+        # Restaurar comas protegidas
+        partes_coma = [p.replace('{COMA}', ',') for p in partes_coma]
+        if len(partes_coma) >= 2 and sum(1 for p in partes_coma if re.search(r'\d+', p)) >= 2:
+            fragmentos_expandidos.extend([p.strip() for p in partes_coma if p.strip()])
+        else:
+            fragmentos_expandidos.append(frag)
+
+    # Paso 4: Separar por "y" + verbo de acción
+    verbos_accion = [
+        "gasté", "gaste", "compré", "compre", "pagué", "pague", "costó", "costo",
+        "recibí", "recibi", "cobré", "cobro", "gané", "gane", "ingresé", "ingrese",
+        "perdí", "perdi", "pagamos", "compramos", "gastamos", "cobramos", "ganamos",
+        "recibimos", "ingresamos", "salí", "salio", "salimos",
+    ]
+    resultado = []
+    for frag in fragmentos_expandidos:
+        # Separar por "y" + verbo
+        partes = re.split(
+            r'\s+y\s+(?=' + '|'.join(re.escape(v) for v in verbos_accion) + r')',
+            frag, flags=re.IGNORECASE
+        )
+        # También separar por "y" + "$" (ej: "comida y $20 de transporte")
+        partes_expandidas = []
+        for p in partes:
+            sub = re.split(r'\s+y\s+(?=\$)', p, flags=re.IGNORECASE)
+            partes_expandidas.extend(sub)
+        resultado.extend([p.strip() for p in partes_expandidas if p.strip()])
+
+    # Paso 5: Filtrar fragmentos sin número
+    result = [f for f in resultado if re.search(r'\d+', f)]
+
+    return result if result else [mensaje]
 
 
 def _detectar_cantidad_en_texto(texto: str) -> Optional[float]:
@@ -431,11 +569,13 @@ def _detectar_tipo_en_texto(texto: str) -> Optional[str]:
     t = texto.lower()
     if any(w in t for w in ["gasté", "gaste", "compré", "compre", "pagué", "pague",
                              "costó", "costo", "pagar", "gasto", "salí", "salio",
-                             "perdí", "perdi", "pérdida", "perdida"]):
+                             "perdí", "perdi", "pérdida", "perdida", "pagamos",
+                             "compramos", "gastamos", "salimos"]):
         return "gasto"
     if any(w in t for w in ["recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
                              "gané", "gane", "salario", "ingreso", "bonus", "bono",
-                             "regalo", "ganancia", "cobré", "ingresó", "ingreso"]):
+                             "regalo", "ganancia", "ingresó", "cobramos", "ganamos",
+                             "recibimos", "ingresamos"]):
         return "ingreso"
     return None
 
@@ -449,17 +589,20 @@ def _detectar_categoria_en_texto(texto: str, tipo: str) -> str:
             "comida": ["comida", "comer", "almuerzo", "cena", "desayuno", "restaurante",
                        "restaurant", "mcdo", "mcdonald", "burger", "pizza", "supermercado",
                        "super", "mercado", "almacén", "almacen"],
-            "transporte": ["transporte", "gasolina", "gas", "uber", "taxi", "bus", "peaje",
-                          "estacionamiento", "parking", "mecánico", "mekaniko"],
+            "ocio": ["ocio", "entretenimiento", "diversión", "diversion", "juego",
+                    "juegos", "cinema", "cine", "teatro", "concierto", "música",
+                    "musica", "netflix", "spotify", "streaming", "cerveza", "cervezas",
+                    "bar", "birra", "alcohol", "trago", "tragos", "copa", "copas",
+                    "fiesta", "party", "rumba", "disco"],
+            "transporte": ["transporte", "gasolina", "uber", "taxi", "bus", "peaje",
+                          "estacionamiento", "parking", "mecánico", "mekaniko",
+                          "combustible", "nafta", "garaje"],
             "servicio": ["servicio", "servicios", "luz", "agua", "internet", "teléfono",
                         "telefono", "cable", "electricidad"],
             "hogar": ["hogar", "casa", "alquiler", "renta", "hipoteca", "mantenimiento",
                      "reparación", "reparacion", "mueble"],
             "salud": ["salud", "médico", "medico", "farmacia", "medicina", "doctor",
                      "hospital", "clínica", "clinica", "dentista"],
-            "ocio": ["ocio", "entretenimiento", "diversión", "diversion", "juego",
-                    "juegos", "cinema", "cine", "teatro", "concierto", "música",
-                    "musica", "netflix", "spotify", "streaming"],
             "educación": ["educación", "educacion", "curso", "clase", "universidad",
                          "colegio", "escuela", "libro", "libros", "uteniles", "útiles"],
             "ropa": ["ropa", "vestido", "camisa", "pantalón", "zapato", "calzado",
@@ -469,7 +612,7 @@ def _detectar_categoria_en_texto(texto: str, tipo: str) -> str:
             "suscripción": ["suscripción", "suscripcion", "mensualidad", "abono"],
         }
         for cat, keywords in cats.items():
-            if any(kw in t for kw in keywords):
+            if any(re.search(r'\b' + re.escape(kw) + r'\b', t) for kw in keywords):
                 return cat
 
     elif tipo == "ingreso":
@@ -484,14 +627,14 @@ def _detectar_categoria_en_texto(texto: str, tipo: str) -> str:
             "ventas": ["venta", "ventas", "vendí", "vendi", "cobro"],
         }
         for cat, keywords in cats.items():
-            if any(kw in t for kw in keywords):
+            if any(re.search(r'\b' + re.escape(kw) + r'\b', t) for kw in keywords):
                 return cat
 
     return "otros"
 
 
 def _extraer_descripcion_limpia(texto: str, cantidad_texto: str = "") -> str:
-    """Extrae la descripción limpia de un fragmento, removiendo montos y verbos."""
+    """Extrae la descripción limpia de un fragmento, removiendo montos, números y verbos."""
     desc = texto
     # Remover el texto del monto si está
     if cantidad_texto:
@@ -499,18 +642,31 @@ def _extraer_descripcion_limpia(texto: str, cantidad_texto: str = "") -> str:
     # Remover verbos comunes al inicio
     for verb in ["gasté", "gaste", "recibí", "recibi", "compré", "compre",
                  "pagué", "pague", "costó", "costo", "cobré", "cobro",
-                 "gané", "gane", "perdí", "perdi", "ingresé", "ingrese"]:
+                 "gané", "gane", "perdí", "perdi", "ingresé", "ingrese",
+                 "pagamos", "compramos", "gastamos", "cobramos", "ganamos",
+                 "recibimos", "ingresamos", "salimos", "salí", "salio"]:
         if desc.lower().startswith(verb + " "):
             desc = desc[len(verb):].strip()
-    # Remover símbolos de moneda y espacios
-    desc = re.sub(r'[\$\€\£\¥\¢]', '', desc).strip()
+            break
+    # Remover símbolos de moneda y palabras de moneda
+    desc = re.sub(r'[\$\€\£\¥\¢]', '', desc)
+    desc = re.sub(r'\b(dólares?|dolares?|pesos?|bs?\.?)\b', '', desc, flags=re.IGNORECASE)
+    # Remover números (el monto ya se extrajo)
+    desc = re.sub(r'\b\d+(?:[.,]\d+)?\b', '', desc)
+    # Remover espacios dobles y puntuación suelta al inicio/final
+    desc = re.sub(r'\s+', ' ', desc).strip()
+    desc = re.sub(r'^[,;\s]+|[,;\s]+$', '', desc)
     # Limpiar palabras de relleno al inicio
     palabras = desc.split()
-    relleno = {"el", "la", "los", "las", "un", "una", "de", "del", "en", "por",
+    relleno = {"el", "la", "los", "las", "un", "una", "unas", "unos", "de", "del", "en", "por",
                "para", "que", "y", "o", "con", "a", "al", "lo", "le", "se",
-               "su", "mis", "tus", "sus", "mi", "tu"}
+               "su", "mis", "tus", "sus", "mi", "tu", "las", "los", "unas", "unos",
+               "que", "lo", "q", "he", "hice", "hoy"}
     while palabras and palabras[0].lower() in relleno:
         palabras.pop(0)
+    # También limpiar al final
+    while palabras and palabras[-1].lower() in relleno:
+        palabras.pop()
     return " ".join(palabras).strip() if palabras else ""
 
 
@@ -519,17 +675,7 @@ def _parsear_multi_transaccion(mensaje: str) -> List[Dict[str, Any]]:
     Parsea un mensaje que puede contener múltiples transacciones.
     Retorna una lista de dicts con: {tipo, cantidad, descripcion, categoria}
     """
-    mensaje_limpio = re.sub(r'[\$\€\£\¥\¢]', ' $ ', mensaje)
-    # Separar por conectores y comas
-    patreon_separador = re.compile(r'\s*(?:\by\b|\by también\b|\btambién\b|\bademás\b|\be\b|,\s*;)\s*', re.IGNORECASE)
-    fragmentos = patreon_separador.split(mensaje_limpio)
-    # Filtrar fragmentos vacíos
-    fragmentos = [f.strip() for f in fragmentos if f.strip()]
-
-    # Si no hay separadores claros, intentar splitting por "$" como indicador de nueva transacción
-    if len(fragmentos) <= 1 and mensaje.count('$') > 1:
-        fragmentos = re.split(r'\$\s*', mensaje)
-        fragmentos = [f"${f.strip()}" for f in fragmentos if f.strip()]
+    fragmentos = _split_transacciones(mensaje)
 
     transacciones = []
     for frag in fragmentos:
@@ -539,9 +685,15 @@ def _parsear_multi_transaccion(mensaje: str) -> List[Dict[str, Any]]:
 
         tipo = _detectar_tipo_en_texto(frag)
         if not tipo:
-            # Inferir por contexto: si hay "en" podría ser gasto, "de" podría ser ingreso
-            if any(w in frag.lower() for w in ["en ", "para "]):
+            # Inferir por contexto
+            frag_lower = frag.lower()
+            if any(w in frag_lower for w in ["en ", "para ", "compr", "gast", "pag"]):
                 tipo = "gasto"
+            elif re.search(r'\$\s*\d+.*\bde\s+\w', frag_lower):
+                # "$20 de transporte" → probablemente gasto (gastó en transporte)
+                tipo = "gasto"
+            elif any(w in frag_lower for w in ["de ", "recib", "cobr", "ingres", "gan"]):
+                tipo = "ingreso"
             else:
                 tipo = "gasto"  # default
 
