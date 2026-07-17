@@ -212,22 +212,18 @@ def _parsear_transaccion(texto: str) -> tuple[Optional[str], Optional[float], Op
         tipo = "ingreso"
 
     # Extraer cantidad
-    cantidad = None
-    texto_sin_moneda = re.sub(r'[\$\€\£\¥\¢]', '', texto_lower)
-    texto_normalizado = texto_sin_moneda.replace(',', '.')
-    numero_match = re.search(r'(\d+(?:\.\d+)?)', texto_normalizado)
-    if numero_match:
-        try:
-            cantidad = float(numero_match.group(1))
-        except ValueError:
-            cantidad = 0.0
+    from knowledge import _parsear_cantidad
+    cantidad = _parsear_cantidad(texto_lower)
 
     # Extraer descripción (texto después del número)
     descripcion = ""
     if cantidad:
-        pos_num = texto_lower.find(str(cantidad))
-        if pos_num != -1:
-            descripcion = texto_lower[pos_num + len(str(cantidad)):].strip()
+        # Buscar el número original en el texto para extraer la descripción después
+        patron_num = re.search(r'\d+(?:[.,]\d+)?', texto_lower)
+        if patron_num:
+            descripcion = texto_lower[patron_num.end():].strip()
+        else:
+            descripcion = texto_lower
     else:
         descripcion = texto_lower
 

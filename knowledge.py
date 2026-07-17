@@ -12,6 +12,48 @@ import database
 logger = logging.getLogger(__name__)
 
 
+def _parsear_cantidad(texto: str) -> Optional[float]:
+    """
+    Parser robusto de cantidades monetarias.
+    Maneja: $248.50, 248,50, 1.248,50, $1,248.50, 248 50, etc.
+    Retorna float o None si no encuentra número.
+    """
+    # Eliminar espacios que separan miles: "1 248" -> "1248"
+    texto = re.sub(r'(?<=\d)\s(?=\d{3})', '', texto)
+    # Eliminar símbolos de moneda
+    texto = re.sub(r'[\$\€\£\¥\¢]', '', texto)
+
+    # Caso 1: coma como decimal (248,50 o 1.248,50)
+    # Detectar si hay coma seguida de 1-2 dígitos al final
+    match_coma = re.search(r'(\d{1,3}(?:\.\d{3})*,\d{1,2})\b', texto)
+    if match_coma:
+        num_str = match_coma.group(1).replace('.', '').replace(',', '.')
+        try:
+            return float(num_str)
+        except ValueError:
+            pass
+
+    # Caso 2: punto como decimal (248.50 o 1,248.50)
+    match_punto = re.search(r'(\d{1,3}(?:,\d{3})*\.\d{1,2})\b', texto)
+    if match_punto:
+        num_str = match_punto.group(1).replace(',', '')
+        try:
+            return float(num_str)
+        except ValueError:
+            pass
+
+    # Caso 3: número entero (248 o 1.248 o 1,248)
+    match_entero = re.search(r'(\d+(?:[.,]\d+)*)', texto)
+    if match_entero:
+        num_str = match_entero.group(1).replace(',', '').replace('.', '')
+        try:
+            return float(num_str)
+        except ValueError:
+            pass
+
+    return None
+
+
 def consultar_ia_finanzas(user_message: str, usuario: Dict[str, Any]) -> str:
     """
     Consulta la IA para interpretar y procesar mensajes financieros.
@@ -95,10 +137,7 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any]) -> str:
     descripcion = ""
 
     # Buscar cantidad
-    texto_normalizado = re.sub(r'[\$\€\£\¥\¢]', '', mensaje).replace(',', '.')
-    cantidad_match = re.search(r"(\d+(?:\.\d+)?)", texto_normalizado)
-    if cantidad_match:
-        cantidad = float(cantidad_match.group(1))
+    cantidad = _parsear_cantidad(mensaje)
 
     # Buscar palabra clave de categoría
     categorias_gastos = ["comida", "supermercado", "restaurante", "desayuno", "almuerzo", "cena",
@@ -142,10 +181,7 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any]) -> str:
     descripcion = ""
 
     # Buscar cantidad
-    texto_normalizado = re.sub(r'[\$\€\£\¥\¢]', '', mensaje).replace(',', '.')
-    cantidad_match = re.search(r"(\d+(?:\.\d+)?)", texto_normalizado)
-    if cantidad_match:
-        cantidad = float(cantidad_match.group(1))
+    cantidad = _parsear_cantidad(mensaje)
 
     # Buscar palabra clave de categoría para ingresos
     categorias_ingresos = ["salario", "remuneración", "pago", "bonus", "bonificación", "intereses",
@@ -357,10 +393,10 @@ def _generar_respuesta_ia_finanzas(mensaje: str, usuario: Dict[str, Any]) -> str
         ])
 
     # Para mensajes no reconocidos, intentar un último intento de parseo
-    if "\\$" in mensaje and any(c in mensaje_lower for c in ["dólar", "usd", "\\$", "cup"]):
-        cantidad = re.search(r"\$?(\d+(?:\.\d+)?)", mensaje)
-        if cantidad:
-            return f"👋 ¡Hola! Registré una transacción de ${cantidad.group(1)}. ¿Podrías especificarme el tipo (gasto/ingreso) y categoría?"
+    if "$" in mensaje or any(c in mensaje_lower for c in ["dólar", "usd", "cup"]):
+        cantidad_val = _parsear_cantidad(mensaje)
+        if cantidad_val:
+            return f"👋 ¡Hola! Registré una transacción de ${cantidad_val:.2f}. ¿Podrías especificarme el tipo (gasto/ingreso) y categoría?"
 
     return (
         f"👋 Hola! No entendí completamente tu mensaje: \"{mensaje}\".\n\n"
@@ -449,11 +485,14 @@ def _detectar_modificacion(mensaje: str) -> Dict[str, Any]:
             return resultado
 
     # Detectar patrón "de $X a $Y"
-    patron_de_a = re.search(r'de\s+\$?(\d+(?:\.\d+)?)\s+a\s+\$?(\d+(?:\.\d+)?)', mensaje_lower)
+    patron_de_a = re.search(r'de\s+\$?([\d.,]+)\s+a\s+\$?([\d.,]+)', mensaje_lower)
     if patron_de_a:
-        resultado["accion"] = "cambiar_monto"
-        resultado["valor_nuevo"] = float(patron_de_a.group(2))
-        resultado["referencia"] = f"${patron_de_a.group(1)}"
+        val_viejo = _parsear_cantidad(patron_de_a.group(1))
+        val_nuevo = _parsear_cantidad(patron_de_a.group(2))
+        if val_viejo and val_nuevo:
+            resultado["accion"] = "cambiar_monto"
+            resultado["valor_nuevo"] = val_nuevo
+            resultado["referencia"] = f"${val_viejo}"
         return resultado
 
     # --- CAMBIAR DESCRIPCIÓN ---
@@ -501,9 +540,9 @@ def _extraer_referencia_transaccion(mensaje_lower: str) -> Optional[str]:
             return "ultimo"
 
     # "el gasto de $X"
-    monto_ref = re.search(r'(?:de|por)\s+\$?(\d+(?:\.\d+)?)', mensaje_lower)
-    if monto_ref:
-        return f"${monto_ref.group(1)}"
+    monto_val = _parsear_cantidad(mensaje_lower)
+    if monto_val and "de" in mensaje_lower or "por" in mensaje_lower:
+        return f"${monto_val}"
 
     # "el gasto/ingreso de ayer/hoy"
     for fecha in ["ayer", "hoy", "anteayer"]:
@@ -525,17 +564,7 @@ def _extraer_referencia_transaccion(mensaje_lower: str) -> Optional[str]:
 
 def _extraer_nuevo_valor(mensaje_lower: str) -> Optional[float]:
     """Extrae el nuevo valor/monto del mensaje."""
-    # Buscar "$X" o "a $X"
-    match = re.search(r'(?:a|de|por|son|valor)\s+\$?(\d+(?:\.\d+)?)', mensaje_lower)
-    if match:
-        return float(match.group(1))
-
-    # Buscar patrón "$X"
-    match = re.search(r'\$(\d+(?:\.\d+)?)', mensaje_lower)
-    if match:
-        return float(match.group(1))
-
-    return None
+    return _parsear_cantidad(mensaje_lower)
 
 
 def _extraer_nueva_descripcion(mensaje_lower: str) -> Optional[str]:
