@@ -238,6 +238,37 @@ def obtener_transacciones(usuario_id: int, limite: int = 50, tipo: Optional[str]
     return [dict(r) for r in rows]
 
 
+def obtener_transacciones_por_fecha(usuario_id: int, fecha_inicio: str, fecha_fin: str,
+                                     tipo: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Obtiene transacciones de un usuario en un rango de fechas.
+    Las fechas deben estar en formato 'YYYY-MM-DD'.
+    Si `tipo` es 'gasto' o 'ingreso', filtra por ese tipo."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    query = """
+        SELECT t.id, t.tipo, t.cantidad, t.descripcion, t.fecha,
+               c.nombre as categoria_nombre, c.tipo as categoria_tipo, c.descripcion as categoria_descripcion
+        FROM transacciones t
+        LEFT JOIN categorias c ON t.categoria_id = c.id
+        WHERE t.usuario_id = ?
+          AND DATE(t.fecha) >= DATE(?)
+          AND DATE(t.fecha) <= DATE(?)
+    """
+    params = [usuario_id, fecha_inicio, fecha_fin]
+
+    if tipo in ("gasto", "ingreso"):
+        query += " AND t.tipo = ?"
+        params.append(tipo)
+
+    query += " ORDER BY t.fecha DESC"
+
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:
     """Obtiene el balance financiero de un usuario."""
     conn = get_connection()

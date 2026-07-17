@@ -175,6 +175,15 @@ class AIResponder:
             except Exception as e:
                 logger.error("Error consultando ingresos con regex: %s", e)
 
+        elif intent == "analizar_por_fecha":
+            try:
+                from knowledge import _analizar_transacciones_por_fecha
+                respuesta = _analizar_transacciones_por_fecha(usuario, mensaje)
+                if respuesta:
+                    return respuesta
+            except Exception as e:
+                logger.error("Error analizando por fecha con regex: %s", e)
+
         elif intent == "consultar_presupuesto":
             try:
                 from knowledge import _procesar_presupuestos
@@ -207,7 +216,7 @@ TRANSACCIONES RECIENTES DEL USUARIO:
 Mensaje del usuario: "{mensaje}"
 
 Por favor, analiza el mensaje e indica:
-1. Intención: 'registrar_gasto', 'registrar_ingreso', 'consultar_balance', 'consultar_transacciones', 'consultar_gastos', 'consultar_ingresos', 'consultar_presupuesto', 'configurar_presupuesto', 'configurar_ahorro', 'configurar_categoria', 'modificar_transaccion', 'eliminar_transaccion', 'general'
+1. Intención: 'registrar_gasto', 'registrar_ingreso', 'consultar_balance', 'consultar_transacciones', 'consultar_gastos', 'consultar_ingresos', 'consultar_presupuesto', 'configurar_presupuesto', 'configurar_ahorro', 'configurar_categoria', 'modificar_transaccion', 'eliminar_transaccion', 'analizar_por_fecha', 'general'
 2. Si es modificación/eliminación:
    - ACCION_MOD: 'cambiar_tipo' | 'cambiar_monto' | 'cambiar_descripcion' | 'cambiar_categoria' | 'cambiar_fecha' | 'eliminar'
    - REFERENCIA: cómo identificar la transacción (ej: "ultimo_gasto", "monto_50", "gasto_ayer")
@@ -313,6 +322,13 @@ Si no puedes determinar una categoría, usa 'null'.
             elif datos.get('INTENTION') == 'consultar_presupuesto':
                 from knowledge import _procesar_presupuestos
                 return _procesar_presupuestos(usuario)
+
+            # --- ANÁLISIS POR FECHA ---
+            elif datos.get('INTENTION') == 'analizar_por_fecha':
+                from knowledge import _analizar_transacciones_por_fecha
+                respuesta = _analizar_transacciones_por_fecha(usuario, mensaje)
+                if respuesta:
+                    return respuesta
 
             # --- NO ENTENDIÓ (general) ---
             elif datos.get('INTENTION') == 'general' or not datos.get('INTENTION'):

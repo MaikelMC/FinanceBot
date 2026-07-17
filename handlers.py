@@ -160,9 +160,32 @@ def _detectar_intencion(texto: str) -> str:
     if es_modificacion:
         if any(w in texto_lower for w in ["transacción", "transaccion", "gasto", "ingreso", "registro", "movimiento"]):
             return "modificar_transaccion"
-        # "cambia el gasto a ingreso" / "pasa ese gasto a ingreso"
         if any(w in texto_lower for w in ["a ingreso", "a gasto", "tipo", "categoría", "categoria", "monto", "cantidad", "descripción", "descripcion", "fecha"]):
             return "modificar_transaccion"
+
+    # Detectar análisis por fecha (prioridad alta)
+    FECHA_KEYWORDS = [
+        "hoy", "ayer", "anteayer", "esta semana", "semana pasada",
+        "este mes", "mes pasado", "últimos", "ultimos", "desde",
+    ]
+    MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+             "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+    es_fecha = any(kw in texto_lower for kw in FECHA_KEYWORDS)
+    es_fecha = es_fecha or any(m in texto_lower for m in MESES)
+    es_fecha = es_fecha or bool(re.search(r'\b(el\s+)?(lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\b', texto_lower))
+    es_fecha = es_fecha or bool(re.search(r'\d{1,2}[/\-]\d{1,2}', texto_lower))
+    es_fecha = es_fecha or bool(re.search(r'del\s+\d{1,2}\s+al\s+\d{1,2}', texto_lower))
+
+    if es_fecha and (es_consulta or es_registro or es_fecha):
+        # Verificar que hay indicio de consulta (no solo "ayer" aislado sin contexto financiero)
+        tiene_contexto_financiero = es_consulta or any(w in texto_lower for w in [
+            "gasto", "gastos", "ingreso", "ingresos", "transacci", "movimient",
+            "cuánto", "cuanto", "qué", "que", "cuales", "cuáles", "dónde", "donde",
+            "comí", "comi", "gasté", "gaste", "recibí", "recibi", "pagué", "pague",
+            "compr", "cobr", "gananc", "balance", "resumen", "historial",
+        ])
+        if tiene_contexto_financiero:
+            return "analizar_por_fecha"
 
     if es_consulta or "como" in texto_lower or "cual" in texto_lower:
         if any(w in texto_lower for w in ["balance", "saldo", "resumen"]):

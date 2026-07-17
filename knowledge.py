@@ -1198,9 +1198,13 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
             f"🤔 {nombre}, parece que querés **consultar** algo sobre tus finanzas.\n\n"
             "¿Qué te gustaría saber?\n"
             "• `¿Cuánto tengo?` — Ver balance general\n"
-            "• `¿Qué gasté hoy?` — Ver transacciones recientes\n"
+            "• `¿Qué gasté hoy?` — Transacciones de hoy\n"
+            "• `¿Qué hice ayer?` — Transacciones de ayer\n"
+            "• `¿Cuánto gasté en julio?` — Análisis mensual\n"
+            "• `¿Qué gasté esta semana?` — Resumen semanal\n"
             "• `¿Cuánto gasté en comida?` — Gastos por categoría\n"
             "• `¿Cuánto ingresé?` — Ver ingresos\n"
+            "• `Del 1 al 10 de julio` — Rango de fechas\n"
             "• `¿Cómo va mi presupuesto?` — Ver presupuestos"
         )
 
@@ -1414,3 +1418,280 @@ def _procesar_eliminar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> str
             f"{tipo_icono} ${transaccion['cantidad']:.2f} - {tipo_label}: {desc}"
         )
     return "❌ No pude eliminar la transacción. Intenta de nuevo."
+
+
+# ============================================================
+# ANÁLISIS DE TRANSACCIONES POR FECHA
+# ============================================================
+
+MESES_ES = {
+    "enero": 1, "febrero": 2, "marzo": 3, "abril": 4,
+    "mayo": 5, "junio": 6, "julio": 7, "agosto": 8,
+    "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12,
+}
+
+
+def _parsear_fecha_natural(mensaje: str):
+    """
+    Parsea referencias de fecha en lenguaje natural.
+    Retorna (fecha_inicio, fecha_fin, etiqueta) o None.
+    Las fechas son strings 'YYYY-MM-DD'.
+    """
+    from datetime import date, timedelta
+
+    msg = mensaje.lower().strip()
+    hoy = date.today()
+
+    # --- Días relativos ---
+    if re.search(r'\bhoy\b', msg):
+        f = hoy.isoformat()
+        return f, f, "hoy"
+
+    if re.search(r'\bayer\b', msg):
+        f = (hoy - timedelta(days=1)).isoformat()
+        return f, f, "ayer"
+
+    if re.search(r'\banteayer\b', msg):
+        f = (hoy - timedelta(days=2)).isoformat()
+        return f, f, "anteayer"
+
+    # "el lunes", "el martes", etc.
+    dias_semana = {
+        "lunes": 0, "martes": 1, "miércoles": 2, "miercoles": 2,
+        "jueves": 3, "viernes": 4, "sábado": 5, "sabado": 5, "domingo": 6,
+    }
+    for dia_nombre, dia_num in dias_semana.items():
+        match = re.search(r'\b(el\s+)?' + dia_nombre + r'\b', msg)
+        if match:
+            dias_atras = (hoy.weekday() - dia_num) % 7
+            if dias_atras == 0:
+                dias_atras = 7
+            fecha = hoy - timedelta(days=dias_atras)
+            f = fecha.isoformat()
+            return f, f, f"el {dia_nombre}"
+
+    # --- Semanas ---
+    if re.search(r'\besta\s+semana\b', msg):
+        inicio = hoy - timedelta(days=hoy.weekday())
+        return inicio.isoformat(), hoy.isoformat(), "esta semana"
+
+    if re.search(r'\bsemana\s+pasada\b', msg):
+        fin = hoy - timedelta(days=hoy.weekday() + 1)
+        inicio = fin - timedelta(days=6)
+        return inicio.isoformat(), fin.isoformat(), "la semana pasada"
+
+    # --- Meses ---
+    if re.search(r'\beste\s+mes\b', msg):
+        inicio = hoy.replace(day=1)
+        return inicio.isoformat(), hoy.isoformat(), "este mes"
+
+    if re.search(r'\bmes\s+pasado\b', msg):
+        primeroeste = hoy.replace(day=1)
+        fin = primeroeste - timedelta(days=1)
+        inicio = fin.replace(day=1)
+        return inicio.isoformat(), fin.isoformat(), "el mes pasado"
+
+    # --- Rangos (PRIMERO que días específicos) ---
+    # "del 1 al 10 de julio"
+    match = re.search(r'del\s+(\d{1,2})\s+al\s+(\d{1,2})\s+de\s+(\w+)', msg)
+    if match:
+        dia_inicio = int(match.group(1))
+        dia_fin = int(match.group(2))
+        mes_nombre = match.group(3)
+        mes_num = MESES_ES.get(mes_nombre)
+        if mes_num:
+            anio = hoy.year
+            try:
+                inicio = date(anio, mes_num, dia_inicio)
+                fin = date(anio, mes_num, dia_fin)
+                return inicio.isoformat(), fin.isoformat(), f"del {dia_inicio} al {dia_fin} de {mes_nombre}"
+            except ValueError:
+                pass
+
+    # --- Días específicos ---
+    # "el 15 de julio", "15 de julio 2026"
+    match = re.search(
+        r'(?:el\s+)?(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(?:\s+(\d{4}))?',
+        msg
+    )
+    if match:
+        dia = int(match.group(1))
+        mes_num = MESES_ES[match.group(2)]
+        anio = int(match.group(3)) if match.group(3) else hoy.year
+        try:
+            fecha = date(anio, mes_num, dia)
+            f = fecha.isoformat()
+            return f, f, f"{dia} de {match.group(2)} {anio}"
+        except ValueError:
+            pass
+
+    # "15/07/2026" o "15-07-2026" o "15/07"
+    match = re.search(r'(\d{1,2})[/\-](\d{1,2})(?:[/\-](\d{2,4}))?', msg)
+    if match:
+        dia = int(match.group(1))
+        mes = int(match.group(2))
+        anio = int(match.group(3)) if match.group(3) else hoy.year
+        if anio < 100:
+            anio += 2000
+        try:
+            fecha = date(anio, mes, dia)
+            f = fecha.isoformat()
+            return f, f, f"{dia}/{mes:02d}/{anio}"
+        except ValueError:
+            pass
+
+    # --- Mes genérico (DESPUÉS de todo lo anterior) ---
+    # "en julio", "de julio", "julio 2026", "mes de julio"
+    for mes_nombre, mes_num in MESES_ES.items():
+        match = re.search(r'(?:en|de|mes\s+de\s+|el\s+mes\s+de\s+)' + mes_nombre + r'(?:\s+(\d{4}))?', msg)
+        if match:
+            anio = int(match.group(1)) if match.group(1) else hoy.year
+            inicio = date(anio, mes_num, 1)
+            if mes_num == 12:
+                fin = date(anio + 1, 1, 1) - timedelta(days=1)
+            else:
+                fin = date(anio, mes_num + 1, 1) - timedelta(days=1)
+            if inicio > hoy:
+                inicio = hoy
+            if fin > hoy:
+                fin = hoy
+            return inicio.isoformat(), fin.isoformat(), f"{mes_nombre} {anio}"
+
+    # Solo nombre de mes: "julio", "junio"
+    for mes_nombre, mes_num in MESES_ES.items():
+        if re.search(r'\b' + mes_nombre + r'\b', msg):
+            anio = hoy.year
+            inicio = date(anio, mes_num, 1)
+            if mes_num == 12:
+                fin = date(anio + 1, 1, 1) - timedelta(days=1)
+            else:
+                fin = date(anio, mes_num + 1, 1) - timedelta(days=1)
+            if inicio > hoy:
+                inicio = hoy
+            if fin > hoy:
+                fin = hoy
+            return inicio.isoformat(), fin.isoformat(), mes_nombre
+
+    # --- Rangos adicionales ---
+
+    # "últimos N días"
+    match = re.search(r'(?:últimos?|ultimos?)\s+(\d+)\s+días?', msg)
+    if match:
+        dias = int(match.group(1))
+        inicio = hoy - timedelta(days=dias)
+        return inicio.isoformat(), hoy.isoformat(), f"últimos {dias} días"
+
+    # "desde el lunes"
+    for dia_nombre, dia_num in dias_semana.items():
+        match = re.search(r'desde\s+(?:el\s+)?' + dia_nombre, msg)
+        if match:
+            dias_atras = (hoy.weekday() - dia_num) % 7
+            fecha = hoy - timedelta(days=dias_atras)
+            return fecha.isoformat(), hoy.isoformat(), f"desde el {dia_nombre}"
+
+    return None
+
+
+def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> str:
+    """
+    Analiza y formatea las transacciones de un usuario para un rango de fecha dado.
+    Retorna un string con el desglose formateado, o None si no detecta fecha.
+    """
+    resultado = _parsear_fecha_natural(mensaje)
+    if not resultado:
+        return None
+
+    fecha_inicio, fecha_fin, etiqueta = resultado
+
+    transacciones = database.obtener_transacciones_por_fecha(
+        usuario["id"], fecha_inicio, fecha_fin
+    )
+
+    if not transacciones:
+        return (
+            f"📅 **{etiqueta.capitalize()}:**\n\n"
+            f"No tenés transacciones registradas para {etiqueta}.\n\n"
+            "¿Querés registrar algo? Por ejemplo:\n"
+            "• `Gasté $50 en comida`\n"
+            "• `Recibí $300 de salario`"
+        )
+
+    gastos = [t for t in transacciones if t["tipo"] == "gasto"]
+    ingresos = [t for t in transacciones if t["tipo"] == "ingreso"]
+
+    total_gastos = sum(t["cantidad"] for t in gastos)
+    total_ingresos = sum(t["cantidad"] for t in ingresos)
+    neto = total_ingresos - total_gastos
+
+    # Desglose por categoría
+    por_categoria = {}
+    for t in gastos:
+        cat = t.get("categoria_nombre", "otros") or "otros"
+        if cat not in por_categoria:
+            por_categoria[cat] = {"total": 0, "cantidad": 0, "transacciones": []}
+        por_categoria[cat]["total"] += t["cantidad"]
+        por_categoria[cat]["cantidad"] += 1
+        por_categoria[cat]["transacciones"].append(t)
+
+    lineas = [f"📅 **Análisis: {etiqueta}**", "━━━━━━━━━━━━━━━━━"]
+
+    # Resumen general
+    lineas.append("")
+    lineas.append(f"💰 **Ingresos:** ${total_ingresos:.2f} ({len(ingresos)} transacciones)")
+    lineas.append(f"💸 **Gastos:** ${total_gastos:.2f} ({len(gastos)} transacciones)")
+    lineas.append(f"💵 **Neto:** ${neto:.2f}")
+    lineas.append(f"📊 **Total transacciones:** {len(transacciones)}")
+
+    # Desglose de gastos por categoría
+    if por_categoria:
+        lineas.append("")
+        lineas.append("📂 **Gastos por categoría:**")
+        for cat, datos in sorted(por_categoria.items(), key=lambda x: x[1]["total"], reverse=True):
+            porcentaje = (datos["total"] / total_gastos * 100) if total_gastos > 0 else 0
+            barra = _crear_barra_progreso(porcentaje)
+            lineas.append(f"  • {cat}: ${datos['total']:.2f} ({datos['cantidad']}x) {barra} {porcentaje:.0f}%")
+
+    # Detalle de gastos
+    if gastos:
+        lineas.append("")
+        lineas.append("💸 **Detalle de gastos:**")
+        for t in gastos:
+            fecha = str(t.get("fecha", ""))[:10]
+            desc = t.get("descripcion", "Sin descripción")
+            cat = t.get("categoria_nombre", "")
+            cat_str = f" ({cat})" if cat else ""
+            lineas.append(f"  📉 ${t['cantidad']:.2f} - {desc}{cat_str} [{fecha}]")
+
+    # Detalle de ingresos
+    if ingresos:
+        lineas.append("")
+        lineas.append("💰 **Detalle de ingresos:**")
+        for t in ingresos:
+            fecha = str(t.get("fecha", ""))[:10]
+            desc = t.get("descripcion", "Sin descripción")
+            cat = t.get("categoria_nombre", "")
+            cat_str = f" ({cat})" if cat else ""
+            lineas.append(f"  📈 ${t['cantidad']:.2f} - {desc}{cat_str} [{fecha}]")
+
+    # Promedio diario si es rango de varios días
+    try:
+        from datetime import date as _date
+        d_inicio = _date.fromisoformat(fecha_inicio)
+        d_fin = _date.fromisoformat(fecha_fin)
+        dias = (d_fin - d_inicio).days + 1
+        if dias > 1:
+            lineas.append("")
+            lineas.append(f"📊 **Promedio diario ({dias} días):**")
+            lineas.append(f"  💸 Gasto promedio: ${total_gastos / dias:.2f}/día")
+            lineas.append(f"  💰 Ingreso promedio: ${total_ingresos / dias:.2f}/día")
+    except Exception:
+        pass
+
+    return "\n".join(lineas)
+
+
+def _crear_barra_progreso(porcentaje: float, largo: int = 8) -> str:
+    """Crea una barra de progreso visual."""
+    llenos = int(porcentaje / 100 * largo)
+    vacios = largo - llenos
+    return "█" * llenos + "░" * vacios

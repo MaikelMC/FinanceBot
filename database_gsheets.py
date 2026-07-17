@@ -371,6 +371,42 @@ class GoogleSheetsDB:
         resultado.sort(key=lambda x: str(x.get("fecha", "")), reverse=True)
         return resultado[:limite]
 
+    def obtener_transacciones_por_fecha(self, usuario_id: int, fecha_inicio: str, fecha_fin: str,
+                                         tipo: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Obtiene transacciones en un rango de fechas (YYYY-MM-DD)."""
+        trans = self._cache.get("transacciones", [])
+        cats = self._cache.get("categorias", [])
+        cat_lookup = {str(c["id"]): c for c in cats}
+
+        resultado = []
+        for t in trans:
+            uid = int(t.get("usuario_id", 0))
+            if uid != usuario_id:
+                continue
+
+            fecha_txn = str(t.get("fecha", ""))[:10]
+            if fecha_txn < fecha_inicio or fecha_txn > fecha_fin:
+                continue
+
+            if tipo and t.get("tipo") != tipo:
+                continue
+
+            cat = cat_lookup.get(str(t.get("categoria_id", "")))
+            row = dict(t)
+            if cat:
+                row["categoria_nombre"] = cat.get("nombre", "")
+                row["categoria_tipo"] = cat.get("tipo", "")
+                row["categoria_descripcion"] = cat.get("descripcion", "")
+            else:
+                row["categoria_nombre"] = ""
+                row["categoria_tipo"] = ""
+                row["categoria_descripcion"] = ""
+
+            resultado.append(row)
+
+        resultado.sort(key=lambda x: str(x.get("fecha", "")), reverse=True)
+        return resultado
+
     def obtener_balance(self, usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:
         trans = self._cache.get("transacciones", [])
         ingresos = 0.0
@@ -527,6 +563,11 @@ def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad:
 
 def obtener_transacciones(usuario_id: int, limite: int = 50, tipo: Optional[str] = None) -> List[Dict[str, Any]]:
     return _get_db().obtener_transacciones(usuario_id, limite, tipo)
+
+
+def obtener_transacciones_por_fecha(usuario_id: int, fecha_inicio: str, fecha_fin: str,
+                                     tipo: Optional[str] = None) -> List[Dict[str, Any]]:
+    return _get_db().obtener_transacciones_por_fecha(usuario_id, fecha_inicio, fecha_fin, tipo)
 
 
 def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:
