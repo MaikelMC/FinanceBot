@@ -231,7 +231,7 @@ def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Opt
         for t in transacciones:
             icono = emoji.get(t["tipo"], "🔹")
             tipo_label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
-            desc = t.get("descripcion", "") or ""
+            desc = _limpiar_descripcion(t.get("descripcion", "") or "")
             fecha = t.get("fecha", "")[:19]
             lineas.append(f"{icono} ${t['cantidad']:.2f} - {tipo_label}: {desc} ({fecha})")
 
@@ -376,6 +376,17 @@ def _generar_respuesta_ia_finanzas(mensaje: str, usuario: Dict[str, Any]) -> str
 # ============================================================
 # FUNCIONES DE MODIFICACIÓN DE TRANSACCIONES
 # ============================================================
+
+def _limpiar_descripcion(desc: str) -> str:
+    """Elimina prefijos viejos 'Gasto: ' o 'Ingreso: ' de la descripción."""
+    if not desc:
+        return ""
+    if desc.lower().startswith("gasto: "):
+        return desc[7:].strip()
+    if desc.lower().startswith("ingreso: "):
+        return desc[9:].strip()
+    return desc
+
 
 def _detectar_modificacion(mensaje: str) -> Dict[str, Any]:
     """
@@ -703,10 +714,10 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
         if confirmado:
             tipo_icono = "📉" if transaccion["tipo"] == "gasto" else "📈"
             tipo_label = "Gasto" if transaccion["tipo"] == "gasto" else "Ingreso"
+            desc = _limpiar_descripcion(transaccion.get("descripcion", "Sin descripción"))
             return (
                 f"🗑️ **Transacción eliminada:**\n"
-                f"{tipo_icono} ${transaccion['cantidad']:.2f} - {tipo_label}: "
-                f"{transaccion.get('descripcion', 'Sin descripción')}"
+                f"{tipo_icono} ${transaccion['cantidad']:.2f} - {tipo_label}: {desc}"
             )
         return "❌ No pude eliminar la transacción. Intenta de nuevo."
 
@@ -735,7 +746,7 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
             emoji_nuevo = "📈" if nuevo_tipo == "ingreso" else "📉"
             label_nuevo = "Ingreso" if nuevo_tipo == "ingreso" else "Gasto"
             label_viejo = "Gasto" if nuevo_tipo == "ingreso" else "Ingreso"
-            desc = transaccion.get("descripcion", "Sin descripción")
+            desc = _limpiar_descripcion(transaccion.get("descripcion", "Sin descripción"))
             return (
                 f"✅ **Tipo cambiado:**\n"
                 f"De: 📉 {label_viejo}: {desc}\n"
@@ -840,9 +851,9 @@ def _procesar_eliminar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> str
     if confirmado:
         tipo_icono = "📉" if transaccion["tipo"] == "gasto" else "📈"
         tipo_label = "Gasto" if transaccion["tipo"] == "gasto" else "Ingreso"
+        desc = _limpiar_descripcion(transaccion.get("descripcion", "Sin descripción"))
         return (
             f"🗑️ **Transacción eliminada:**\n"
-            f"{tipo_icono} ${transaccion['cantidad']:.2f} - {tipo_label}: "
-            f"{transaccion.get('descripcion', 'Sin descripción')}"
+            f"{tipo_icono} ${transaccion['cantidad']:.2f} - {tipo_label}: {desc}"
         )
     return "❌ No pude eliminar la transacción. Intenta de nuevo."
