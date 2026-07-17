@@ -127,7 +127,7 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any]) -> str:
             categoria_id = categoria_info["id"]
 
         database.agregar_transaccion(usuario["id"], categoria_id, "gasto", cantidad,
-                                   f"Gasto: {mensaje}")
+                                   mensaje)
 
         return f"✅ Gasto registrado: ${cantidad:.2f} en '{categoria}'"
     except Exception as e:
@@ -179,7 +179,7 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any]) -> str:
             categoria_id = categoria_info["id"]
 
         database.agregar_transaccion(usuario["id"], categoria_id, "ingreso", cantidad,
-                                   f"Ingreso: {mensaje}")
+                                   mensaje)
 
         return f"✅ Ingreso registrado: ${cantidad:.2f} de '{categoria}'"
     except Exception as e:
@@ -226,17 +226,14 @@ def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Opt
         elif tipo == "ingreso":
             titulo = "TUS INGRESOS RECIENTES"
 
-        emoji = {"gasto": "💸", "ingreso": "💰"}
+        emoji = {"gasto": "📉", "ingreso": "📈"}
         lineas = [f"📋 **{titulo}**", "━━━━━━━━━━━━━━━━━"]
         for t in transacciones:
             icono = emoji.get(t["tipo"], "🔹")
-            categoria = t.get("categoria_nombre", "sin categoria")
+            tipo_label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
             desc = t.get("descripcion", "") or ""
-            fecha = t.get("fecha", "")[:10]
-            lineas.append(f"{icono} **${t['cantidad']:.2f}** | {categoria}")
-            if desc:
-                lineas.append(f"   └ {desc}")
-            lineas.append(f"   └ {fecha}")
+            fecha = t.get("fecha", "")[:19]
+            lineas.append(f"{icono} ${t['cantidad']:.2f} - {tipo_label}: {desc} ({fecha})")
 
         total = sum(t["cantidad"] for t in transacciones)
         if tipo:
@@ -704,10 +701,11 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
     if accion == "eliminar":
         confirmado = database.eliminar_transaccion(usuario["id"], tid)
         if confirmado:
-            tipo_icono = "💸" if transaccion["tipo"] == "gasto" else "💰"
+            tipo_icono = "📉" if transaccion["tipo"] == "gasto" else "📈"
+            tipo_label = "Gasto" if transaccion["tipo"] == "gasto" else "Ingreso"
             return (
                 f"🗑️ **Transacción eliminada:**\n"
-                f"{tipo_icono} ${transaccion['cantidad']:.2f} - "
+                f"{tipo_icono} ${transaccion['cantidad']:.2f} - {tipo_label}: "
                 f"{transaccion.get('descripcion', 'Sin descripción')}"
             )
         return "❌ No pude eliminar la transacción. Intenta de nuevo."
@@ -727,28 +725,21 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
             cat_info = database.crear_categoria(usuario["id"], "otros", nuevo_tipo_cat)
             nueva_categoria_id = cat_info["id"]
 
-        # Actualizar descripción para reflejar el nuevo tipo
-        desc_actual = transaccion.get("descripcion", "") or ""
-        if desc_actual.lower().startswith("gasto:"):
-            nueva_descripcion = "Ingreso: " + desc_actual[len("gasto:"):].strip()
-        elif desc_actual.lower().startswith("ingreso:"):
-            nueva_descripcion = "Gasto: " + desc_actual[len("ingreso:"):].strip()
-        else:
-            nueva_descripcion = desc_actual
-
         actualizada = database.actualizar_transaccion(
             usuario["id"], tid,
             tipo=nuevo_tipo,
-            categoria_id=nueva_categoria_id,
-            descripcion=nueva_descripcion
+            categoria_id=nueva_categoria_id
         )
 
         if actualizada:
-            emoji = "💰" if nuevo_tipo == "ingreso" else "💸"
+            emoji_nuevo = "📈" if nuevo_tipo == "ingreso" else "📉"
+            label_nuevo = "Ingreso" if nuevo_tipo == "ingreso" else "Gasto"
+            label_viejo = "Gasto" if nuevo_tipo == "ingreso" else "Ingreso"
+            desc = transaccion.get("descripcion", "Sin descripción")
             return (
-                f"✅ **Tipo cambiado:** {emoji}\n"
-                f"Tu transacción de ${transaccion['cantidad']:.2f} ahora es un **{nuevo_tipo}**.\n"
-                f"Antes era: {'gasto' if nuevo_tipo == 'ingreso' else 'ingreso'}"
+                f"✅ **Tipo cambiado:**\n"
+                f"De: 📉 {label_viejo}: {desc}\n"
+                f"A: {emoji_nuevo} ${transaccion['cantidad']:.2f} - {label_nuevo}: {desc}"
             )
         return "❌ No pude cambiar el tipo. Intenta de nuevo."
 
@@ -847,11 +838,11 @@ def _procesar_eliminar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> str
     confirmado = database.eliminar_transaccion(usuario["id"], tid)
 
     if confirmado:
-        tipo_icono = "💸" if transaccion["tipo"] == "gasto" else "💰"
+        tipo_icono = "📉" if transaccion["tipo"] == "gasto" else "📈"
+        tipo_label = "Gasto" if transaccion["tipo"] == "gasto" else "Ingreso"
         return (
             f"🗑️ **Transacción eliminada:**\n"
-            f"{tipo_icono} ${transaccion['cantidad']:.2f} - "
-            f"{transaccion.get('descripcion', 'Sin descripción')} "
-            f"({transaccion.get('categoria_nombre', 'Sin categoría')})"
+            f"{tipo_icono} ${transaccion['cantidad']:.2f} - {tipo_label}: "
+            f"{transaccion.get('descripcion', 'Sin descripción')}"
         )
     return "❌ No pude eliminar la transacción. Intenta de nuevo."

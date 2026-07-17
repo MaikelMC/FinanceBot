@@ -306,8 +306,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             mensaje = "📝 **Tus últimas transacciones:**\n\n"
             for t in transacciones:
                 tipo_icono = "📈" if t["tipo"] == "ingreso" else "📉"
+                tipo_label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
                 fecha = t.get("fecha", "N/A")
-                mensaje += f"{tipo_icono} ${t['cantidad']:.2f} - {t.get('descripcion', 'Sin descripción')} ({fecha})\n"
+                desc = t.get("descripcion", "Sin descripción")
+                mensaje += f"{tipo_icono} ${t['cantidad']:.2f} - {tipo_label}: {desc} ({fecha})\n"
         await context.bot.send_message(
             chat_id=query.message.chat_id,
             text=mensaje,
