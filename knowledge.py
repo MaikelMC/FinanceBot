@@ -378,13 +378,18 @@ def _generar_respuesta_ia_finanzas(mensaje: str, usuario: Dict[str, Any]) -> str
 # ============================================================
 
 def _limpiar_descripcion(desc: str) -> str:
-    """Elimina prefijos viejos 'Gasto: ' o 'Ingreso: ' de la descripción."""
+    """Elimina prefijos y palabras innecesarias de la descripción."""
     if not desc:
         return ""
     if desc.lower().startswith("gasto: "):
-        return desc[7:].strip()
-    if desc.lower().startswith("ingreso: "):
-        return desc[9:].strip()
+        desc = desc[7:].strip()
+    elif desc.lower().startswith("ingreso: "):
+        desc = desc[9:].strip()
+    # Eliminar palabras verbales al inicio
+    for prefijo in ["gasté ", "gaste ", "recibí ", "recibi ", "compré ", "compre ", "pagué ", "pague "]:
+        if desc.lower().startswith(prefijo):
+            desc = desc[len(prefijo):].strip()
+            break
     return desc
 
 
