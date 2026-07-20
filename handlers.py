@@ -255,10 +255,34 @@ def _parsear_transaccion(texto: str) -> tuple[Optional[str], Optional[float], Op
 
     # Identificar tipo por palabras clave
     tipo = None
-    if any(kw in texto_lower for kw in ["gast", "compra", "pago", "cost"]):
+
+    # Keywords de gasto (usan word boundaries para evitar falsos positivos como "gestión")
+    GASTO_KEYWORDS = ["gasté", "gaste", "gasto", "compré", "compre", "compra",
+                      "pagué", "pague", "pago", "costó", "costo", "pagar"]
+    # Keywords de ingreso
+    INGRESO_KEYWORDS = ["recibí", "recibi", "ingresé", "ingrese", "ingreso",
+                        "salario", "cobré", "cobro", "cobrar", "gané", "gane",
+                        "bonus", "bono", "regalo", "dividendos", "intereses"]
+    # "agrega"/"agregar" es exclusivo de ingreso cuando no hay keyword de gasto explícito
+    AGREGAR_KEYWORDS = ["agrega", "agregar", "añadir", "sumar"]
+
+    # Primero verificar si hay keywords EXPLÍCITOS de gasto
+    tiene_gasto_explicito = any(re.search(r'\b' + kw + r'\b', texto_lower) for kw in GASTO_KEYWORDS)
+    tiene_ingreso_explicito = any(re.search(r'\b' + kw + r'\b', texto_lower) for kw in INGRESO_KEYWORDS)
+    tiene_agregar = any(re.search(r'\b' + kw + r'\b', texto_lower) for kw in AGREGAR_KEYWORDS)
+
+    if tiene_gasto_explicito:
         tipo = "gasto"
-    elif any(kw in texto_lower for kw in ["ingress", "salario", "ingreso", "recib"]):
+    elif tiene_ingreso_explicito:
         tipo = "ingreso"
+    elif tiene_agregar:
+        tipo = "ingreso"  # "agrega" por defecto es ingreso
+    else:
+        # Fallback: buscar indicadores de contexto
+        if any(w in texto_lower for w in ["en ", "para ", "de comida", "de transporte"]):
+            tipo = "gasto"
+        elif any(w in texto_lower for w in ["de salario", "de pago", "de inversión", "de trading"]):
+            tipo = "ingreso"
 
     # Extraer cantidad
     from knowledge import _parsear_cantidad

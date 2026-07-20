@@ -545,16 +545,16 @@ def _detectar_cantidad_en_texto(texto: str) -> Optional[float]:
 def _detectar_tipo_en_texto(texto: str) -> Optional[str]:
     """Detecta si un fragmento describe un gasto o ingreso."""
     t = texto.lower()
-    if any(w in t for w in ["gasté", "gaste", "compré", "compre", "pagué", "pague",
-                             "costó", "costo", "pagar", "gasto", "salí", "salio",
-                             "perdí", "perdi", "pérdida", "perdida", "pagamos",
-                             "compramos", "gastamos", "salimos"]):
+    gasto_kw = ["gasté", "gaste", "gasto", "compré", "compre", "compra",
+                "pagué", "pague", "pago", "costó", "costo", "pagar",
+                "perdí", "perdi", "pérdida", "perdida"]
+    ingreso_kw = ["recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
+                  "gané", "gane", "salario", "ingreso", "bonus", "bono",
+                  "regalo", "ganancia", "dividendos", "intereses",
+                  "agrega", "agregar"]
+    if any(re.search(r'\b' + kw + r'\b', t) for kw in gasto_kw):
         return "gasto"
-    if any(w in t for w in ["recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
-                             "gané", "gane", "salario", "ingreso", "bonus", "bono",
-                             "regalo", "ganancia", "ingresó", "cobramos", "ganamos",
-                             "recibimos", "ingresamos", "inversión", "inversion",
-                             "dividendos", "intereses"]):
+    if any(re.search(r'\b' + kw + r'\b', t) for kw in ingreso_kw):
         return "ingreso"
     return None
 
