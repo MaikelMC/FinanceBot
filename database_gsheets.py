@@ -177,10 +177,36 @@ class GoogleSheetsDB:
         try:
             ws = self._spreadsheet.worksheet(name)
             records = ws.get_all_records()
-            # Normalizar: asegurar que todos los campos existen
+            # Normalizar: asegurar que todos los campos existen y tipos correctos
             rows = []
             for r in records:
                 row = {col: r.get(col, "") for col in SHEET_COLUMNS[name]}
+                # Castear campos numéricos para evitar strings en la caché
+                if "cantidad" in row:
+                    try:
+                        row["cantidad"] = float(row["cantidad"]) if row["cantidad"] != "" else 0.0
+                    except (TypeError, ValueError):
+                        row["cantidad"] = 0.0
+                if "cantidad_planejada" in row:
+                    try:
+                        row["cantidad_planejada"] = float(row["cantidad_planejada"]) if row["cantidad_planejada"] != "" else 0.0
+                    except (TypeError, ValueError):
+                        row["cantidad_planejada"] = 0.0
+                if "cantidad_gastada" in row:
+                    try:
+                        row["cantidad_gastada"] = float(row["cantidad_gastada"]) if row["cantidad_gastada"] != "" else 0.0
+                    except (TypeError, ValueError):
+                        row["cantidad_gastada"] = 0.0
+                if "cantidad_actual" in row:
+                    try:
+                        row["cantidad_actual"] = float(row["cantidad_actual"]) if row["cantidad_actual"] != "" else 0.0
+                    except (TypeError, ValueError):
+                        row["cantidad_actual"] = 0.0
+                if "objetivo" in row:
+                    try:
+                        row["objetivo"] = float(row["objetivo"]) if row["objetivo"] != "" else 0.0
+                    except (TypeError, ValueError):
+                        row["objetivo"] = 0.0
                 rows.append(row)
             self._cache[name] = rows
 
@@ -309,6 +335,14 @@ class GoogleSheetsDB:
 
     def agregar_transaccion(self, usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "") -> Dict[str, Any]:
         with LOCK:
+            # Validar y normalizar cantidad
+            try:
+                cantidad = round(float(cantidad), 2)
+            except (TypeError, ValueError):
+                cantidad = 0.0
+            if cantidad <= 0:
+                raise ValueError("La cantidad debe ser mayor a 0")
+
             trans = self._cache.get("transacciones", [])
             tid = self._next_id("transacciones")
             now = self._now()
@@ -368,6 +402,11 @@ class GoogleSheetsDB:
             # Enriquecer con datos de categoría (JOIN manual)
             cat = cat_lookup.get(str(t.get("categoria_id", "")))
             row = dict(t)
+            # Asegurar que cantidad es float
+            try:
+                row["cantidad"] = float(row.get("cantidad", 0))
+            except (TypeError, ValueError):
+                row["cantidad"] = 0.0
             if cat:
                 row["categoria_nombre"] = cat.get("nombre", "")
                 row["categoria_tipo"] = cat.get("tipo", "")
