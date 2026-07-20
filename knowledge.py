@@ -491,7 +491,8 @@ def _split_transacciones(mensaje: str) -> List[str]:
     """
     # Paso 1: Normalizar separadores fuertes a marcador
     msg = mensaje
-    for sep in [r'\bluego\b', r'\bdespués\b', r'\bdespues\b', r'\bes\s+todo\b']:
+    for sep in [r'\bluego\b', r'\bdespués\b', r'\bdespues\b', r'\bes\s+todo\b',
+                r'\by\s+también\b', r'\by\s+tambien\b', r'\bademás\b', r'\bademas\b']:
         msg = re.sub(sep, ' ||| ', msg, flags=re.IGNORECASE)
 
     # Paso 2: Separar por marcador fuerte
@@ -510,26 +511,32 @@ def _split_transacciones(mensaje: str) -> List[str]:
         else:
             fragmentos_expandidos.append(frag)
 
-    # Paso 4: Separar por "y" + verbo de acción
+    # Paso 4: Separar por "y" + verbo de acción O "y" + número
     verbos_accion = [
         "gasté", "gaste", "compré", "compre", "pagué", "pague", "costó", "costo",
         "recibí", "recibi", "cobré", "cobro", "gané", "gane", "ingresé", "ingrese",
         "perdí", "perdi", "pagamos", "compramos", "gastamos", "cobramos", "ganamos",
         "recibimos", "ingresamos", "salí", "salio", "salimos",
     ]
+    verbo_pattern = '|'.join(re.escape(v) for v in verbos_accion)
     resultado = []
     for frag in fragmentos_expandidos:
         # Separar por "y" + verbo
         partes = re.split(
-            r'\s+y\s+(?=' + '|'.join(re.escape(v) for v in verbos_accion) + r')',
+            r'\s+y\s+(?:' + verbo_pattern + r')',
             frag, flags=re.IGNORECASE
         )
         # También separar por "y" + "$" (ej: "comida y $20 de transporte")
         partes_expandidas = []
         for p in partes:
-            sub = re.split(r'\s+y\s+(?=\$)', p, flags=re.IGNORECASE)
+            sub = re.split(r'\s+y\s+\$', p, flags=re.IGNORECASE)
             partes_expandidas.extend(sub)
-        resultado.extend([p.strip() for p in partes_expandidas if p.strip()])
+        # También separar por "y" + número (ej: "50 en taxi y 100 en comida")
+        partes_finales = []
+        for p in partes_expandidas:
+            sub = re.split(r'\s+y\s+(?=\d)', p, flags=re.IGNORECASE)
+            partes_finales.extend(sub)
+        resultado.extend([p.strip() for p in partes_finales if p.strip()])
 
     # Paso 5: Filtrar fragmentos sin número
     result = [f for f in resultado if re.search(r'\d+', f)]
@@ -632,6 +639,9 @@ def _extraer_descripcion_limpia(texto: str, cantidad_texto: str = "") -> str:
         if desc.lower().startswith(verb + " "):
             desc = desc[len(verb):].strip()
             break
+    # Remover conectores al final (y recibi, y gaste, luego, despues, etc.)
+    desc = re.sub(r'\s*,?\s*\by\s+(?:recib[íi]|gast[ée]|compr[ée]|pag[ué]|cobr[éi]|gan[éi]|ingres[éi]|perdí|costó|cobro|salio|salimos)\b.*$', '', desc, flags=re.IGNORECASE)
+    desc = re.sub(r'\s*,?\s*(?:luego|después|despues|además|ademas)\s+.*$', '', desc, flags=re.IGNORECASE)
     # Remover símbolos de moneda y palabras de moneda
     desc = re.sub(r'[\$\€\£\¥\¢]', '', desc)
     desc = re.sub(r'\b(dólares?|dolares?|pesos?|bs?\.?)\b', '', desc, flags=re.IGNORECASE)
