@@ -35,6 +35,7 @@ SHEET_NAMES = {
     "transacciones": "transacciones",
     "presupuestos": "presupuestos",
     "metas_ahorro": "metas_ahorro",
+    "notificaciones": "notificaciones",
 }
 
 # Columnas de cada hoja (deben coincidir con las claves de los dicts devueltos)
@@ -44,6 +45,7 @@ SHEET_COLUMNS = {
     "transacciones": ["id", "usuario_id", "categoria_id", "tipo", "cantidad", "descripcion", "fecha", "created_at"],
     "presupuestos": ["id", "usuario_id", "categoria_id", "cantidad_planejada", "cantidad_gastada", "periodo", "fecha_inicio", "fecha_fin", "created_at"],
     "metas_ahorro": ["id", "usuario_id", "nombre", "objetivo", "cantidad_actual", "fecha_inicio", "fecha_meta", "created_at"],
+    "notificaciones": ["id", "usuario_id", "version", "enviada_en"],
 }
 
 LOCK = threading.Lock()
@@ -63,6 +65,8 @@ class GoogleSheetsDB:
         self._cache_dirty: set = set()
         self._initialized = False
         self._next_ids: Dict[str, int] = {}
+        self._flush_timer: Optional[threading.Timer] = None
+        self._FLUSH_DELAY = 3.0  # segundos antes de flush real
 
     # ----------------------------------------------------------
     # INICIALIZACIÓN
@@ -205,6 +209,14 @@ class GoogleSheetsDB:
         except Exception as e:
             logger.error("Error escribiendo hoja '%s': %s", name, e)
 
+    def _schedule_flush(self):
+        """Programa un flush diferido para evitar rate limiting."""
+        if self._flush_timer:
+            self._flush_timer.cancel()
+        self._flush_timer = threading.Timer(self._FLUSH_DELAY, self.flush_all)
+        self._flush_timer.daemon = True
+        self._flush_timer.start()
+
     def flush_all(self):
         """Fuerza escritura de todas las hojas sucias a Google Sheets."""
         for name in list(self._cache_dirty):
@@ -245,7 +257,7 @@ class GoogleSheetsDB:
             }
             users.append(nuevo)
             self._cache_dirty.add("usuarios")
-            self._flush_sheet("usuarios")
+            self._schedule_flush()
             logger.info("Usuario creado: %s (ID %d)", nombre, uid)
             return dict(nuevo)
 
@@ -275,7 +287,7 @@ class GoogleSheetsDB:
             }
             cats.append(nueva)
             self._cache_dirty.add("categorias")
-            self._flush_sheet("categorias")
+            self._schedule_flush()
             logger.info("Categoría creada: %s (tipo=%s) para usuario %d", nombre, tipo, usuario_id)
             return dict(nueva)
 
@@ -317,7 +329,7 @@ class GoogleSheetsDB:
             if tipo == "gasto" and categoria_id:
                 self._actualizar_gasto_presupuesto(usuario_id, categoria_id, cantidad)
 
-            self._flush_sheet("transacciones")
+            self._schedule_flush()
             logger.info("Transacción registrada: %s $%.2f (usuario %d)", tipo, cantidad, usuario_id)
             return dict(nueva)
 
@@ -417,12 +429,20 @@ class GoogleSheetsDB:
                 continue
             if fecha_inicio and str(t.get("fecha", "")) < fecha_inicio:
                 continue
+            try:
+                cant = float(t.get("cantidad", 0))
+            except (TypeError, ValueError):
+                cant = 0.0
             if t.get("tipo") == "ingreso":
-                ingresos += float(t.get("cantidad", 0))
+                ingresos += cant
             elif t.get("tipo") == "gasto":
-                gastos += float(t.get("cantidad", 0))
+                gastos += cant
 
-        return {"ingresos": ingresos, "gastos": gastos, "neto": ingresos - gastos}
+        return {
+            "ingresos": round(ingresos, 2),
+            "gastos": round(gastos, 2),
+            "neto": round(ingresos - gastos, 2),
+        }
 
     def contar_transacciones(self, usuario_id: int) -> Dict[str, Any]:
         trans = self._cache.get("transacciones", [])
@@ -464,7 +484,7 @@ class GoogleSheetsDB:
             }
             pres.append(nuevo)
             self._cache_dirty.add("presupuestos")
-            self._flush_sheet("presupuestos")
+            self._schedule_flush()
             logger.info("Presupuesto creado: $%.2f para categoría %d", cantidad_planejada, categoria_id)
             return dict(nuevo)
 
@@ -506,10 +526,47 @@ class GoogleSheetsDB:
                     actual = float(m.get("cantidad_actual", 0))
                     m["cantidad_actual"] = actual + cantidad
                     self._cache_dirty.add("metas_ahorro")
-                    self._flush_sheet("metas_ahorro")
+                    self._schedule_flush()
                     logger.info("Meta %d actualizada: +$%.2f", meta_id, cantidad)
                     return True
             return False
+
+    # ----------------------------------------------------------
+    # NOTIFICACIONES
+    # ----------------------------------------------------------
+
+    def obtener_ultima_version_vista(self, usuario_id: int) -> Optional[str]:
+        """Retorna la última versión de changelog que vio el usuario."""
+        notifs = self._cache.get("notificaciones", [])
+        usuario_notifs = [n for n in notifs if int(n.get("usuario_id", 0)) == usuario_id]
+        if not usuario_notifs:
+            return None
+        usuario_notifs.sort(key=lambda x: int(x.get("id", 0)), reverse=True)
+        return usuario_notifs[0].get("version")
+
+    def registrar_notificacion(self, usuario_id: int, version: str):
+        """Registra que el usuario vio una versión del changelog."""
+        with LOCK:
+            notifs = self._cache.get("notificaciones", [])
+            nid = self._next_id("notificaciones")
+            nueva = {
+                "id": nid,
+                "usuario_id": usuario_id,
+                "version": version,
+                "enviada_en": self._now(),
+            }
+            notifs.append(nueva)
+            self._cache_dirty.add("notificaciones")
+            self._schedule_flush()
+
+    def contar_usuarios(self) -> int:
+        """Retorna el total de usuarios registrados."""
+        return len(self._cache.get("usuarios", []))
+
+    def obtener_todos_los_usuarios(self) -> List[Dict[str, Any]]:
+        """Retorna todos los usuarios registrados."""
+        usuarios = self._cache.get("usuarios", [])
+        return [{"id": u["id"], "telegram_user_id": u["telegram_user_id"], "nombre": u["nombre"]} for u in usuarios]
 
     # ----------------------------------------------------------
     # TABLAS (init compat)
@@ -594,6 +651,14 @@ def contar_transacciones(usuario_id: int) -> Dict[str, Any]:
     return _get_db().contar_transacciones(usuario_id)
 
 
+def flush_all():
+    """Fuerza escritura de todas las hojas pendientes. Llamar al cerrar el bot."""
+    try:
+        _get_db().flush_all()
+    except Exception as e:
+        logger.error("Error en flush_all: %s", e)
+
+
 def eliminar_transacciones(usuario_id: int) -> int:
     """Elimina todas las transacciones de un usuario. Retorna la cantidad eliminada."""
     with LOCK:
@@ -609,7 +674,7 @@ def eliminar_transacciones(usuario_id: int) -> int:
         if eliminadas > 0:
             db._cache["transacciones"] = nueva_lista
             db._cache_dirty.add("transacciones")
-            db._flush_sheet("transacciones")
+            db._schedule_flush()
         return eliminadas
 
 
@@ -655,7 +720,7 @@ def actualizar_transaccion(usuario_id: int, transaccion_id: int, **kwargs) -> Op
                 for k, v in campos.items():
                     t[k] = v
                 db._cache_dirty.add("transacciones")
-                db._flush_sheet("transacciones")
+                db._schedule_flush()
 
                 cats = db._cache.get("categorias", [])
                 cat_lookup = {str(c["id"]): c for c in cats}
@@ -686,5 +751,21 @@ def eliminar_transaccion(usuario_id: int, transaccion_id: int) -> bool:
         if eliminada:
             db._cache["transacciones"] = nueva_lista
             db._cache_dirty.add("transacciones")
-            db._flush_sheet("transacciones")
+            db._schedule_flush()
         return eliminada
+
+
+def obtener_ultima_version_vista(usuario_id: int) -> Optional[str]:
+    return _get_db().obtener_ultima_version_vista(usuario_id)
+
+
+def registrar_notificacion(usuario_id: int, version: str):
+    return _get_db().registrar_notificacion(usuario_id, version)
+
+
+def contar_usuarios() -> int:
+    return _get_db().contar_usuarios()
+
+
+def obtener_todos_los_usuarios() -> List[Dict[str, Any]]:
+    return _get_db().obtener_todos_los_usuarios()

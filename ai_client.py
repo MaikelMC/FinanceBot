@@ -123,9 +123,11 @@ class AIResponder:
 
             if categoria_tipo:
                 try:
-                    from handlers import _procesar_transaccion_finanzas
-                    respuesta = asyncio.run(_procesar_transaccion_finanzas(fecha, "gasto", cantidad, descripcion))
-                    return respuesta
+                    from knowledge import _procesar_gasto, _procesar_ingreso
+                    if "gasto" in str(categoria_tipo):
+                        return _procesar_gasto(mensaje, usuario)
+                    else:
+                        return _procesar_ingreso(mensaje, usuario)
                 except Exception as e:
                     logger.error("Error procesando con regex nativo: %s", e)
 

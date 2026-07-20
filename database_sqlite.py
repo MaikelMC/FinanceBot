@@ -91,6 +91,16 @@ def crear_tablas():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notificaciones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            version TEXT NOT NULL,
+            enviada_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -496,3 +506,52 @@ def eliminar_transaccion(usuario_id: int, transaccion_id: int) -> bool:
     conn.commit()
     conn.close()
     return eliminada
+
+
+# ----------------------------------------------------------
+# NOTIFICACIONES
+# ----------------------------------------------------------
+
+def obtener_ultima_version_vista(usuario_id: int) -> Optional[str]:
+    """Retorna la última versión de changelog que vio el usuario. None si nunca vio ninguna."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT version FROM notificaciones WHERE usuario_id = ? ORDER BY id DESC LIMIT 1",
+        (usuario_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row["version"] if row else None
+
+
+def registrar_notificacion(usuario_id: int, version: str):
+    """Registra que el usuario vio una versión del changelog."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO notificaciones (usuario_id, version) VALUES (?, ?)",
+        (usuario_id, version)
+    )
+    conn.commit()
+    conn.close()
+
+
+def contar_usuarios() -> int:
+    """Retorna el total de usuarios registrados."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) as total FROM usuarios")
+    row = cursor.fetchone()
+    conn.close()
+    return row["total"] if row else 0
+
+
+def obtener_todos_los_usuarios() -> List[Dict[str, Any]]:
+    """Retorna todos los usuarios registrados (telegram_user_id y nombre)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, telegram_user_id, nombre FROM usuarios")
+    usuarios = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return usuarios

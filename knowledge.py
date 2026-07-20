@@ -115,8 +115,13 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any]) -> str:
     # Registrar transacción
     try:
         # Primero obtener el ID de la categoría
-        categorias = database.obtener_categorias(usuario["id"], categoria)
-        categoria_id = categorias[0]["id"] if categorias else None
+        categorias = database.obtener_categorias(usuario["id"], "gastos")
+        categoria_id = None
+
+        for cat in categorias:
+            if cat["nombre"].lower() == categoria.lower():
+                categoria_id = cat["id"]
+                break
 
         if not categoria_id:
             # Crear categoría si no existe
@@ -160,12 +165,10 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any]) -> str:
         categorias = database.obtener_categorias(usuario["id"], "ingresos")
         categoria_id = None
 
-        if categorias:
-            # Buscar categoría exacta o usar la primera disponible
-            for cat in categorias:
-                if cat["nombre"] == categoria.lower():
-                    categoria_id = cat["id"]
-                    break
+        for cat in categorias:
+            if cat["nombre"].lower() == categoria.lower():
+                categoria_id = cat["id"]
+                break
 
         if not categoria_id:
             # Crear categoría si no existe

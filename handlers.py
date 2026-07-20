@@ -15,7 +15,8 @@ from telegram.ext import ContextTypes
 import database
 import knowledge
 import ai_client
-from config import IMAGES_DIR
+import changelog
+from config import IMAGES_DIR, ADMIN_USER_ID
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,31 @@ PALABRAS_RELLENO = {
     "más", "mas", "extra", "adicional",
     "también", "tambien", "además", "ademas",
 }
+
+
+def _formatear_notificacion(ultima_vista: Optional[str]) -> Optional[str]:
+    """Construye el mensaje de notificación con las versiones no vistas por el usuario."""
+    versiones_a_mostrar = []
+    for ver, data in changelog.CHANGELOG.items():
+        if ultima_vista is None or ver > ultima_vista:
+            versiones_a_mostrar.append((ver, data))
+
+    if not versiones_a_mostrar:
+        return None
+
+    versiones_a_mostrar.sort(key=lambda x: x[0], reverse=True)
+
+    lineas = []
+    for ver, data in versiones_a_mostrar:
+        emoji = data.get("emoji", "📢")
+        lineas.append(f"{emoji} *v{ver}* - {data['titulo']}")
+        for mejora in data.get("mejoras", []):
+            lineas.append(f"  • {mejora}")
+        lineas.append("")
+
+    lineas.append("Escribí /help para ver todos los comandos.")
+
+    return "\n".join(lineas)
 
 
 def _limpiar_palabra(palabra: str) -> str:
@@ -310,153 +336,212 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
 
-    user = update.effective_user
-    usuario = database.obtener_usuario(user.id)
-    if not usuario:
-        usuario = database.obtener_o_crear_usuario(user.id, user.first_name)
-    usuario_id = usuario["id"]
+    try:
+        user = update.effective_user
+        usuario = database.obtener_usuario(user.id)
+        if not usuario:
+            usuario = database.obtener_o_crear_usuario(user.id, user.first_name)
+        usuario_id = usuario["id"]
 
-    botones = _crear_botones_rapidos()
+        botones = _crear_botones_rapidos()
 
-    if query.data == "accion_balance":
-        balance = database.obtener_balance(usuario_id)
-        mensaje = (
-            f"💰 **Tu balance actual:**\n\n"
-            f"  📈 Ingresos: ${balance['ingresos']:.2f}\n"
-            f"  📉 Gastos: ${balance['gastos']:.2f}\n"
-            f"  💵 Neto: ${balance['neto']:.2f}"
-        )
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=mensaje,
-            parse_mode="Markdown",
-            reply_markup=botones,
-        )
-
-    elif query.data == "accion_transacciones":
-        transacciones = database.obtener_transacciones(usuario_id, 5)
-        if not transacciones:
-            mensaje = "📝 No tienes transacciones registradas aún."
-        else:
-            mensaje = "📝 **Tus últimas transacciones:**\n\n"
-            for t in transacciones:
-                tipo_icono = "📈" if t["tipo"] == "ingreso" else "📉"
-                tipo_label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
-                fecha = t.get("fecha", "N/A")[:10]
-                desc = t.get("descripcion", "Sin descripción")
-                if desc.lower().startswith("gasto: "):
-                    desc = desc[7:].strip()
-                elif desc.lower().startswith("ingreso: "):
-                    desc = desc[9:].strip()
-                for pv in ["gasté ", "gaste ", "recibí ", "recibi ", "compré ", "compre ", "pagué ", "pague "]:
-                    if desc.lower().startswith(pv):
-                        desc = desc[len(pv):].strip()
-                        break
-                mensaje += f"{tipo_icono} ${t['cantidad']:.2f} - {tipo_label}: {desc} ({fecha})\n"
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=mensaje,
-            parse_mode="Markdown",
-            reply_markup=botones,
-        )
-
-    # === CALLBACKS DE MÚLTIPLES TRANSACCIONES ===
-    elif query.data == "multi_confirm":
-        transacciones_pendientes = context.user_data.get("multi_transacciones", [])
-        if not transacciones_pendientes:
+        if query.data == "accion_balance":
+            balance = database.obtener_balance(usuario_id)
+            mensaje = (
+                f"💰 **Tu balance actual:**\n\n"
+                f"  📈 Ingresos: ${balance['ingresos']:.2f}\n"
+                f"  📉 Gastos: ${balance['gastos']:.2f}\n"
+                f"  💵 Neto: ${balance['neto']:.2f}"
+            )
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text="⚠️ No hay transacciones pendientes para guardar.",
+                text=mensaje,
+                parse_mode="Markdown",
+                reply_markup=botones,
             )
-            return
-        resultado = knowledge._guardar_multi_transacciones(transacciones_pendientes, usuario)
-        context.user_data.pop("multi_transacciones", None)
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=resultado,
-            parse_mode="Markdown",
-            reply_markup=botones,
-        )
 
-    elif query.data == "multi_cancel":
-        context.user_data.pop("multi_transacciones", None)
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text="❌ Transacciones canceladas. No se guardó nada.",
-            reply_markup=botones,
-        )
+        elif query.data == "accion_transacciones":
+            transacciones = database.obtener_transacciones(usuario_id, 5)
+            if not transacciones:
+                mensaje = "📝 No tienes transacciones registradas aún."
+            else:
+                mensaje = "📝 **Tus últimas transacciones:**\n\n"
+                for t in transacciones:
+                    tipo_icono = "📈" if t["tipo"] == "ingreso" else "📉"
+                    tipo_label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
+                    fecha = t.get("fecha", "N/A")[:10]
+                    desc = t.get("descripcion", "Sin descripción")
+                    if desc.lower().startswith("gasto: "):
+                        desc = desc[7:].strip()
+                    elif desc.lower().startswith("ingreso: "):
+                        desc = desc[9:].strip()
+                    for pv in ["gasté ", "gaste ", "recibí ", "recibi ", "compré ", "compre ", "pagué ", "pague "]:
+                        if desc.lower().startswith(pv):
+                            desc = desc[len(pv):].strip()
+                            break
+                    mensaje += f"{tipo_icono} ${t['cantidad']:.2f} - {tipo_label}: {desc} ({fecha})\n"
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=mensaje,
+                parse_mode="Markdown",
+                reply_markup=botones,
+            )
 
-    elif query.data.startswith("multi_remove_"):
-        idx = int(query.data.split("_")[-1])
-        transacciones_pendientes = context.user_data.get("multi_transacciones", [])
-        if 0 <= idx < len(transacciones_pendientes):
-            eliminada = transacciones_pendientes.pop(idx)
-            context.user_data["multi_transacciones"] = transacciones_pendientes
-
+        # === CALLBACKS DE MÚLTIPLES TRANSACCIONES ===
+        elif query.data == "multi_confirm":
+            transacciones_pendientes = context.user_data.get("multi_transacciones", [])
             if not transacciones_pendientes:
                 await context.bot.send_message(
                     chat_id=query.message.chat_id,
-                    text="❌ No quedan transacciones. Proceso cancelado.",
-                    reply_markup=botones,
+                    text="⚠️ No hay transacciones pendientes para guardar.",
+                )
+                return
+            resultado = knowledge._guardar_multi_transacciones(transacciones_pendientes, usuario)
+            context.user_data.pop("multi_transacciones", None)
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=resultado,
+                parse_mode="Markdown",
+                reply_markup=botones,
+            )
+
+        elif query.data == "multi_cancel":
+            context.user_data.pop("multi_transacciones", None)
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="❌ Transacciones canceladas. No se guardó nada.",
+                reply_markup=botones,
+            )
+
+        elif query.data.startswith("multi_remove_"):
+            idx = int(query.data.split("_")[-1])
+            transacciones_pendientes = context.user_data.get("multi_transacciones", [])
+            if 0 <= idx < len(transacciones_pendientes):
+                eliminada = transacciones_pendientes.pop(idx)
+                context.user_data["multi_transacciones"] = transacciones_pendientes
+
+                if not transacciones_pendientes:
+                    await context.bot.send_message(
+                        chat_id=query.message.chat_id,
+                        text="❌ No quedan transacciones. Proceso cancelado.",
+                        reply_markup=botones,
+                    )
+                    return
+
+                preview = knowledge._formatear_preview_transacciones(transacciones_pendientes)
+                botones_multi = _crear_botones_multi_transacciones(len(transacciones_pendientes))
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=f"🗑️ Eliminada: ${eliminada['cantidad']:.2f} - {eliminada.get('descripcion', '')}\n\n{preview}",
+                    parse_mode="Markdown",
+                    reply_markup=botones_multi,
+                )
+
+        elif query.data.startswith("multi_edit_"):
+            idx = int(query.data.split("_")[-1])
+            transacciones_pendientes = context.user_data.get("multi_transacciones", [])
+            if 0 <= idx < len(transacciones_pendientes):
+                t = transacciones_pendientes[idx]
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=(
+                        f"✏️ **Editando transacción {idx+1}:**\n"
+                        f"{'📈' if t['tipo'] == 'ingreso' else '📉'} ${t['cantidad']:.2f} - {t.get('descripcion', '')}\n\n"
+                        f"Envíame la transacción corregida, por ejemplo:\n"
+                        f"• `$50 en comida`\n"
+                        f"• `Recibí $200 de salario`\n\n"
+                        f"La reemplazaré en la lista."
+                    ),
+                    parse_mode="Markdown",
+                )
+                context.user_data["editando_multi_idx"] = idx
+
+        # === CALLBACKS DE ANUNCIO ===
+        elif query.data == "anuncio_enviar":
+            # Verificar que sea el admin
+            if user.id != ADMIN_USER_ID:
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="🚫 No tenés permiso para realizar esta acción.",
                 )
                 return
 
-            # Regenerar preview
-            preview = knowledge._formatear_preview_transacciones(transacciones_pendientes)
-            botones_multi = _crear_botones_multi_transacciones(len(transacciones_pendientes))
+            mensaje_anuncio = context.user_data.pop("anuncio_pendiente", None)
+            if not mensaje_anuncio:
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="⚠️ No hay anuncio pendiente para enviar.",
+                )
+                return
+
+            # Enviar a todos los usuarios
+            usuarios = database.obtener_todos_los_usuarios()
+            enviados = 0
+            fallidos = 0
+            for u in usuarios:
+                try:
+                    await context.bot.send_message(
+                        chat_id=u["telegram_user_id"],
+                        text=f"📢 **Anuncio:**\n\n{mensaje_anuncio}",
+                        parse_mode="Markdown",
+                    )
+                    enviados += 1
+                except Exception as e:
+                    logger.warning("No se pudo enviar anuncio a %s: %s", u.get("nombre", "?"), e)
+                    fallidos += 1
+
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text=f"🗑️ Eliminada: ${eliminada['cantidad']:.2f} - {eliminada.get('descripcion', '')}\n\n{preview}",
+                text=f"✅ Anuncio enviado a **{enviados}** usuarios." + (f"\n⚠️ {fallidos} no pudieron recibirllo." if fallidos else ""),
                 parse_mode="Markdown",
-                reply_markup=botones_multi,
             )
 
-    elif query.data.startswith("multi_edit_"):
-        idx = int(query.data.split("_")[-1])
-        transacciones_pendientes = context.user_data.get("multi_transacciones", [])
-        if 0 <= idx < len(transacciones_pendientes):
-            t = transacciones_pendientes[idx]
+        elif query.data == "anuncio_cancelar":
+            context.user_data.pop("anuncio_pendiente", None)
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text=(
-                    f"✏️ **Editando transacción {idx+1}:**\n"
-                    f"{'📈' if t['tipo'] == 'ingreso' else '📉'} ${t['cantidad']:.2f} - {t.get('descripcion', '')}\n\n"
-                    f"Envíame la transacción corregida, por ejemplo:\n"
-                    f"• `$50 en comida`\n"
-                    f"• `Recibí $200 de salario`\n\n"
-                    f"La reemplazaré en la lista."
-                ),
-                parse_mode="Markdown",
+                text="❌ Anuncio cancelado.",
             )
-            context.user_data["editando_multi_idx"] = idx
+
+    except Exception as e:
+        logger.error("Error en callback query: %s", e)
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="⚠️ Ocurrió un error al procesar tu solicitud. Intentá de nuevo.",
+            reply_markup=_crear_botones_rapidos(),
+        )
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja el comando /start."""
-    user = update.effective_user
-    nombre = user.first_name if user.first_name else "amigo"
+    try:
+        user = update.effective_user
+        nombre = user.first_name if user.first_name else "amigo"
 
-    context.user_data["telegram_user_id"] = user.id
-    usuario = database.obtener_o_crear_usuario(user.id, nombre)
-    context.user_data["usuario_id"] = usuario["id"]
+        context.user_data["telegram_user_id"] = user.id
+        usuario = database.obtener_o_crear_usuario(user.id, nombre)
+        context.user_data["usuario_id"] = usuario["id"]
 
-    estadisticas = database.contar_transacciones(usuario["id"])
+        estadisticas = database.contar_transacciones(usuario["id"])
 
-    mensaje = (
-        f"¡Hola {nombre}! 👋 Soy **FinanzasBot**, tu asistente financiero personal.\n\n"
-        f"📊 Tengo **{estadisticas.get('total', 0)} transacciones** registradas:\n"
-        f"  💸 Gastos: {estadisticas.get('gastos', 0)}\n"
-        f"  💰 Ingresos: {estadisticas.get('ingresos', 0)}\n\n"
-        f"🏦 *Qué puedo ayudarte hoy:*\n"
-        f"• Registrar un gasto o ingreso (ej: \"Gasté $50 en comida para el desayuno\")\n"
-        f"• Configurar presupuestos por categoría\n"
-        f"• Hacer un seguimiento de metas de ahorro e inversión\n"
-        f"• Consultar tu balance y transacciones recientes\n"
-        f"• Ver tus categorías financieras\n"
-    )
+        mensaje = (
+            f"¡Hola {nombre}! 👋 Soy **FinanzasBot**, tu asistente financiero personal.\n\n"
+            f"📊 Tengo **{estadisticas.get('total', 0)} transacciones** registradas:\n"
+            f"  💸 Gastos: {estadisticas.get('gastos', 0)}\n"
+            f"  💰 Ingresos: {estadisticas.get('ingresos', 0)}\n\n"
+            f"🏦 *Qué puedo ayudarte hoy:*\n"
+            f"• Registrar un gasto o ingreso (ej: \"Gasté $50 en comida para el desayuno\")\n"
+            f"• Configurar presupuestos por categoría\n"
+            f"• Hacer un seguimiento de metas de ahorro e inversión\n"
+            f"• Consultar tu balance y transacciones recientes\n"
+            f"• Ver tus categorías financieras\n"
+        )
 
-    botones = _crear_botones_rapidos()
-    await update.message.reply_text(mensaje, parse_mode="Markdown", reply_markup=botones)
+        botones = _crear_botones_rapidos()
+        await update.message.reply_text(mensaje, parse_mode="Markdown", reply_markup=botones)
+    except Exception as e:
+        logger.error("Error en /start: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error. Intentá de nuevo con /start.")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -470,6 +555,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     usuario_id = context.user_data["usuario_id"]
     usuario = database.obtener_usuario(user.id) or {"id": usuario_id, "nombre": user.first_name}
+
+    # --- Notificación de actualización ---
+    try:
+        ultima_vista = database.obtener_ultima_version_vista(usuario_id)
+        if ultima_vista != changelog.VERSION_ACTUAL:
+            mensaje_update = _formatear_notificacion(ultima_vista)
+            if mensaje_update:
+                await update.message.reply_text(mensaje_update, parse_mode="Markdown")
+            database.registrar_notificacion(usuario_id, changelog.VERSION_ACTUAL)
+    except Exception as e:
+        logger.error("Error verificando notificación: %s", e)
+    # --- Fin notificación ---
 
     # Verificar si el usuario está editando una transacción multi
     if "editando_multi_idx" in context.user_data:
@@ -516,9 +613,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     # Flujo normal: una sola transacción o consulta
-    respuesta = await ai_client.AIResponder().responder(mensaje, usuario)
-    botones = _crear_botones_rapidos()
-    await update.message.reply_text(respuesta, parse_mode="Markdown", reply_markup=botones)
+    try:
+        respuesta = await ai_client.AIResponder().responder(mensaje, usuario)
+        botones = _crear_botones_rapidos()
+        await update.message.reply_text(respuesta, parse_mode="Markdown", reply_markup=botones)
+    except Exception as e:
+        logger.error("Error procesando mensaje de %s: %s", user.first_name, e)
+        botones = _crear_botones_rapidos()
+        await update.message.reply_text(
+            "⚠️ Ups, algo salió mal al procesar tu mensaje.\n\n"
+            "Intentá con estos comandos:\n"
+            "• `Gasté $50 en comida`\n"
+            "• `¿Cuánto tengo?`\n"
+            "• `¿Qué gasté hoy?`\n\n"
+            "Si el problema persiste, escribí `/help`.",
+            parse_mode="Markdown",
+            reply_markup=botones,
+        )
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -532,70 +643,131 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def consultar_usuario(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja el comando /user."""
-    user = update.effective_user
-    usuario_id = context.user_data.get("usuario_id")
-    if not usuario_id:
-        context.user_data["telegram_user_id"] = user.id
-        context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, user.first_name)["id"]
-        usuario_id = context.user_data["usuario_id"]
+    try:
+        user = update.effective_user
+        usuario_id = context.user_data.get("usuario_id")
+        if not usuario_id:
+            context.user_data["telegram_user_id"] = user.id
+            context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, user.first_name)["id"]
+            usuario_id = context.user_data["usuario_id"]
 
-    balance = database.obtener_balance(usuario_id)
-    transacciones = database.obtener_transacciones(usuario_id, 5)
-    categorias = database.obtener_categorias(usuario_id)
+        balance = database.obtener_balance(usuario_id)
+        transacciones = database.obtener_transacciones(usuario_id, 5)
+        categorias = database.obtener_categorias(usuario_id)
 
-    mensaje = (
-        f"👤 **Usuario:** {user.first_name}\n"
-        f"🆔 **ID:** `{user.id}`\n\n"
-        f"💰 **Balance:**\n"
-        f"  Ingresos: ${balance['ingresos']:.2f}\n"
-        f"  Gastos: ${balance['gastos']:.2f}\n"
-        f"  Neto: ${balance['neto']:.2f}\n\n"
-        f"📁 **Categorías:** {len(categorias)}\n"
-        f"📝 **Transacciones recientes:** {len(transacciones)}"
-    )
-    await update.message.reply_text(mensaje, parse_mode="Markdown")
+        mensaje = (
+            f"👤 **Usuario:** {user.first_name}\n"
+            f"🆔 **ID:** `{user.id}`\n\n"
+            f"💰 **Balance:**\n"
+            f"  Ingresos: ${balance['ingresos']:.2f}\n"
+            f"  Gastos: ${balance['gastos']:.2f}\n"
+            f"  Neto: ${balance['neto']:.2f}\n\n"
+            f"📁 **Categorías:** {len(categorias)}\n"
+            f"📝 **Transacciones recientes:** {len(transacciones)}"
+        )
+        await update.message.reply_text(mensaje, parse_mode="Markdown")
+    except Exception as e:
+        logger.error("Error en /user: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error al obtener tu información.")
 
 
 async def consultar_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja el comando /help."""
-    mensaje = (
-        "🤖 **Comandos disponibles:**\n\n"
-        "• `/start` - Iniciar/Reiniciar el bot\n"
-        "• `/user` - Ver información de usuario\n"
-        "• `/help` - Ver esta ayuda\n"
-        "• `/delete` - Borrar todo el historial de transacciones\n\n"
-        "📝 **Ejemplos de lenguaje natural:**\n"
-        "• 'Gasté $50 en comida para el desayuno'\n"
-        "• 'Recibí $2000 de salario'\n"
-        "• 'Mi presupuesto para comida es $500 este mes'\n"
-        "• 'Quiero ahorrar $5000 para unas vacaciones'\n"
-        "• '¿Cuál es mi balance actual?'\n\n"
-        "✏️ **Modificar datos:**\n"
-        "• 'Cambia el gasto de $50 a ingreso'\n"
-        "• 'Modifica la descripción de mi último gasto'\n"
-        "• 'Cambia el monto de $100 a $150'\n"
-        "• 'Elimina la transacción de $30'\n"
-        "• 'Pasa ese gasto a la categoría transporte'"
-    )
-    await update.message.reply_text(mensaje, parse_mode="Markdown")
+    try:
+        mensaje = (
+            "🤖 **Comandos disponibles:**\n\n"
+            "• `/start` - Iniciar/Reiniciar el bot\n"
+            "• `/user` - Ver información de usuario\n"
+            "• `/help` - Ver esta ayuda\n"
+            "• `/delete` - Borrar todo el historial de transacciones\n\n"
+            "📝 **Ejemplos de lenguaje natural:**\n"
+            "• 'Gasté $50 en comida para el desayuno'\n"
+            "• 'Recibí $2000 de salario'\n"
+            "• 'Mi presupuesto para comida es $500 este mes'\n"
+            "• 'Quiero ahorrar $5000 para unas vacaciones'\n"
+            "• '¿Cuál es mi balance actual?'\n\n"
+            "✏️ **Modificar datos:**\n"
+            "• 'Cambia el gasto de $50 a ingreso'\n"
+            "• 'Modifica la descripción de mi último gasto'\n"
+            "• 'Cambia el monto de $100 a $150'\n"
+            "• 'Elimina la transacción de $30'\n"
+            "• 'Pasa ese gasto a la categoría transporte'"
+        )
+        await update.message.reply_text(mensaje, parse_mode="Markdown")
+    except Exception as e:
+        logger.error("Error en /help: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error al mostrar la ayuda.")
 
 
 async def eliminar_historial(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja el comando /delete para borrar todo el historial."""
-    user = update.effective_user
+    try:
+        user = update.effective_user
 
-    if "usuario_id" not in context.user_data:
-        context.user_data["telegram_user_id"] = user.id
-        context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, user.first_name)["id"]
+        if "usuario_id" not in context.user_data:
+            context.user_data["telegram_user_id"] = user.id
+            context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, user.first_name)["id"]
 
-    usuario_id = context.user_data["usuario_id"]
-    eliminadas = database.eliminar_transacciones(usuario_id)
+        usuario_id = context.user_data["usuario_id"]
+        eliminadas = database.eliminar_transacciones(usuario_id)
 
-    botones = _crear_botones_rapidos()
-    mensaje = f"🗑️ **Historial eliminado.** Se borraron **{eliminadas}** transacciones.\n\nTu balance ahora está en $0.00."
-    await update.message.reply_text(mensaje, parse_mode="Markdown", reply_markup=botones)
+        botones = _crear_botones_rapidos()
+        mensaje = f"🗑️ **Historial eliminado.** Se borraron **{eliminadas}** transacciones.\n\nTu balance ahora está en $0.00."
+        await update.message.reply_text(mensaje, parse_mode="Markdown", reply_markup=botones)
+    except Exception as e:
+        logger.error("Error en /delete: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error al eliminar el historial.")
 
 
 async def _procesar_transaccion_finanzas(fecha, tipo, cantidad, descripcion):
     """Procesa una transacción financiera."""
     return f"✅ Transacción registrada: ${cantidad:.2f} en '{descripcion}'"
+
+
+# ============================================================
+# COMANDO /anuncio - Envío de anuncios a todos los usuarios
+# ============================================================
+
+async def anuncio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja el comando /anuncio para enviar mensajes a todos los usuarios."""
+    try:
+        user = update.effective_user
+
+        # Solo el admin puede usar este comando
+        if user.id != ADMIN_USER_ID:
+            await update.message.reply_text("🚫 No tenés permiso para usar este comando.")
+            return
+
+        # Verificar que haya mensaje
+        if not context.args:
+            await update.message.reply_text(
+                "Uso: `/anuncio Tu mensaje aquí`\n\n"
+                "Ejemplo: `/anuncio Mañana hay mantenimiento de 10 a 10:30`",
+                parse_mode="Markdown",
+            )
+            return
+
+        mensaje_anuncio = " ".join(context.args)
+        total_usuarios = database.contar_usuarios()
+
+        # Guardar en context para el preview
+        context.user_data["anuncio_pendiente"] = mensaje_anuncio
+
+        # Mostrar preview con botones
+        preview = (
+            f"📢 **Vista previa del anuncio:**\n\n"
+            f"{mensaje_anuncio}\n\n"
+            f"👥 Enviado a: **{total_usuarios}** usuarios"
+        )
+
+        botones = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Enviar", callback_data="anuncio_enviar"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="anuncio_cancelar"),
+            ]
+        ])
+
+        await update.message.reply_text(preview, parse_mode="Markdown", reply_markup=botones)
+    except Exception as e:
+        logger.error("Error en /anuncio: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error al procesar el anuncio.")

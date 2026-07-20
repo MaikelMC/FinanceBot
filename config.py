@@ -18,6 +18,9 @@ PROMPTS_DIR = BASE_DIR / "prompts"
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
+# ID de Telegram del admin (dueño del bot). Solo él puede usar /anuncio.
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
+
 # Backend de base de datos: "sqlite" (default) o "gsheets"
 DB_BACKEND = os.getenv("DB_BACKEND", "sqlite").lower()
 
