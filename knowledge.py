@@ -459,7 +459,7 @@ def _esensaje_multi_transaccion(mensaje: str) -> bool:
     if len(montos_dolar) >= 2:
         return True
 
-    # Señal 2: Dos o más números seguidos de palabras de moneda o contexto monetario
+    # Señal 2: Dos o más números seguidos de contexto monetario (con o sin verbos)
     montos_texto = re.findall(
         r'\d+(?:[.,]\d+)?\s*(?:dólares?|dolares?|pesos?|bs?\.?|en\s|de\s|para\s)',
         msg
@@ -467,7 +467,26 @@ def _esensaje_multi_transaccion(mensaje: str) -> bool:
     if len(montos_texto) >= 2:
         return True
 
-    # Señal 3: Números + conectores temporales que indican secuencia de acciones
+    # Señal 3: Dos o más números con palabras de contexto entre ellos
+    # Ej: "50 taxi 100 comida", "comida 50 transporte 100"
+    numeros_con_contexto = re.findall(
+        r'\d+(?:[.,]\d+)?\s*\w+',
+        msg
+    )
+    if len(numeros_con_contexto) >= 2:
+        return True
+
+    # Señal 4: Números separados por conectores
+    # Ej: "50 en taxi. 100 en comida", "50 taxi; 100 comida"
+    tiene_dos_numeros = len(re.findall(r'\d+', msg)) >= 2
+    tiene_separador = any(s in msg for s in [
+        ".", ";", "y", "luego", "después", "despues", "también", "tambien",
+        "además", "ademas", "ah y", "por cierto", "de paso",
+    ])
+    if tiene_dos_numeros and tiene_separador:
+        return True
+
+    # Señal 5: Números + conectores temporales que indican secuencia de acciones
     tiene_conector = any(w in msg for w in [
         "luego", "después", "despues", "y también", "y tambien",
         "además", "ademas", "es todo lo que", "es todo"
@@ -476,7 +495,8 @@ def _esensaje_multi_transaccion(mensaje: str) -> bool:
     tiene_verbo_accion = any(w in msg for w in [
         "gasté", "gaste", "compré", "compre", "pagué", "pague",
         "recibí", "recibi", "cobré", "cobro", "gané", "gane",
-        "ingresé", "ingrese", "costó", "costo", "perdí", "perdi"
+        "ingresé", "ingrese", "costó", "costo", "perdí", "perdi",
+        "me costó", "me costo", "me salió", "me salio", "me cobró", "me cobro",
     ])
     if tiene_conector and tiene_numero and tiene_verbo_accion:
         return True
@@ -487,18 +507,41 @@ def _esensaje_multi_transaccion(mensaje: str) -> bool:
 def _split_transacciones(mensaje: str) -> List[str]:
     """
     Divide un mensaje en fragmentos, cada uno conteniendo una transacción.
-    Maneja conectores naturales: 'y', 'luego', 'después', comas, etc.
+    Maneja conectores naturales: 'y', 'luego', 'después', comas, puntos, etc.
     """
     # Paso 1: Normalizar separadores fuertes a marcador
     msg = mensaje
     for sep in [r'\bluego\b', r'\bdespués\b', r'\bdespues\b', r'\bes\s+todo\b',
-                r'\by\s+también\b', r'\by\s+tambien\b', r'\bademás\b', r'\bademas\b']:
+                r'\by\s+también\b', r'\by\s+tambien\b', r'\bademás\b', r'\bademas\b',
+                r'\bpor\s+cierto\b', r'\bde\s+paso\b', r'\bpor\s+último\b', r'\bpor\s+ultimo\b',
+                r'\by\s+otra\s+cosa\b', r'\by\s+una\s+cosa\s+más\b', r'\by\s+una\s+cosa\s+mas\b',
+                r'\bah\s*,?\s*y\b']:
         msg = re.sub(sep, ' ||| ', msg, flags=re.IGNORECASE)
 
     # Paso 2: Separar por marcador fuerte
     fragmentos = [f.strip() for f in re.split(r'\|\|\|', msg) if f.strip()]
 
-    # Paso 3: Para cada fragmento, intentar separar por comas si hay acción múltiple
+    # Paso 3: Separar por puntuación fuerte (punto, punto y coma, dos puntos)
+    fragmentos_puntuacion = []
+    for frag in fragmentos:
+        partes = re.split(r'[.;:]\s*', frag)
+        if len(partes) >= 2 and sum(1 for p in partes if re.search(r'\d+', p)) >= 2:
+            fragmentos_puntuacion.extend([p.strip() for p in partes if p.strip()])
+        else:
+            fragmentos_puntuacion.append(frag)
+    fragmentos = fragmentos_puntuacion
+
+    # Paso 3b: Separar por "también"/"tambien" (sin "y" delante)
+    fragmentos_tambien = []
+    for frag in fragmentos:
+        partes = re.split(r'\s*también\s+|\s*tambien\s*', frag, flags=re.IGNORECASE)
+        if len(partes) >= 2 and sum(1 for p in partes if re.search(r'\d+', p)) >= 2:
+            fragmentos_tambien.extend([p.strip() for p in partes if p.strip()])
+        else:
+            fragmentos_tambien.append(frag)
+    fragmentos = fragmentos_tambien
+
+    # Paso 4: Para cada fragmento, intentar separar por comas si hay acción múltiple
     fragmentos_expandidos = []
     for frag in fragmentos:
         # Proteger comas dentro de números decimales (248,50 → 248{COMA}50)
@@ -511,12 +554,13 @@ def _split_transacciones(mensaje: str) -> List[str]:
         else:
             fragmentos_expandidos.append(frag)
 
-    # Paso 4: Separar por "y" + verbo de acción O "y" + número
+    # Paso 5: Separar por "y" + verbo de acción O "y" + número O "y" + contexto monetario
     verbos_accion = [
         "gasté", "gaste", "compré", "compre", "pagué", "pague", "costó", "costo",
         "recibí", "recibi", "cobré", "cobro", "gané", "gane", "ingresé", "ingrese",
         "perdí", "perdi", "pagamos", "compramos", "gastamos", "cobramos", "ganamos",
         "recibimos", "ingresamos", "salí", "salio", "salimos",
+        "me costó", "me costo", "me salió", "me salio", "me cobró", "me cobro",
     ]
     verbo_pattern = '|'.join(re.escape(v) for v in verbos_accion)
     resultado = []
@@ -536,12 +580,40 @@ def _split_transacciones(mensaje: str) -> List[str]:
         for p in partes_expandidas:
             sub = re.split(r'\s+y\s+(?=\d)', p, flags=re.IGNORECASE)
             partes_finales.extend(sub)
-        resultado.extend([p.strip() for p in partes_finales if p.strip()])
+        # Separar por "y" + palabra de contexto + número (ej: "taxi 50 y uber 30")
+        # Usar lookahead para no consumir la palabra de contexto
+        CONTEXT_WORDS = r'(?:taxi|uber|bus|comida|supermercado|restaurante|farmacia|ropa|luz|agua|internet|alquiler|salario|sueldo|bonus|regalo|venta|compra|pago|transporte|servicio|ocio|salud|educación)'
+        partes_ctx = []
+        for p in partes_finales:
+            sub = re.split(r'\s+y\s+(?=' + CONTEXT_WORDS + r'\s+\d)', p, flags=re.IGNORECASE)
+            partes_ctx.extend(sub)
+        resultado.extend([p.strip() for p in partes_ctx if p.strip()])
 
-    # Paso 5: Filtrar fragmentos sin número
+    # Paso 6: Filtrar fragmentos sin número
     result = [f for f in resultado if re.search(r'\d+', f)]
 
-    return result if result else [mensaje]
+    # Paso 7: Si un fragmento tiene dos números con palabra de contexto entre ellos,
+    # separar por la palabra de contexto (ej: "50 taxi 100 comida" → "50 taxi" + "100 comida")
+    CTX = r'(?:taxi|uber|bus|comida|supermercado|restaurante|farmacia|ropa|luz|agua|internet|alquiler|salario|sueldo|bonus|regalo|venta|compra|pago|transporte|servicio|ocio|salud|educación)'
+    result_final = []
+    for f in result:
+        # Buscar patrón: número + palabra_contexto + número
+        match = re.search(r'(\d+)\s+' + CTX + r'\s+(\d+)', f, flags=re.IGNORECASE)
+        if match:
+            # Encontrar el índice donde empieza la palabra de contexto
+            ctx_match = re.search(r'\s+' + CTX + r'\s+', f, flags=re.IGNORECASE)
+            if ctx_match:
+                idx = ctx_match.start()
+                primera = f[:idx].strip()
+                segunda = f[idx:].strip()
+                if primera and re.search(r'\d+', primera):
+                    result_final.append(primera)
+                if segunda and re.search(r'\d+', segunda):
+                    result_final.append(segunda)
+                continue
+        result_final.append(f)
+
+    return result_final if result_final else [mensaje]
 
 
 def _detectar_cantidad_en_texto(texto: str) -> Optional[float]:
@@ -557,12 +629,15 @@ def _detectar_tipo_en_texto(texto: str) -> Optional[str]:
         "pagué", "pague", "pago", "pagos", "costó", "costo", "pagar",
         "perdí", "perdi", "pérdida", "perdida",
         "invertí", "inverti", "inversión", "inversion",
+        "me costó", "me costo", "me salió", "me salio", "me cobró", "me cobro",
+        "le di", "le pagué", "le pague",
     ]
     ingreso_kw = [
         "recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
         "gané", "gane", "salario", "sueldo", "ingreso", "ingresos",
         "bonus", "bono", "regalo", "ganancia", "dividendos", "intereses",
         "agrega", "agregar", "remuneración", "herencia",
+        "me dieron", "me pagan", "me pagan",
     ]
     if any(re.search(r'\b' + kw + r'\b', t) for kw in gasto_kw):
         return "gasto"
@@ -679,14 +754,22 @@ def _parsear_multi_transaccion(mensaje: str) -> List[Dict[str, Any]]:
 
         tipo = _detectar_tipo_en_texto(frag)
         if not tipo:
-            # Inferir por contexto
+            # Inferir por contexto (ampliado para mensajes naturales)
             frag_lower = frag.lower()
-            if any(w in frag_lower for w in ["en ", "para ", "compr", "gast", "pag"]):
+            # Patrones de gasto: "en", "para", verbos, preposiciones con contexto de gasto
+            patrones_gasto = ["en ", "para ", "compr", "gast", "pag", "cost",
+                             "taxi", "uber", "bus", "comida", "supermercado",
+                             "restaurante", "farmacia", "médico", "ropa",
+                             "luz", "agua", "internet", "teléfono", "alquiler"]
+            if any(w in frag_lower for w in patrones_gasto):
                 tipo = "gasto"
             elif re.search(r'\$\s*\d+.*\bde\s+\w', frag_lower):
-                # "$20 de transporte" → probablemente gasto (gastó en transporte)
                 tipo = "gasto"
-            elif any(w in frag_lower for w in ["de ", "recib", "cobr", "ingres", "gan"]):
+            # Patrones de ingreso: "de", "recib", "cobr", "ingres", "gan", "salario"
+            patrones_ingreso = ["de ", "recib", "cobr", "ingres", "gan",
+                               "salario", "sueldo", "bonus", "regalo",
+                               "dividendos", "intereses", "venta"]
+            if any(w in frag_lower for w in patrones_ingreso):
                 tipo = "ingreso"
             else:
                 tipo = "gasto"  # default
