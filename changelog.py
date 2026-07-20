@@ -10,7 +10,7 @@ CHANGELOG = {
     "2.1": {
         "titulo": "🚀 Nuevas funciones disponibles",
         "mejoras": [
-            "Análisis de gastos por fecha: preguntá qué gastaste esta semana, este mes o un día específico",
+            "Análisis de gastos por fecha: pregunta qué gastaste esta semana, este mes o un día específico",
             "Varias transacciones de una sola vez: \"Gasté $50 en comida y $30 en taxi\"",
             "Interpretación robusta de números: $248.50, 1.500 pesos, todo funciona bien",
             "Categorías más inteligentes: cervezas va a Ocio, inversiones se reconocen como ingresos"

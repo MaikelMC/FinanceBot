@@ -1078,7 +1078,7 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
 
     if accion == "desconocido":
         return (
-            "🤔 No pude entender qué querés modificar.\n\n"
+            "🤔 No pude entender qué quieres modificar.\n\n"
             "Podés hacer cosas como:\n"
             "• 'Cambia el gasto a ingreso'\n"
             "• 'Modifica el monto a $100'\n"
@@ -1091,7 +1091,7 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
     transaccion = _buscar_transaccion(usuario, mod["referencia"])
 
     if not transaccion:
-        return "❌ No encontré la transacción que querés modificar. ¿Podés especificar cuál?"
+        return "❌ No encontré la transacción que quieres modificar. ¿Podés especificar cuál?"
 
     tid = transaccion["id"]
 
@@ -1174,7 +1174,7 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
 
     if tiene_consulta and not tiene_accion:
         return (
-            f"🤔 {nombre}, parece que querés **consultar** algo sobre tus finanzas.\n\n"
+            f"🤔 {nombre}, parece que quieres **consultar** algo sobre tus finanzas.\n\n"
             "¿Qué te gustaría saber?\n"
             "• `¿Cuánto tengo?` — Ver balance general\n"
             "• `¿Qué gasté hoy?` — Transacciones de hoy\n"
@@ -1189,8 +1189,8 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
 
     if tiene_config:
         return (
-            f"⚙️ {nombre}, veo que querés **configurar** algo.\n\n"
-            "¿Qué necesitás?\n"
+            f"⚙️ {nombre}, veo que quieres **configurar** algo.\n\n"
+            "¿Qué necesitas?\n"
             "• `Mi presupuesto para comida es $500 este mes`\n"
             "• `Quiero ahorrar $2000 para vacaciones`\n"
             "• `Crear categoría: Suscripciones`\n"
@@ -1199,8 +1199,8 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
 
     if tiene_mod:
         return (
-            f"✏️ {nombre}, parece que querés **modificar** algo.\n\n"
-            "¿Qué necesitás cambiar?\n"
+            f"✏️ {nombre}, parece que quieres **modificar** algo.\n\n"
+            "¿Qué necesitas cambiar?\n"
             "• `Cambiar el monto de mi último gasto a $75`\n"
             "• `Eliminar mi último gasto`\n"
             "• `Cambiar la categoría de mi último ingreso a bonus`\n"
@@ -1216,7 +1216,7 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
             "• `Recibí $300 de salario` — Registrar un ingreso\n"
             "• `Pagué $20 de transporte` — Registrar un pago\n"
             "• `$100 en supermercado` — Formato corto\n\n"
-            "También podés incluir la fecha:\n"
+            "También puedes incluir la fecha:\n"
             "• `Gasté $50 en comida ayer`\n"
             "• `Recibí $300 el lunes`"
         )
@@ -1242,7 +1242,7 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
 
     # --- RESPUESTA GENÉRICA CON EJEMPLOS ---
     return (
-        f"🤔 {nombre}, no estoy seguro de qué querés hacer con: \"{mensaje}\"\n\n"
+        f"🤔 {nombre}, no estoy seguro de qué quieres hacer con: \"{mensaje}\"\n\n"
         "¿Podés decirme algo como?\n\n"
         "💸 **Registrar:**\n"
         "• `Gasté $50 en comida`\n"
@@ -1258,7 +1258,7 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
         "✏️ **Modificar:**\n"
         "• `Cambiar mi último gasto a $75`\n"
         "• `Eliminar mi último gasto`\n\n"
-        "¿Qué necesitás? 😊"
+        "¿Qué necesitas? 😊"
     )
 
     # --- CAMBIAR TIPO ---
@@ -1383,7 +1383,7 @@ def _procesar_eliminar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> str
     transaccion = _buscar_transaccion(usuario, referencia)
 
     if not transaccion:
-        return "❌ No encontré la transacción que querés eliminar. ¿Podés especificar cuál?"
+        return "❌ No encontré la transacción que quieres eliminar. ¿Podés especificar cuál?"
 
     tid = transaccion["id"]
     confirmado = database.eliminar_transaccion(usuario["id"], tid)
@@ -1589,7 +1589,7 @@ def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> 
     if not transacciones:
         return (
             f"📅 **{etiqueta.capitalize()}:**\n\n"
-            f"No tenés transacciones registradas para {etiqueta}.\n\n"
+            f"No tienes transacciones registradas para {etiqueta}.\n\n"
             "¿Querés registrar algo? Por ejemplo:\n"
             "• `Gasté $50 en comida`\n"
             "• `Recibí $300 de salario`"

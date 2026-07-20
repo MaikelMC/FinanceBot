@@ -259,7 +259,7 @@ Si no puedes determinar una categoría, usa 'null'.
 
         except Exception as e:
             logger.error("Error consultando Mistral: %s", e)
-            return "Disculpá, estoy experimentando problemas técnicos con la IA. Por favor, intenta de nuevo más tarde."
+            return "Disculpa, estoy experimentando problemas técnicos con la IA. Por favor, intenta de nuevo más tarde."
 
     def _procesar_respuesta_mistral(self, respuesta_ia: str, usuario: Dict[str, Any]) -> str:
         """Procesa la respuesta de Mistral AI."""
@@ -388,23 +388,23 @@ Si no puedes determinar una categoría, usa 'null'.
         nombre = usuario.get("nombre", "amigo")
         if tipo_error == "IA":
             return (
-                f"😔 Disculpá {nombre}, el servicio de IA no está disponible ahora mismo.\n\n"
-                "Mientras tanto, podés usar **lenguaje natural** directamente:\n\n"
+                f"😔 Disculpa {nombre}, el servicio de IA no está disponible ahora mismo.\n\n"
+                "Mientras tanto, puedes usar **lenguaje natural** directamente:\n\n"
                 "• 💸 `Gasté $50 en comida` —Registrar gasto\n"
                 "• 💰 `Recibí $300 de salario` — Registrar ingreso\n"
                 "• 📊 `¿Cuánto tengo?` — Ver balance\n"
                 "• 📋 `¿Qué gasté hoy?` — Ver transacciones\n"
                 "• ⚙️ `Mi presupuesto es $500 para comida` — Configurar\n\n"
-                "Intentá de nuevo en unos segundos si querés usar la IA."
+                "Intenta de nuevo en unos segundos si quieres usar la IA."
             )
         else:
             return (
                 f"⚠️ {nombre}, algo salió mal.\n\n"
-                "Intentá con estos comandos:\n"
+                "Intenta con estos comandos:\n"
                 "• `Gasté $50 en comida`\n"
                 "• `¿Cuánto tengo?`\n"
                 "• `¿Qué gasté hoy?`\n\n"
-                "Si el problema persiste, escribí `/help` para ver todos los comandos."
+                "Si el problema persiste, escribe `/help` para ver todos los comandos."
             )
 
     def _generar_respuesta_fallback(self, mensaje: str, usuario: Dict[str, Any]) -> str:

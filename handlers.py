@@ -462,7 +462,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             if user.id != ADMIN_USER_ID:
                 await context.bot.send_message(
                     chat_id=query.message.chat_id,
-                    text="🚫 No tenés permiso para realizar esta acción.",
+                    text="🚫 No tienes permiso para realizar esta acción.",
                 )
                 return
 
@@ -507,7 +507,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error("Error en callback query: %s", e)
         await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text="⚠️ Ocurrió un error al procesar tu solicitud. Intentá de nuevo.",
+            text="⚠️ Ocurrió un error al procesar tu solicitud. Intenta de nuevo.",
             reply_markup=_crear_botones_rapidos(),
         )
 
@@ -541,7 +541,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(mensaje, parse_mode="Markdown", reply_markup=botones)
     except Exception as e:
         logger.error("Error en /start: %s", e)
-        await update.message.reply_text("⚠️ Ocurrió un error. Intentá de nuevo con /start.")
+        await update.message.reply_text("⚠️ Ocurrió un error. Intenta de nuevo con /start.")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -622,11 +622,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         botones = _crear_botones_rapidos()
         await update.message.reply_text(
             "⚠️ Ups, algo salió mal al procesar tu mensaje.\n\n"
-            "Intentá con estos comandos:\n"
+            "Intenta con estos comandos:\n"
             "• `Gasté $50 en comida`\n"
             "• `¿Cuánto tengo?`\n"
             "• `¿Qué gasté hoy?`\n\n"
-            "Si el problema persiste, escribí `/help`.",
+            "Si el problema persiste, escribe `/help`.",
             parse_mode="Markdown",
             reply_markup=botones,
         )
@@ -735,7 +735,7 @@ async def anuncio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Solo el admin puede usar este comando
         if user.id != ADMIN_USER_ID:
-            await update.message.reply_text("🚫 No tenés permiso para usar este comando.")
+            await update.message.reply_text("🚫 No tienes permiso para usar este comando.")
             return
 
         # Verificar que haya mensaje
