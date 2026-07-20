@@ -36,6 +36,7 @@ SHEET_NAMES = {
     "presupuestos": "presupuestos",
     "metas_ahorro": "metas_ahorro",
     "notificaciones": "notificaciones",
+    "monedas": "monedas",
 }
 
 # Columnas de cada hoja (deben coincidir con las claves de los dicts devueltos)
@@ -46,6 +47,7 @@ SHEET_COLUMNS = {
     "presupuestos": ["id", "usuario_id", "categoria_id", "cantidad_planejada", "cantidad_gastada", "periodo", "fecha_inicio", "fecha_fin", "created_at"],
     "metas_ahorro": ["id", "usuario_id", "nombre", "objetivo", "cantidad_actual", "fecha_inicio", "fecha_meta", "created_at"],
     "notificaciones": ["id", "usuario_id", "version", "enviada_en"],
+    "monedas": ["id", "usuario_id", "nombre", "simbolo", "abreviatura", "es_default", "created_at"],
 }
 
 LOCK = threading.Lock()
@@ -571,6 +573,77 @@ class GoogleSheetsDB:
             return False
 
     # ----------------------------------------------------------
+    # MONEDAS
+    # ----------------------------------------------------------
+
+    def crear_moneda(self, usuario_id: int, nombre: str, simbolo: str, abreviatura: str, es_default: bool = False) -> Dict[str, Any]:
+        with LOCK:
+            monedas = self._cache.get("monedas", [])
+            if es_default:
+                for m in monedas:
+                    if int(m.get("usuario_id", 0)) == usuario_id:
+                        m["es_default"] = 0
+
+            mid = self._next_id("monedas")
+            nueva = {
+                "id": mid,
+                "usuario_id": usuario_id,
+                "nombre": nombre,
+                "simbolo": simbolo,
+                "abreviatura": abreviatura.upper(),
+                "es_default": 1 if es_default else 0,
+                "created_at": self._now(),
+            }
+            monedas.append(nueva)
+            self._cache_dirty.add("monedas")
+            self._schedule_flush()
+            logger.info("Moneda creada: %s (%s) para usuario %d", nombre, abreviatura, usuario_id)
+            return dict(nueva)
+
+    def obtener_monedas(self, usuario_id: int) -> List[Dict[str, Any]]:
+        monedas = self._cache.get("monedas", [])
+        resultado = []
+        for m in monedas:
+            if int(m.get("usuario_id", 0)) == usuario_id:
+                d = dict(m)
+                d["es_default"] = bool(int(d.get("es_default", 0)))
+                resultado.append(d)
+        resultado.sort(key=lambda x: (not x.get("es_default", False), x.get("nombre", "")))
+        return resultado
+
+    def eliminar_moneda(self, usuario_id: int, moneda_id: int) -> bool:
+        with LOCK:
+            monedas = self._cache.get("monedas", [])
+            nueva_lista = []
+            eliminada = False
+            for m in monedas:
+                if int(m.get("id", 0)) == moneda_id and int(m.get("usuario_id", 0)) == usuario_id:
+                    eliminada = True
+                else:
+                    nueva_lista.append(m)
+            if eliminada:
+                self._cache["monedas"] = nueva_lista
+                self._cache_dirty.add("monedas")
+                self._schedule_flush()
+            return eliminada
+
+    def establecer_moneda_default(self, usuario_id: int, moneda_id: int) -> bool:
+        with LOCK:
+            monedas = self._cache.get("monedas", [])
+            actualizada = False
+            for m in monedas:
+                if int(m.get("usuario_id", 0)) == usuario_id:
+                    if int(m.get("id", 0)) == moneda_id:
+                        m["es_default"] = 1
+                        actualizada = True
+                    else:
+                        m["es_default"] = 0
+            if actualizada:
+                self._cache_dirty.add("monedas")
+                self._schedule_flush()
+            return actualizada
+
+    # ----------------------------------------------------------
     # NOTIFICACIONES
     # ----------------------------------------------------------
 
@@ -808,3 +881,19 @@ def contar_usuarios() -> int:
 
 def obtener_todos_los_usuarios() -> List[Dict[str, Any]]:
     return _get_db().obtener_todos_los_usuarios()
+
+
+def crear_moneda(usuario_id: int, nombre: str, simbolo: str, abreviatura: str, es_default: bool = False) -> Dict[str, Any]:
+    return _get_db().crear_moneda(usuario_id, nombre, simbolo, abreviatura, es_default)
+
+
+def obtener_monedas(usuario_id: int) -> List[Dict[str, Any]]:
+    return _get_db().obtener_monedas(usuario_id)
+
+
+def eliminar_moneda(usuario_id: int, moneda_id: int) -> bool:
+    return _get_db().eliminar_moneda(usuario_id, moneda_id)
+
+
+def establecer_moneda_default(usuario_id: int, moneda_id: int) -> bool:
+    return _get_db().establecer_moneda_default(usuario_id, moneda_id)

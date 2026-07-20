@@ -101,6 +101,19 @@ def crear_tablas():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS monedas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            nombre TEXT NOT NULL,
+            simbolo TEXT NOT NULL DEFAULT '$',
+            abreviatura TEXT NOT NULL,
+            es_default INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -555,3 +568,80 @@ def obtener_todos_los_usuarios() -> List[Dict[str, Any]]:
     usuarios = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return usuarios
+
+
+# ----------------------------------------------------------
+# MONEDAS
+# ----------------------------------------------------------
+
+def crear_moneda(usuario_id: int, nombre: str, simbolo: str, abreviatura: str, es_default: bool = False) -> Dict[str, Any]:
+    """Crea una nueva moneda para un usuario."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    if es_default:
+        cursor.execute("UPDATE monedas SET es_default = 0 WHERE usuario_id = ?", (usuario_id,))
+
+    cursor.execute(
+        "INSERT INTO monedas (usuario_id, nombre, simbolo, abreviatura, es_default) VALUES (?, ?, ?, ?, ?)",
+        (usuario_id, nombre, simbolo, abreviatura, 1 if es_default else 0)
+    )
+    moneda_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    return {
+        "id": moneda_id,
+        "usuario_id": usuario_id,
+        "nombre": nombre,
+        "simbolo": simbolo,
+        "abreviatura": abreviatura.upper(),
+        "es_default": es_default,
+    }
+
+
+def obtener_monedas(usuario_id: int) -> List[Dict[str, Any]]:
+    """Obtiene todas las monedas de un usuario."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM monedas WHERE usuario_id = ? ORDER BY es_default DESC, nombre",
+        (usuario_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    resultado = []
+    for r in rows:
+        d = dict(r)
+        d["es_default"] = bool(d.get("es_default", 0))
+        resultado.append(d)
+    return resultado
+
+
+def eliminar_moneda(usuario_id: int, moneda_id: int) -> bool:
+    """Elimina una moneda específica. Retorna True si se eliminó."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM monedas WHERE id = ? AND usuario_id = ?",
+        (moneda_id, usuario_id)
+    )
+    eliminada = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return eliminada
+
+
+def establecer_moneda_default(usuario_id: int, moneda_id: int) -> bool:
+    """Marca una moneda como predeterminada. Retorna True si se actualizó."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE monedas SET es_default = 0 WHERE usuario_id = ?", (usuario_id,))
+    cursor.execute(
+        "UPDATE monedas SET es_default = 1 WHERE id = ? AND usuario_id = ?",
+        (moneda_id, usuario_id)
+    )
+    actualizada = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return actualizada
