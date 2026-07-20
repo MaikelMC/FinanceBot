@@ -23,11 +23,21 @@ logger = logging.getLogger(__name__)
 # === PALABRAS CLAVE PARA FINANZAS ===
 
 REGISTRAR_KEYWORDS = [
+    # Verbos de gasto
     "gasté", "gaste", "compré", "compre", "pagué", "pague",
-    "recibí", "recibi", "ingresé", "ingrese", "transferir",
+    "costó", "costo", "invertí", "inverti",
+    # Verbos de ingreso
+    "recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
+    "gané", "gane", "agrega", "agregar",
+    # Nombres de transacción (noun forms — IMPORTANT: "gasto" here ensures
+    # "mi gasto de $50" is detected as registration, not consultation)
+    "gasto", "gastos", "ingreso", "ingresos", "compra", "compras",
+    "pago", "pagos", "inversión", "inversion",
+    # Acciones genéricas
     "registrar", "registra", "agregar", "añadir", "guardar",
-    "compra", "pago", "cost", "salario", "bonifica",
-    "remuner", "pension", "pollo", "alquile", "rent", "hipoteca",
+    # Categorías con monto implícito
+    "salario", "bonifica", "remuner", "pension", "alquiler", "alquile",
+    "renta", "rent", "hipoteca", "servicio", "transporte",
 ]
 
 PRESUPUESTO_KEYWORDS = [
@@ -43,7 +53,8 @@ AHORRO_KEYWORDS = [
 CONSULTAR_KEYWORDS = [
     "consultar", "ver", "balance", "saldo", "resumen", "estado",
     "listar", "mostrar", "mostrarme", "muestra", "muestrame",
-    "dame", "historial",
+    "dame", "historial", "cuánto", "cuanto", "qué", "que",
+    "cuales", "cuáles", "dónde", "donde", "cuántos",
 ]
 
 CATEGORIA_KEYWORDS = [
@@ -155,11 +166,12 @@ def _extraer_numero_y_limpiar(texto: str) -> tuple[float, str]:
 
 def _extraer_fecha(texto: str) -> Optional[str]:
     """Intenta extraer una fecha del texto."""
+    from datetime import timedelta
+    hoy = datetime.now()
     textos_fecha = {
-        "hoy": datetime.now().strftime("%Y-%m-%d"),
-        "ayer": (datetime.now().replace(day=1)).strftime("%Y-%m-%d"),  # Simplificado
-        "este mes": datetime.now().strftime("%Y-%m-%d"),
-        "este mes": datetime.now().strftime("%Y-%m-%d"),
+        "hoy": hoy.strftime("%Y-%m-%d"),
+        "ayer": (hoy - timedelta(days=1)).strftime("%Y-%m-%d"),
+        "anteayer": (hoy - timedelta(days=2)).strftime("%Y-%m-%d"),
     }
 
     for key, fecha in textos_fecha.items():
@@ -177,6 +189,27 @@ def _detectar_intencion(texto: str) -> str:
     es_modificacion = any(kw in texto_lower for kw in MODIFICAR_KEYWORDS)
     es_eliminacion = any(kw in texto_lower for kw in ELIMINAR_KEYWORDS)
 
+    # Pregunta sobre uso del bot ("cómo", "qué puedo", "para qué sirve", etc.)
+    # PRIORIDAD MÁXIMA — detectar ANTES de todo lo demás
+    PATRONES_AYUDA = [
+        r'\bcomo\s+(?:se\s+|lo\s+)?(?:hago|agrego|registro|gasto|ingreso|consulto|ver|veo|activo|configuro|elimino|borro|cambio|modifico|ahorro|presupuest)',
+        r'\bcomo\s+(?:se\s+)?(?:hace|funciona|uso|trabaja|puedo)',
+        r'\bpara\s+qu[eé]\s+(?:sirve|es|sirve\s+el)',
+        r'\bqu[eé]\s+(?:puedo|hago|se|hace|funciona)',
+        r'\bens\w*ame',
+        r'\bexpl[ií]came',
+        r'\bquiero\s+saber\s+como',
+        r'\bc[oó]mo\s+(?:registro|agrego|gasto|consulto|veo|ahorro|activo|configuro|elimino|cambio|pongo|puedo)',
+        r'\bqu[eé]\s+hace\s+el\s+bot',
+        r'\bcomo\s+le\s+hago\s+para',
+        r'\bcomo\s+se\s+(?:hace|usa|trabaja|configura)',
+        r'\bpara\s+qu[eé]\s+es\s+(?:el\s+)?bot',
+        r'\bqu[eé]\s+puedo\s+(?:hacer|hago)',
+        r'\bquiero\s+saber\s+(?:que|hago|como)',
+        r'\bens\w*ame\s+(?:a\s+)?(?:usar|configurar|modificar|eliminar|registrar)',
+    ]
+    es_pregunta_ayuda = any(re.search(p, texto_lower) for p in PATRONES_AYUDA)
+
     # Detectar eliminación de transacción específica
     if es_eliminacion:
         if any(w in texto_lower for w in ["transacción", "transaccion", "gasto", "ingreso", "registro", "movimiento"]):
@@ -188,6 +221,10 @@ def _detectar_intencion(texto: str) -> str:
             return "modificar_transaccion"
         if any(w in texto_lower for w in ["a ingreso", "a gasto", "tipo", "categoría", "categoria", "monto", "cantidad", "descripción", "descripcion", "fecha"]):
             return "modificar_transaccion"
+
+    # Detectar preguntas de uso del bot → respuesta ayuda contextual
+    if es_pregunta_ayuda:
+        return "ayuda_uso"
 
     # Detectar análisis por fecha (prioridad alta)
     FECHA_KEYWORDS = [
@@ -203,7 +240,6 @@ def _detectar_intencion(texto: str) -> str:
     es_fecha = es_fecha or bool(re.search(r'del\s+\d{1,2}\s+al\s+\d{1,2}', texto_lower))
 
     if es_fecha and (es_consulta or es_registro or es_fecha):
-        # Verificar que hay indicio de consulta (no solo "ayer" aislado sin contexto financiero)
         tiene_contexto_financiero = es_consulta or any(w in texto_lower for w in [
             "gasto", "gastos", "ingreso", "ingresos", "transacci", "movimient",
             "cuánto", "cuanto", "qué", "que", "cuales", "cuáles", "dónde", "donde",
@@ -211,8 +247,17 @@ def _detectar_intencion(texto: str) -> str:
             "compr", "cobr", "gananc", "balance", "resumen", "historial",
         ])
         if tiene_contexto_financiero:
+            # Si hay verbo de registro + cantidad, es REGISTRO con fecha, no consulta
+            TIPOS_VERBOS = ["gasté", "gaste", "compré", "compre", "pagué", "pague",
+                           "recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
+                           "gané", "gane", "invertí", "inverti"]
+            tiene_verbo_registro = any(re.search(r'\b' + v + r'\b', texto_lower) for v in TIPOS_VERBOS)
+            tiene_cantidad = bool(re.search(r'\d+(?:[.,]\d+)?', texto_lower))
+            if tiene_verbo_registro and tiene_cantidad:
+                return "registrar_transaccion"
             return "analizar_por_fecha"
 
+    # Detectar consultas ANTES del registro para que "cuánto gasto" sea consulta
     if es_consulta or "como" in texto_lower or "cual" in texto_lower:
         if any(w in texto_lower for w in ["balance", "saldo", "resumen"]):
             return "consultar_balance"
@@ -222,11 +267,17 @@ def _detectar_intencion(texto: str) -> str:
             return "consultar_presupuesto"
         if any(w in texto_lower for w in ["ahorro", "ahorros", "meta de ahorro"]):
             return "consultar_ahorro"
-        if "gasto" in texto_lower or "gastos" in texto_lower:
-            if not es_registro:
+        # "cuánto gasto" / "qué gasté" = consulta, NO registro
+        if any(w in texto_lower for w in ["cuánto", "cuanto", "qué", "que", "cuales", "cuáles"]):
+            if "gasto" in texto_lower or "gastos" in texto_lower or "gasté" in texto_lower or "gaste" in texto_lower:
                 return "consultar_gastos"
-        if "ingreso" in texto_lower or "ingresos" in texto_lower:
-            if not es_registro:
+            if "ingreso" in texto_lower or "ingresos" in texto_lower:
+                return "consultar_ingresos"
+        # "ver gastos" / "mostrar gastos" = consulta
+        if any(w in texto_lower for w in ["ver", "mostrar", "mostrarme", "muestra", "muestrame", "listar", "dame"]):
+            if "gasto" in texto_lower or "gastos" in texto_lower:
+                return "consultar_gastos"
+            if "ingreso" in texto_lower or "ingresos" in texto_lower:
                 return "consultar_ingresos"
         if any(w in texto_lower for w in ["transacci", "historial", "movimient", "operacion", "registro"]):
             return "consultar_transacciones"
@@ -253,20 +304,25 @@ def _parsear_transaccion(texto: str) -> tuple[Optional[str], Optional[float], Op
     """
     texto_lower = texto.lower().strip()
 
-    # Identificar tipo por palabras clave
     tipo = None
 
     # Keywords de gasto (usan word boundaries para evitar falsos positivos como "gestión")
-    GASTO_KEYWORDS = ["gasté", "gaste", "gasto", "compré", "compre", "compra",
-                      "pagué", "pague", "pago", "costó", "costo", "pagar"]
+    GASTO_KEYWORDS = [
+        "gasté", "gaste", "gasto", "gastos", "compré", "compre", "compra", "compras",
+        "pagué", "pague", "pago", "pagos", "costó", "costo", "pagar", "invertí", "inverti",
+        "inversión", "inversion", "invierto",
+    ]
     # Keywords de ingreso
-    INGRESO_KEYWORDS = ["recibí", "recibi", "ingresé", "ingrese", "ingreso",
-                        "salario", "cobré", "cobro", "cobrar", "gané", "gane",
-                        "bonus", "bono", "regalo", "dividendos", "intereses"]
+    INGRESO_KEYWORDS = [
+        "recibí", "recibi", "ingresé", "ingrese", "ingreso", "ingresos",
+        "salario", "sueldo", "cobré", "cobro", "cobrar", "cobrado",
+        "gané", "gane", "bonus", "bono", "bonificación", "bonificacion",
+        "regalo", "dividendos", "intereses", "remuneración", "remuneracion",
+        "herencia", "ventas", "facturé", "facture", "facturado",
+    ]
     # "agrega"/"agregar" es exclusivo de ingreso cuando no hay keyword de gasto explícito
-    AGREGAR_KEYWORDS = ["agrega", "agregar", "añadir", "sumar"]
+    AGREGAR_KEYWORDS = ["agrega", "agregar", "añadir", "sumar", "guardar"]
 
-    # Primero verificar si hay keywords EXPLÍCITOS de gasto
     tiene_gasto_explicito = any(re.search(r'\b' + kw + r'\b', texto_lower) for kw in GASTO_KEYWORDS)
     tiene_ingreso_explicito = any(re.search(r'\b' + kw + r'\b', texto_lower) for kw in INGRESO_KEYWORDS)
     tiene_agregar = any(re.search(r'\b' + kw + r'\b', texto_lower) for kw in AGREGAR_KEYWORDS)
@@ -276,12 +332,24 @@ def _parsear_transaccion(texto: str) -> tuple[Optional[str], Optional[float], Op
     elif tiene_ingreso_explicito:
         tipo = "ingreso"
     elif tiene_agregar:
-        tipo = "ingreso"  # "agrega" por defecto es ingreso
+        tipo = "ingreso"
     else:
-        # Fallback: buscar indicadores de contexto
-        if any(w in texto_lower for w in ["en ", "para ", "de comida", "de transporte"]):
+        # Fallback ampliado: indicadores de contexto
+        GASTO_CONTEXTO = [
+            "en ", "para ", "de ", "por ", "sobre ",
+            "comida", "transporte", "gasolina", "supermercado", "servicio",
+            "alquiler", "renta", "luz", "agua", "internet", "teléfono",
+            "ropa", "zapatos", "médico", "farmacia", "doctor",
+            "Netflix", "Spotify", "Netflix", "uber", "taxi",
+        ]
+        INGRESO_CONTEXTO = [
+            "de salario", "de pago", "de inversión", "de trading",
+            "de dividendos", "de intereses", "de regalo", "de venta",
+            "de alquiler", "de renta", "de comisión",
+        ]
+        if any(w in texto_lower for w in GASTO_CONTEXTO):
             tipo = "gasto"
-        elif any(w in texto_lower for w in ["de salario", "de pago", "de inversión", "de trading"]):
+        elif any(w in texto_lower for w in INGRESO_CONTEXTO):
             tipo = "ingreso"
 
     # Extraer cantidad

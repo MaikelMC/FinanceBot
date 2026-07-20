@@ -115,6 +115,13 @@ class AIResponder:
 
         intent = _detectar_intencion(mensaje)
 
+        if intent == "ayuda_uso":
+            try:
+                from knowledge import _responder_ayuda_uso
+                return _responder_ayuda_uso(mensaje)
+            except Exception as e:
+                logger.error("Error generando ayuda contextual: %s", e)
+
         if intent == "registrar_transaccion":
             categoria_tipo, cantidad, descripcion, fecha = _parsear_transaccion(mensaje)
 

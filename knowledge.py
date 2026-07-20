@@ -545,13 +545,18 @@ def _detectar_cantidad_en_texto(texto: str) -> Optional[float]:
 def _detectar_tipo_en_texto(texto: str) -> Optional[str]:
     """Detecta si un fragmento describe un gasto o ingreso."""
     t = texto.lower()
-    gasto_kw = ["gasté", "gaste", "gasto", "compré", "compre", "compra",
-                "pagué", "pague", "pago", "costó", "costo", "pagar",
-                "perdí", "perdi", "pérdida", "perdida"]
-    ingreso_kw = ["recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
-                  "gané", "gane", "salario", "ingreso", "bonus", "bono",
-                  "regalo", "ganancia", "dividendos", "intereses",
-                  "agrega", "agregar"]
+    gasto_kw = [
+        "gasté", "gaste", "gasto", "gastos", "compré", "compre", "compra", "compras",
+        "pagué", "pague", "pago", "pagos", "costó", "costo", "pagar",
+        "perdí", "perdi", "pérdida", "perdida",
+        "invertí", "inverti", "inversión", "inversion",
+    ]
+    ingreso_kw = [
+        "recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
+        "gané", "gane", "salario", "sueldo", "ingreso", "ingresos",
+        "bonus", "bono", "regalo", "ganancia", "dividendos", "intereses",
+        "agrega", "agregar", "remuneración", "herencia",
+    ]
     if any(re.search(r'\b' + kw + r'\b', t) for kw in gasto_kw):
         return "gasto"
     if any(re.search(r'\b' + kw + r'\b', t) for kw in ingreso_kw):
@@ -1136,6 +1141,195 @@ _MODIFICACION = [
     "cambiar", "modificar", "editar", "actualizar", "corregir", "mover",
     "convertir", "eliminar", "borrar", "quitar", "suprimir",
 ]
+
+
+def _responder_ayuda_uso(mensaje: str) -> str:
+    """Responde con ayuda contextual según lo que el usuario pregunte."""
+    m = mensaje.lower()
+    nombre = "amigo"
+
+    # Detectar INTENCIÓN de la pregunta (cualquier forma)
+    # 1. Registrar gasto
+    if any(w in m for w in ["gasto", "gastar", "gasté", "gaste", "compra", "comprar",
+                            "compré", "compre", "pago", "pagar", "pagué", "pague"]):
+        return "\n".join([
+            "💰 **Cómo registrar un gasto:**",
+            "",
+            "Escribe un mensaje con tu gasto en lenguaje natural:",
+            "",
+            "• `Gasté $50 en comida`",
+            "• `Compré $30 de ropa`",
+            "• `Pagué $100 de luz`",
+            "• `$20 en transporte`",
+            "• `Gasto $75 en supermercado`",
+            "",
+            "El bot detecta automáticamente la categoría y el monto.",
+            "También puedes registrar varios gastos juntos:",
+            "• `$50 en comida y $30 en transporte`",
+        ])
+
+    # 2. Registrar ingreso
+    if any(w in m for w in ["ingreso", "ingresar", "ingresé", "ingrese",
+                            "salario", "cobrar", "cobré", "cobro", "ganar",
+                            "gané", "gane", "agrega", "agregar"]):
+        return "\n".join([
+            "📈 **Cómo registrar un ingreso:**",
+            "",
+            "Escribe un mensaje con tu ingreso:",
+            "",
+            "• `Recibí $2000 de salario`",
+            "• `Ingresé $500 de trading`",
+            "• `Cobré $300 de freelance`",
+            "• `Agrega $100 de dividendos`",
+            "• `Gané $150 de ventas`",
+            "",
+            "El bot lo clasifica como ingreso automáticamente.",
+        ])
+
+    # 3. Ver balance / saldo
+    if any(w in m for w in ["balance", "saldo", "cuánto tengo", "cuanto tengo",
+                            "ver dinero", "mi plata", "mi dinero", "mis finanzas"]):
+        return "\n".join([
+            "💵 **Cómo ver tu balance:**",
+            "",
+            "• `¿Cuánto tengo?` — Balance general",
+            "• `¿Cuál es mi saldo?` — Ver saldo actual",
+            "• `Ver balance` — Resumen de finanzas",
+            "",
+            "Te mostrará tus ingresos totales, gastos totales y saldo neto.",
+        ])
+
+    # 4. Ver transacciones / historial
+    if any(w in m for w in ["transacción", "transaccion", "transacciones", "historial",
+                            "movimiento", "movimientos", "ver mis", "listar",
+                            "mostrar", "qué hice", "que hice", "últimas"]):
+        return "\n".join([
+            "📋 **Cómo ver tu historial:**",
+            "",
+            "• `¿Qué gasté hoy?` — Transacciones de hoy",
+            "• `¿Qué hice ayer?` — Transacciones de ayer",
+            "• `Ver transacciones` — Últimas transacciones",
+            "• `Historial de esta semana` — Resumen semanal",
+            "",
+            "También puedes filtrar por categoría o fecha.",
+        ])
+
+    # 5. Ver gastos por categoría
+    if any(w in m for w in ["categoría", "categoria", "categorías", "categorias",
+                            "qué categoría", "que categoria"]):
+        return "\n".join([
+            "🏷️ **Cómo ver categorías:**",
+            "",
+            "• `¿Cuánto gasté en comida?` — Gastos en comida",
+            "• `¿Cuánto gasté en transporte?` — Gastos en transporte",
+            "• `¿Qué categorías tengo?` — Ver todas las categorías",
+            "",
+            "Las categorías se crean automáticamente al registrar transacciones.",
+        ])
+
+    # 6. Presupuesto
+    if any(w in m for w in ["presupuesto", "budget", "planea", "planifica",
+                            "límite", "limite", "tope"]):
+        return "\n".join([
+            "📊 **Cómo configurar un presupuesto:**",
+            "",
+            "• `Mi presupuesto para comida es $500 este mes`",
+            "• `Presupuesto de transporte $200`",
+            "• `Límite de gasto $1000 por mes`",
+            "",
+            "El bot te avisará cuando estés cerca del límite.",
+        ])
+
+    # 7. Ahorro / metas
+    if any(w in m for w in ["ahorrar", "ahorro", "meta", "objetivo",
+                            "vacaciones", "viaje", "emergencia"]):
+        return "\n".join([
+            "🎯 **Cómo configurar una meta de ahorro:**",
+            "",
+            "• `Quiero ahorrar $5000 para vacaciones`",
+            "• `Meta de ahorro $3000 para emergencias`",
+            "• `Objetivo: ahorrar $10000 este año`",
+            "",
+            "El bot te mostrará cuánto has ahorrado hacia tu meta.",
+        ])
+
+    # 8. Modificar transacción
+    if any(w in m for w in ["modificar", "cambiar", "editar", "corregir",
+                            "actualizar", "cambio"]):
+        return "\n".join([
+            "✏️ **Cómo modificar una transacción:**",
+            "",
+            "• `Cambiar mi último gasto a $75`",
+            "• `Modifica la descripción de mi último gasto`",
+            "• `Cambia el monto de $100 a $150`",
+            "• `Pasa ese gasto a la categoría transporte`",
+            "",
+            "Puedes modificar monto, descripción, categoría o fecha.",
+        ])
+
+    # 9. Eliminar transacción
+    if any(w in m for w in ["eliminar", "borrar", "quitar", "suprimir",
+                            "delet", "remover"]):
+        return "\n".join([
+            "🗑️ **Cómo eliminar transacciones:**",
+            "",
+            "• `Eliminar mi último gasto`",
+            "• `Borrar la transacción de $50`",
+            "• `Quitar el gasto de comida`",
+            "• `/delete` — Borrar todo el historial",
+            "",
+            "⚠️ Cuidado: eliminar todo el historial es irreversible.",
+        ])
+
+    # 10. Comandos generales del bot
+    if any(w in m for w in ["comando", "comandos", "qué puedo", "que puedo",
+                            "funciones", "opciones", "menú", "menu",
+                            "qué hace", "que hace", "para qué sirve",
+                            "cómo funciona", "como funciona"]):
+        return "\n".join([
+            "🤖 **Qué puedo hacer:**",
+            "",
+            "📝 **Registrar:**",
+            "• Gastos: `Gasté $50 en comida`",
+            "• Ingresos: `Recibí $2000 de salario`",
+            "• Varios: `$50 comida y $30 transporte`",
+            "",
+            "📊 **Consultar:**",
+            "• Balance: `¿Cuánto tengo?`",
+            "• Historial: `¿Qué gasté hoy?`",
+            "• Categorías: `¿Cuánto en comida?`",
+            "",
+            "⚙️ **Configurar:**",
+            "• Presupuesto: `Mi presupuesto es $500 para comida`",
+            "• Metas: `Quiero ahorrar $5000 para vacaciones`",
+            "",
+            "✏️ **Modificar/Eliminar:**",
+            "• Cambiar: `Cambiar mi último gasto a $75`",
+            "• Eliminar: `Eliminar mi último gasto`",
+            "",
+            "📋 **Comandos:**",
+            "• `/start` — Iniciar el bot",
+            "• `/help` — Ver ayuda completa",
+            "• `/user` — Tu información",
+            "• `/delete` — Borrar historial",
+        ])
+
+    # 11. Respuesta genérica para preguntas de uso no categorizadas
+    return "\n".join([
+        "🤖 **Cómo puedo ayudarte:**",
+        "",
+        "Pregúntame sobre cualquier funcionalidad:",
+        "",
+        "• ¿Cómo registro un gasto?",
+        "• ¿Cómo veo mi balance?",
+        "• ¿Cómo pongo un presupuesto?",
+        "• ¿Cómo creo una meta de ahorro?",
+        "• ¿Cómo modifico una transacción?",
+        "• ¿Cómo elimino algo?",
+        "• ¿Qué comandos tienes?",
+        "",
+        "O simplemente escribe tu gasto o ingreso directamente.",
+    ])
 
 
 def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> str:
