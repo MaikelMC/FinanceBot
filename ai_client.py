@@ -147,8 +147,13 @@ class AIResponder:
                     elif any(kw in texto_lower for kw in ingreso_kw):
                         return _procesar_ingreso(mensaje, usuario)
                     else:
-                        # Sin tipo detectable, registrar como gasto por defecto
-                        return _procesar_gasto(mensaje, usuario)
+                        # Sin tipo detectable, preguntar al usuario
+                        return (
+                            f"Detecté un monto de **${cantidad:.2f}** en tu mensaje, pero no estoy seguro si es un **gasto** o un **ingreso**.\n\n"
+                            f"¿Podrías confirmarme?\n"
+                            f"• Si es un **gasto**, escribe algo como: `Gasté ${cantidad:.2f} {descripcion}`\n"
+                            f"• Si es un **ingreso**, escribe algo como: `Recibí ${cantidad:.2f} {descripcion}`"
+                        )
             except Exception as e:
                 logger.error("Error procesando con regex nativo: %s", e)
 
