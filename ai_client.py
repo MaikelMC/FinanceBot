@@ -10,6 +10,7 @@ from typing import Dict, Any
 from mistralai.client import Mistral
 
 import config
+import database
 
 logger = logging.getLogger(__name__)
 
@@ -123,19 +124,35 @@ class AIResponder:
                 logger.error("Error generando ayuda contextual: %s", e)
 
         if intent == "registrar_transaccion":
-            categoria_tipo, cantidad, descripcion, fecha = _parsear_transaccion(mensaje)
+            monedas_usuario = database.obtener_monedas(usuario["id"])
+            categoria_tipo, cantidad, descripcion, fecha, moneda_detectada = _parsear_transaccion(mensaje, monedas_usuario)
 
             if not cantidad or cantidad <= 0:
                 return None
 
+            # Si hay moneda detectada en el texto, usarla directamente
+            # Si no, verificar cuántas monedas tiene el usuario
+            if moneda_detectada is None and len(monedas_usuario) > 1:
+                lineas = [
+                    "💱 **Tienes varias monedas configuradas y no especificaste cuál usar.**",
+                    "",
+                    "Por favor, reescribe tu mensaje indicando la moneda al final:",
+                    ""
+                ]
+                for m in monedas_usuario:
+                    default = " ⭐" if m.get("es_default") else ""
+                    lineas.append(f"  {m['simbolo']} {m['nombre']} ({m['abreviatura']}){default}")
+                lineas.append("")
+                lineas.append("Ejemplo: `Gasté $50 en comida USD` o `Gasté $50 en comida en pesos`")
+                return "\n".join(lineas)
+
             try:
                 from knowledge import _procesar_gasto, _procesar_ingreso
                 if categoria_tipo and "gasto" in str(categoria_tipo):
-                    return _procesar_gasto(mensaje, usuario)
+                    return _procesar_gasto(mensaje, usuario, moneda=moneda_detectada)
                 elif categoria_tipo and "ingreso" in str(categoria_tipo):
-                    return _procesar_ingreso(mensaje, usuario)
+                    return _procesar_ingreso(mensaje, usuario, moneda=moneda_detectada)
                 else:
-                    # Fallback: detectar tipo directamente del mensaje
                     texto_lower = mensaje.lower()
                     gasto_kw = ["gasté", "gaste", "compré", "compre", "pagué", "pague",
                                 "costó", "costo", "gasto", "compra", "pago"]
@@ -143,11 +160,10 @@ class AIResponder:
                                   "gané", "gane", "ingreso", "salario", "sueldo", "bonus",
                                   "agrega", "agregar"]
                     if any(kw in texto_lower for kw in gasto_kw):
-                        return _procesar_gasto(mensaje, usuario)
+                        return _procesar_gasto(mensaje, usuario, moneda=moneda_detectada)
                     elif any(kw in texto_lower for kw in ingreso_kw):
-                        return _procesar_ingreso(mensaje, usuario)
+                        return _procesar_ingreso(mensaje, usuario, moneda=moneda_detectada)
                     else:
-                        # Sin tipo detectable, preguntar al usuario
                         return (
                             f"Detecté un monto de **${cantidad:.2f}** en tu mensaje, pero no estoy seguro si es un **gasto** o un **ingreso**.\n\n"
                             f"¿Podrías confirmarme?\n"

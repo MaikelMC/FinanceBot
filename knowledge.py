@@ -12,6 +12,37 @@ import database
 logger = logging.getLogger(__name__)
 
 
+def _detectar_moneda_en_texto(texto: str, monedas_usuario: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Detecta si el texto menciona una moneda configurada por el usuario.
+    Busca por nombre, abreviatura o símbolo.
+    Retorna la moneda encontrada o None.
+    """
+    if not monedas_usuario:
+        return None
+    
+    texto_lower = texto.lower()
+    
+    for moneda in monedas_usuario:
+        nombre = moneda.get("nombre", "").lower()
+        abreviatura = moneda.get("abreviatura", "").lower()
+        simbolo = moneda.get("simbolo", "")
+        
+        # Buscar por nombre (ej: "pesos", "dólares", "euros")
+        if nombre and nombre in texto_lower:
+            return moneda
+        
+        # Buscar por abreviatura (ej: "USD", "ARS", "EUR")
+        if abreviatura and abreviatura in texto_lower:
+            return moneda
+        
+        # Buscar por símbolo (ej: "$", "€", "₿")
+        if simbolo and simbolo in texto:
+            return moneda
+    
+    return None
+
+
 def consultar_ia_finanzas(user_message: str, usuario: Dict[str, Any]) -> str:
     """
     Consulta la IA para interpretar y procesar mensajes financieros.
@@ -87,17 +118,13 @@ def _procesar_intencion_finanzas(intencion: str, mensaje: str, usuario: Dict[str
     return _generar_respuesta_ia_finanzas(mensaje, usuario)
 
 
-def _procesar_gasto(mensaje: str, usuario: Dict[str, Any]) -> str:
+def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None) -> str:
     """Procesa una transacción de gasto."""
-    # Extraer cantidad y categoría del mensaje
     cantidad = None
     categoria = None
-    descripcion = ""
 
-    # Buscar cantidad
     cantidad = _parsear_cantidad(mensaje)
 
-    # Buscar palabra clave de categoría
     categorias_gastos = ["comida", "supermercado", "restaurante", "desayuno", "almuerzo", "cena",
                          "transporte", "gasolina", "servicio", "hogar", "utiles"]
 
@@ -112,9 +139,9 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any]) -> str:
     if not cantidad:
         return "No pude entender la cantidad en tu gasto. ¿Podrías especificar el monto?"
 
-    # Registrar transacción
+    moneda_id = moneda["id"] if moneda else None
+
     try:
-        # Primero obtener el ID de la categoría
         categorias = database.obtener_categorias(usuario["id"], "gastos")
         categoria_id = None
 
@@ -124,29 +151,27 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any]) -> str:
                 break
 
         if not categoria_id:
-            # Crear categoría si no existe
             categoria_info = database.crear_categoria(usuario["id"], categoria, "gastos")
             categoria_id = categoria_info["id"]
 
         database.agregar_transaccion(usuario["id"], categoria_id, "gasto", cantidad,
-                                   mensaje)
+                                   mensaje, moneda_id=moneda_id)
 
-        return f"✅ Gasto registrado: ${cantidad:.2f} en '{categoria}'"
+        simbolo = moneda.get("simbolo", "$") if moneda else "$"
+        nombre_moneda = f" ({moneda['nombre']})" if moneda else ""
+        return f"✅ Gasto registrado: {simbolo}{cantidad:.2f}{nombre_moneda} en '{categoria}'"
     except Exception as e:
         logger.error("Error al procesar gasto: %s", e)
         return f"❌ Ocurrió un error al registrar tu gasto: {cantidad:.2f} en '{categoria}'. Por favor, inténtalo de nuevo."
 
 
-def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any]) -> str:
+def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None) -> str:
     """Procesa una transacción de ingreso."""
     cantidad = None
     categoria = None
-    descripcion = ""
 
-    # Buscar cantidad
     cantidad = _parsear_cantidad(mensaje)
 
-    # Buscar palabra clave de categoría para ingresos
     categorias_ingresos = ["salario", "remuneración", "pago", "bonus", "bonificación", "intereses",
                            "dividendos", "regalo", "herencia", "ventas"]
 
@@ -161,6 +186,8 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any]) -> str:
     if not cantidad:
         return "No pude entender la cantidad en tu ingreso. ¿Podrías especificar el monto?"
 
+    moneda_id = moneda["id"] if moneda else None
+
     try:
         categorias = database.obtener_categorias(usuario["id"], "ingresos")
         categoria_id = None
@@ -171,14 +198,15 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any]) -> str:
                 break
 
         if not categoria_id:
-            # Crear categoría si no existe
             categoria_info = database.crear_categoria(usuario["id"], categoria, "ingresos")
             categoria_id = categoria_info["id"]
 
         database.agregar_transaccion(usuario["id"], categoria_id, "ingreso", cantidad,
-                                   mensaje)
+                                   mensaje, moneda_id=moneda_id)
 
-        return f"✅ Ingreso registrado: ${cantidad:.2f} de '{categoria}'"
+        simbolo = moneda.get("simbolo", "$") if moneda else "$"
+        nombre_moneda = f" ({moneda['nombre']})" if moneda else ""
+        return f"✅ Ingreso registrado: {simbolo}{cantidad:.2f}{nombre_moneda} de '{categoria}'"
     except Exception as e:
         logger.error("Error al procesar ingreso: %s", e)
         return f"❌ Ocurrió un error al registrar tu ingreso: {cantidad:.2f} de '{categoria}'. Por favor, inténtalo de nuevo."
@@ -825,7 +853,6 @@ def _guardar_multi_transacciones(transacciones: List[Dict[str, Any]], usuario: D
 
     for t in transacciones:
         try:
-            # Obtener o crear categoría
             tipo_cat = "ingresos" if t["tipo"] == "ingreso" else "gastos"
             categorias = database.obtener_categorias(usuario["id"], tipo_cat)
             categoria_id = None
@@ -839,9 +866,11 @@ def _guardar_multi_transacciones(transacciones: List[Dict[str, Any]], usuario: D
                 cat_info = database.crear_categoria(usuario["id"], t["categoria"], tipo_cat)
                 categoria_id = cat_info["id"]
 
+            moneda_id = t.get("moneda_id") or t.get("moneda", {}).get("id")
             database.agregar_transaccion(
                 usuario["id"], categoria_id, t["tipo"],
-                t["cantidad"], t["descripcion"]
+                t["cantidad"], t["descripcion"],
+                moneda_id=moneda_id
             )
             guardadas += 1
         except Exception as e:

@@ -359,10 +359,10 @@ def _detectar_intencion(texto: str) -> str:
     return "general"
 
 
-def _parsear_transaccion(texto: str) -> tuple[Optional[str], Optional[float], Optional[str], Optional[str]]:
+def _parsear_transaccion(texto: str, monedas_usuario: Optional[List[Dict[str, Any]]] = None) -> tuple[Optional[str], Optional[float], Optional[str], Optional[str], Optional[Dict[str, Any]]]:
     """
     Parsea un texto de transacción financiera.
-    Retorna (categoria_tipo, cantidad, descripcion, fecha).
+    Retorna (categoria_tipo, cantidad, descripcion, fecha, moneda_detectada).
     """
     texto_lower = texto.lower().strip()
 
@@ -418,6 +418,12 @@ def _parsear_transaccion(texto: str) -> tuple[Optional[str], Optional[float], Op
     from knowledge import _parsear_cantidad
     cantidad = _parsear_cantidad(texto_lower)
 
+    # Detectar moneda en el texto
+    moneda_detectada = None
+    if monedas_usuario:
+        from knowledge import _detectar_moneda_en_texto
+        moneda_detectada = _detectar_moneda_en_texto(texto, monedas_usuario)
+
     # Extraer descripción (texto después del número)
     descripcion = ""
     if cantidad:
@@ -455,7 +461,7 @@ def _parsear_transaccion(texto: str) -> tuple[Optional[str], Optional[float], Op
     # Extraer fecha
     fecha = _extraer_fecha(texto_lower)
 
-    return categoria_tipo, cantidad, descripcion, fecha
+    return categoria_tipo, cantidad, descripcion, fecha, moneda_detectada
 
 
 def _crear_botones_rapidos() -> InlineKeyboardMarkup:
