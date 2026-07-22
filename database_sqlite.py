@@ -243,13 +243,13 @@ def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad:
 
     # Si es un gasto, actualiza la cantidad gastada del presupuesto
     if tipo == 'gasto' and categoria_id:
-        cursor.execute("SELECT cantidad_planejada, cantidad_gastada FROM presupuestos WHERE categoria_id = ? ORDER BY fecha_inicio DESC LIMIT 1", (categoria_id,))
+        cursor.execute("SELECT id, cantidad_planejada, cantidad_gastada FROM presupuestos WHERE categoria_id = ? ORDER BY fecha_inicio DESC LIMIT 1", (categoria_id,))
         presupuesto = cursor.fetchone()
         if presupuesto:
             nueva_cantidad_gastada = presupuesto['cantidad_gastada'] + cantidad
             cursor.execute(
                 "UPDATE presupuestos SET cantidad_gastada = ? WHERE id = ?",
-                (nueva_cantidad_gastada, cursor.lastrowid)
+                (nueva_cantidad_gastada, presupuesto['id'])
             )
 
     conn.commit()
@@ -272,7 +272,7 @@ def obtener_transacciones(usuario_id: int, limite: int = 50, tipo: Optional[str]
     cursor = conn.cursor()
 
     query = """
-        SELECT t.id, t.tipo, t.cantidad, t.descripcion, t.fecha,
+        SELECT t.id, t.tipo, t.cantidad, t.descripcion, t.fecha, t.moneda_id,
                c.nombre as categoria_nombre, c.tipo as categoria_tipo, c.descripcion as categoria_descripcion
         FROM transacciones t
         LEFT JOIN categorias c ON t.categoria_id = c.id
@@ -360,11 +360,6 @@ def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict
         cant = row['total'] or 0.0
         mid = row['moneda_id']
 
-        if row['tipo'] == 'ingreso':
-            ingresos += cant
-        elif row['tipo'] == 'gasto':
-            gastos += cant
-
         # Agrupar por moneda — fallback a default si moneda_id vacio
         if mid and mid in moneda_lookup:
             m = moneda_lookup[mid]
@@ -386,6 +381,17 @@ def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict
             por_moneda[key]["ingresos"] += cant
         elif row['tipo'] == 'gasto':
             por_moneda[key]["gastos"] += cant
+
+    # Flat totals solo desde la moneda default (evita mezclar monedas)
+    if moneda_default:
+        key = moneda_default["abreviatura"]
+        if key in por_moneda:
+            ingresos = por_moneda[key]["ingresos"]
+            gastos = por_moneda[key]["gastos"]
+    elif len(por_moneda) == 1:
+        key = list(por_moneda.keys())[0]
+        ingresos = por_moneda[key]["ingresos"]
+        gastos = por_moneda[key]["gastos"]
 
     return {
         "ingresos": round(ingresos, 2),

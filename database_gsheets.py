@@ -329,6 +329,7 @@ class GoogleSheetsDB:
                 except ValueError:
                     pass
         
+        logger.warning("No se pudo parsear número: '%s' — retornando 0.0", value)
         return 0.0
 
     def _get_numeric_columns(self, sheet_name: str) -> List[str]:
@@ -566,11 +567,6 @@ class GoogleSheetsDB:
             except (TypeError, ValueError):
                 cant = 0.0
 
-            if t.get("tipo") == "ingreso":
-                ingresos += cant
-            elif t.get("tipo") == "gasto":
-                gastos += cant
-
             # Agrupar por moneda — fallback a default si moneda_id vacio
             mid = str(t.get("moneda_id", ""))
             if mid and mid in moneda_lookup:
@@ -594,6 +590,17 @@ class GoogleSheetsDB:
                 por_moneda[key]["ingresos"] += cant
             elif t.get("tipo") == "gasto":
                 por_moneda[key]["gastos"] += cant
+
+        # Flat totals solo desde la moneda default (evita mezclar monedas)
+        if moneda_default:
+            key = moneda_default["abreviatura"]
+            if key in por_moneda:
+                ingresos = por_moneda[key]["ingresos"]
+                gastos = por_moneda[key]["gastos"]
+        elif len(por_moneda) == 1:
+            key = list(por_moneda.keys())[0]
+            ingresos = por_moneda[key]["ingresos"]
+            gastos = por_moneda[key]["gastos"]
 
         return {
             "ingresos": round(ingresos, 2),
