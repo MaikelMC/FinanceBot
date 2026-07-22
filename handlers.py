@@ -304,6 +304,21 @@ def _detectar_intencion(texto: str) -> str:
             return "analizar_por_fecha"
 
     # Detectar consultas ANTES del registro para que "cuánto gasto" sea consulta
+    # PERO: si hay verbo de registro + cantidad, es REGISTRO, no consulta
+    TIPOS_VERBOS_REGISTRO = ["gasté", "gaste", "compré", "compre", "pagué", "pague",
+                             "recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
+                             "gané", "gane", "invertí", "inverti", "costó", "costo"]
+    tiene_verbo_registro = any(re.search(r'\b' + v + r'\b', texto_lower) for v in TIPOS_VERBOS_REGISTRO)
+    tiene_cantidad = bool(re.search(r'\d+(?:[.,]\d+)?', texto_lower))
+    # "ingreso de 248.58 en mi saldo Qvapay" → nombre de transacción + cantidad = registro
+    tiene_nombre_transaccion = any(kw in texto_lower for kw in ["ingreso", "ingresos", "gasto", "gastos",
+                                                                  "compra", "compras", "pago", "pagos"])
+
+    if tiene_verbo_registro and tiene_cantidad:
+        return "registrar_transaccion"
+    if tiene_nombre_transaccion and tiene_cantidad:
+        return "registrar_transaccion"
+
     if es_consulta or "como" in texto_lower or "cual" in texto_lower:
         if any(w in texto_lower for w in ["balance", "saldo", "resumen"]):
             return "consultar_balance"
