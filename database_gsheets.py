@@ -479,6 +479,7 @@ class GoogleSheetsDB:
         trans = self._cache.get("transacciones", [])
         monedas = self.obtener_monedas(usuario_id)
         moneda_lookup = {str(m["id"]): m for m in monedas}
+        moneda_default = next((m for m in monedas if m.get("es_default")), None)
 
         ingresos = 0.0
         gastos = 0.0
@@ -499,11 +500,14 @@ class GoogleSheetsDB:
             elif t.get("tipo") == "gasto":
                 gastos += cant
 
-            # Agrupar por moneda
+            # Agrupar por moneda — fallback a default si moneda_id vacio
             mid = str(t.get("moneda_id", ""))
             if mid and mid in moneda_lookup:
                 m = moneda_lookup[mid]
                 key = m["abreviatura"]
+            elif moneda_default:
+                key = moneda_default["abreviatura"]
+                mid = str(moneda_default["id"])
             else:
                 key = "Sin moneda"
 
@@ -512,6 +516,9 @@ class GoogleSheetsDB:
             if mid in moneda_lookup:
                 por_moneda[key]["simbolo"] = moneda_lookup[mid].get("simbolo", "$")
                 por_moneda[key]["nombre"] = moneda_lookup[mid].get("nombre", key)
+            elif moneda_default:
+                por_moneda[key]["simbolo"] = moneda_default.get("simbolo", "$")
+                por_moneda[key]["nombre"] = moneda_default.get("nombre", key)
             if t.get("tipo") == "ingreso":
                 por_moneda[key]["ingresos"] += cant
             elif t.get("tipo") == "gasto":

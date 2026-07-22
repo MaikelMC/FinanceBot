@@ -348,6 +348,7 @@ def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict
     # Obtener monedas del usuario
     monedas = obtener_monedas(usuario_id)
     moneda_lookup = {m["id"]: m for m in monedas}
+    moneda_default = next((m for m in monedas if m.get("es_default")), None)
 
     conn.close()
 
@@ -364,12 +365,16 @@ def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict
         elif row['tipo'] == 'gasto':
             gastos += cant
 
-        # Agrupar por moneda
+        # Agrupar por moneda — fallback a default si moneda_id vacio
         if mid and mid in moneda_lookup:
             m = moneda_lookup[mid]
             key = m["abreviatura"]
             simbolo = m.get("simbolo", "$")
             nombre = m.get("nombre", key)
+        elif moneda_default:
+            key = moneda_default["abreviatura"]
+            simbolo = moneda_default.get("simbolo", "$")
+            nombre = moneda_default.get("nombre", key)
         else:
             key = "Sin moneda"
             simbolo = "$"
