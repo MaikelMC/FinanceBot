@@ -185,30 +185,15 @@ class GoogleSheetsDB:
                 row = {col: r.get(col, "") for col in SHEET_COLUMNS[name]}
                 # Castear campos numéricos para evitar strings en la caché
                 if "cantidad" in row:
-                    try:
-                        row["cantidad"] = float(row["cantidad"]) if row["cantidad"] != "" else 0.0
-                    except (TypeError, ValueError):
-                        row["cantidad"] = 0.0
+                    row["cantidad"] = self._parse_number_locale_aware(row["cantidad"])
                 if "cantidad_planejada" in row:
-                    try:
-                        row["cantidad_planejada"] = float(row["cantidad_planejada"]) if row["cantidad_planejada"] != "" else 0.0
-                    except (TypeError, ValueError):
-                        row["cantidad_planejada"] = 0.0
+                    row["cantidad_planejada"] = self._parse_number_locale_aware(row["cantidad_planejada"])
                 if "cantidad_gastada" in row:
-                    try:
-                        row["cantidad_gastada"] = float(row["cantidad_gastada"]) if row["cantidad_gastada"] != "" else 0.0
-                    except (TypeError, ValueError):
-                        row["cantidad_gastada"] = 0.0
+                    row["cantidad_gastada"] = self._parse_number_locale_aware(row["cantidad_gastada"])
                 if "cantidad_actual" in row:
-                    try:
-                        row["cantidad_actual"] = float(row["cantidad_actual"]) if row["cantidad_actual"] != "" else 0.0
-                    except (TypeError, ValueError):
-                        row["cantidad_actual"] = 0.0
+                    row["cantidad_actual"] = self._parse_number_locale_aware(row["cantidad_actual"])
                 if "objetivo" in row:
-                    try:
-                        row["objetivo"] = float(row["objetivo"]) if row["objetivo"] != "" else 0.0
-                    except (TypeError, ValueError):
-                        row["objetivo"] = 0.0
+                    row["objetivo"] = self._parse_number_locale_aware(row["objetivo"])
                 if "moneda_id" in row:
                     try:
                         val = row["moneda_id"]
@@ -230,7 +215,7 @@ class GoogleSheetsDB:
             self._next_ids[name] = 1
 
     def _flush_sheet(self, name: str):
-        """Escribe la caché modificada de vuelta a la hoja."""
+        """Escribe la caché modificada de vuelta a la hoja con formato numérico explícito."""
         if name not in self._cache_dirty:
             return
         try:
@@ -239,6 +224,22 @@ class GoogleSheetsDB:
             df = pd.DataFrame(self._cache[name], columns=cols)
             ws.clear()
             set_with_dataframe(ws, df, include_column_header=True, resize=True)
+
+            # Aplicar formato numérico explícito a columnas monetarias
+            # Esto evita que Google Sheets interprete mal los decimales según locale
+            numeric_cols = self._get_numeric_columns(name)
+            for col_name in numeric_cols:
+                if col_name in cols:
+                    col_idx = cols.index(col_name) + 1  # 1-indexed
+                    col_letter = chr(ord('A') + col_idx - 1) if col_idx <= 26 else None
+                    if col_letter:
+                        ws.format(f"{col_letter}:{col_letter}", {
+                            "numberFormat": {
+                                "type": "NUMBER",
+                                "pattern": "0.00"
+                            }
+                        })
+
             self._cache_dirty.discard(name)
         except Exception as e:
             logger.error("Error escribiendo hoja '%s': %s", name, e)
@@ -256,6 +257,12 @@ class GoogleSheetsDB:
         for name in list(self._cache_dirty):
             self._flush_sheet(name)
 
+    def _next_id(self, sheet: str) -> int:
+        """Genera el próximo ID secuencial para una hoja."""
+        nid = self._next_ids.get(sheet, 1)
+        self._next_ids[sheet] = nid + 1
+        return nid
+
     def _now(self) -> str:
         """Retorna timestamp actual en formato ISO."""
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -263,11 +270,75 @@ class GoogleSheetsDB:
     def _today(self) -> str:
         return datetime.now().strftime("%Y-%m-%d")
 
-    def _next_id(self, sheet: str) -> int:
-        """Genera el próximo ID secuencial para una hoja."""
-        nid = self._next_ids.get(sheet, 1)
-        self._next_ids[sheet] = nid + 1
-        return nid
+    def _parse_number_locale_aware(self, value) -> float:
+        """
+        Parsea un número manejando ambos separadores decimales (punto y coma).
+        Convención: en locales latinos, coma = decimal, punto = miles.
+        En locales US/UK, punto = decimal, coma = miles.
+        
+        Estrategia:
+        1. Si es int/float directo, retornar como float
+        2. Intentar float() directo (funciona para punto decimal)
+        3. Si falla y tiene coma: detectar si coma es decimal (últimos 1-2 dígitos)
+           y normalizar reemplazando punto por nada y coma por punto
+        4. Caso US con coma de miles: "1,234.56" -> reemplazar coma por nada
+        """
+        if value is None or value == "":
+            return 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        
+        s = str(value).strip()
+        
+        # Caso 1: float directo (punto como decimal: "234.56" o "1,234.56")
+        try:
+            return float(s)
+        except ValueError:
+            pass
+        
+        # Caso 2: formato US con coma de miles ("1,234.56")
+        if ',' in s and '.' in s:
+            # Verificar si es formato US: coma antes que punto, y punto seguido de 1-2 dígitos al final
+            comma_pos = s.find(',')
+            dot_pos = s.rfind('.')
+            if comma_pos < dot_pos and len(s) - dot_pos - 1 <= 2:
+                # Formato US: eliminar comas de miles
+                try:
+                    return float(s.replace(',', ''))
+                except ValueError:
+                    pass
+        
+        # Caso 3: coma como decimal ("234,56" o "1.234,56")
+        if ',' in s:
+            parts = s.rsplit(',', 1)
+            if len(parts) == 2 and len(parts[1]) <= 2 and parts[1].isdigit():
+                # Coma es decimal: eliminar puntos de miles, cambiar coma por punto
+                normalized = parts[0].replace('.', '').replace(',', '') + '.' + parts[1]
+                try:
+                    return float(normalized)
+                except ValueError:
+                    pass
+        
+        # Caso 4: solo puntos como separadores de miles ("1.234" -> 1234)
+        # Solo si no hay coma y todos los grupos tienen 3 dígitos excepto el primero
+        if '.' in s and ',' not in s:
+            parts = s.split('.')
+            if len(parts[-1]) == 3 and all(len(p) == 3 for p in parts[:-1]):
+                try:
+                    return float(s.replace('.', ''))
+                except ValueError:
+                    pass
+        
+        return 0.0
+
+    def _get_numeric_columns(self, sheet_name: str) -> List[str]:
+        """Retorna lista de columnas numéricas para una hoja dada."""
+        numeric_map = {
+            "transacciones": ["cantidad"],
+            "presupuestos": ["cantidad_planejada", "cantidad_gastada"],
+            "metas_ahorro": ["objetivo", "cantidad_actual"],
+        }
+        return numeric_map.get(sheet_name, [])
 
     # ----------------------------------------------------------
     # USUARIOS
