@@ -559,7 +559,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             original = transacciones_pendientes[idx]
             tipo_original = original.get("tipo", "gasto")
             # Parsear la nueva transacción
-            nueva = knowledge._parsear_multi_transaccion(mensaje)
+            nueva = knowledge._parsear_multi_transaccion(mensaje, usuario)
             if nueva:
                 # Preservar el tipo de la transacción original
                 nueva[0]["tipo"] = tipo_original
@@ -603,7 +603,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Detectar múltiples transacciones en lenguaje natural
     if knowledge._esensaje_multi_transaccion(mensaje):
-        transacciones = knowledge._parsear_multi_transaccion(mensaje)
+        transacciones = knowledge._parsear_multi_transaccion(mensaje, usuario)
         if len(transacciones) >= 2:
             context.user_data["multi_transacciones"] = transacciones
             preview = knowledge._formatear_preview_transacciones(transacciones)

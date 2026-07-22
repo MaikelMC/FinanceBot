@@ -5,6 +5,7 @@ Maneja la lógica de IA para preguntas en lenguaje natural relacionadas con fina
 
 import logging
 import re
+from collections import defaultdict
 from typing import Dict, Any, Optional, List
 
 import database
@@ -765,12 +766,17 @@ def _extraer_descripcion_limpia(texto: str, cantidad_texto: str = "") -> str:
     return " ".join(palabras).strip() if palabras else ""
 
 
-def _parsear_multi_transaccion(mensaje: str) -> List[Dict[str, Any]]:
+def _parsear_multi_transaccion(mensaje: str, usuario: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """
     Parsea un mensaje que puede contener múltiples transacciones.
-    Retorna una lista de dicts con: {tipo, cantidad, descripcion, categoria}
+    Si recibe el usuario, detecta la moneda de cada fragmento.
+    Retorna una lista de dicts con: {tipo, cantidad, descripcion, categoria, moneda, moneda_id}
     """
     fragmentos = _split_transacciones(mensaje)
+
+    monedas_usuario = None
+    if usuario:
+        monedas_usuario = database.obtener_monedas(usuario["id"])
 
     transacciones = []
     for frag in fragmentos:
@@ -780,9 +786,7 @@ def _parsear_multi_transaccion(mensaje: str) -> List[Dict[str, Any]]:
 
         tipo = _detectar_tipo_en_texto(frag)
         if not tipo:
-            # Inferir por contexto (ampliado para mensajes naturales)
             frag_lower = frag.lower()
-            # Patrones de gasto: "en", "para", verbos, preposiciones con contexto de gasto
             patrones_gasto = ["en ", "para ", "compr", "gast", "pag", "cost",
                              "taxi", "uber", "bus", "comida", "supermercado",
                              "restaurante", "farmacia", "médico", "ropa",
@@ -791,24 +795,34 @@ def _parsear_multi_transaccion(mensaje: str) -> List[Dict[str, Any]]:
                 tipo = "gasto"
             elif re.search(r'\$\s*\d+.*\bde\s+\w', frag_lower):
                 tipo = "gasto"
-            # Patrones de ingreso: "de", "recib", "cobr", "ingres", "gan", "salario"
             patrones_ingreso = ["de ", "recib", "cobr", "ingres", "gan",
                                "salario", "sueldo", "bonus", "regalo",
                                "dividendos", "intereses", "venta"]
             if any(w in frag_lower for w in patrones_ingreso):
                 tipo = "ingreso"
             else:
-                tipo = "gasto"  # default
+                tipo = "gasto"
 
         categoria = _detectar_categoria_en_texto(frag, tipo)
         descripcion = _extraer_descripcion_limpia(frag)
 
-        transacciones.append({
+        moneda = None
+        if monedas_usuario:
+            moneda = _detectar_moneda_en_texto(frag, monedas_usuario)
+            if not moneda and len(monedas_usuario) == 1:
+                moneda = monedas_usuario[0]
+
+        transaccion = {
             "tipo": tipo,
             "cantidad": cantidad,
             "descripcion": descripcion or f"Transacción de ${cantidad:.2f}",
             "categoria": categoria,
-        })
+        }
+        if moneda:
+            transaccion["moneda"] = moneda
+            transaccion["moneda_id"] = moneda["id"]
+
+        transacciones.append(transaccion)
 
     return transacciones
 
@@ -819,27 +833,39 @@ def _formatear_preview_transacciones(transacciones: List[Dict[str, Any]]) -> str
         return "❌ No pude detectar ninguna transacción en tu mensaje."
 
     lineas = ["📋 **Transacciones detectadas:**", "━━━━━━━━━━━━━━━━━"]
-    total_ingresos = 0
-    total_gastos = 0
 
     for i, t in enumerate(transacciones, 1):
         emoji = "📈" if t["tipo"] == "ingreso" else "📉"
         label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
         desc = t.get("descripcion", "Sin descripción")
         cat = t.get("categoria", "otros")
-        lineas.append(f"{emoji} **{i}.** ${t['cantidad']:.2f} - {label}: {desc} ({cat})")
-        if t["tipo"] == "ingreso":
-            total_ingresos += t["cantidad"]
-        else:
-            total_gastos += t["cantidad"]
+        moneda = t.get("moneda", {})
+        simbolo = moneda.get("simbolo", "$") if moneda else "$"
+        abrev = f" ({moneda['abreviatura']})" if moneda else ""
+        lineas.append(f"{emoji} **{i}.** {simbolo}{t['cantidad']:.2f}{abrev} - {label}: {desc} ({cat})")
 
     lineas.append("━━━━━━━━━━━━━━━━━")
-    neto = total_ingresos - total_gastos
-    if total_ingresos > 0:
-        lineas.append(f"📈 Total ingresos: ${total_ingresos:.2f}")
-    if total_gastos > 0:
-        lineas.append(f"📉 Total gastos: ${total_gastos:.2f}")
-    lineas.append(f"💵 Neto: ${neto:.2f}")
+
+    totales_por_moneda = defaultdict(lambda: {"ingresos": 0.0, "gastos": 0.0})
+    for t in transacciones:
+        moneda = t.get("moneda", {})
+        clave = moneda.get("abreviatura", "$") if moneda else "$"
+        simbolo = moneda.get("simbolo", "$") if moneda else "$"
+        if t["tipo"] == "ingreso":
+            totales_por_moneda[clave]["ingresos"] += t["cantidad"]
+        else:
+            totales_por_moneda[clave]["gastos"] += t["cantidad"]
+        totales_por_moneda[clave]["simbolo"] = simbolo
+
+    for abrev, datos in totales_por_moneda.items():
+        sim = datos.get("simbolo", "$")
+        if datos["ingresos"] > 0:
+            lineas.append(f"📈 Total ingresos ({abrev}): {sim}{datos['ingresos']:.2f}")
+        if datos["gastos"] > 0:
+            lineas.append(f"📉 Total gastos ({abrev}): {sim}{datos['gastos']:.2f}")
+        neto = datos["ingresos"] - datos["gastos"]
+        lineas.append(f"💵 Neto ({abrev}): {sim}{neto:.2f}")
+
     lineas.append("")
     lineas.append("¿Quieres guardar estas transacciones?")
 
