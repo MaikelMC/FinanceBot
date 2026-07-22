@@ -128,15 +128,29 @@ class AIResponder:
             if not cantidad or cantidad <= 0:
                 return None
 
-            if categoria_tipo:
-                try:
-                    from knowledge import _procesar_gasto, _procesar_ingreso
-                    if "gasto" in str(categoria_tipo):
+            try:
+                from knowledge import _procesar_gasto, _procesar_ingreso
+                if categoria_tipo and "gasto" in str(categoria_tipo):
+                    return _procesar_gasto(mensaje, usuario)
+                elif categoria_tipo and "ingreso" in str(categoria_tipo):
+                    return _procesar_ingreso(mensaje, usuario)
+                else:
+                    # Fallback: detectar tipo directamente del mensaje
+                    texto_lower = mensaje.lower()
+                    gasto_kw = ["gasté", "gaste", "compré", "compre", "pagué", "pague",
+                                "costó", "costo", "gasto", "compra", "pago"]
+                    ingreso_kw = ["recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
+                                  "gané", "gane", "ingreso", "salario", "sueldo", "bonus",
+                                  "agrega", "agregar"]
+                    if any(kw in texto_lower for kw in gasto_kw):
                         return _procesar_gasto(mensaje, usuario)
-                    else:
+                    elif any(kw in texto_lower for kw in ingreso_kw):
                         return _procesar_ingreso(mensaje, usuario)
-                except Exception as e:
-                    logger.error("Error procesando con regex nativo: %s", e)
+                    else:
+                        # Sin tipo detectable, registrar como gasto por defecto
+                        return _procesar_gasto(mensaje, usuario)
+            except Exception as e:
+                logger.error("Error procesando con regex nativo: %s", e)
 
         elif intent == "modificar_transaccion":
             try:

@@ -109,7 +109,7 @@ def _formatear_notificacion(ultima_vista: Optional[str]) -> Optional[str]:
     """Construye el mensaje de notificación con las versiones no vistas por el usuario."""
     versiones_a_mostrar = []
     for ver, data in changelog.CHANGELOG.items():
-        if ultima_vista is None or ver > ultima_vista:
+        if ultima_vista is None or str(ver) > str(ultima_vista):
             versiones_a_mostrar.append((ver, data))
 
     if not versiones_a_mostrar:
@@ -505,7 +505,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja mensajes de texto en lenguaje natural."""
     user = update.effective_user
-    mensaje = update.message.text
+    # Soportar mensajes normales y mensajes editados
+    msg = update.message or update.edited_message
+    if not msg or not msg.text:
+        return
+    mensaje = msg.text
 
     if "usuario_id" not in context.user_data:
         context.user_data["telegram_user_id"] = user.id
@@ -520,7 +524,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ultima_vista != changelog.VERSION_ACTUAL:
             mensaje_update = _formatear_notificacion(ultima_vista)
             if mensaje_update:
-                await update.message.reply_text(mensaje_update, parse_mode="Markdown")
+                await msg.reply_text(mensaje_update, parse_mode="Markdown")
             database.registrar_notificacion(usuario_id, changelog.VERSION_ACTUAL)
     except Exception as e:
         logger.error("Error verificando notificación: %s", e)
@@ -542,14 +546,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["multi_transacciones"] = transacciones_pendientes
                 preview = knowledge._formatear_preview_transacciones(transacciones_pendientes)
                 botones_multi = _crear_botones_multi_transacciones(len(transacciones_pendientes))
-                await update.message.reply_text(
+                await msg.reply_text(
                     f"✅ Transacción #{idx+1} actualizada.\n\n{preview}",
                     parse_mode="Markdown",
                     reply_markup=botones_multi,
                 )
                 return
             else:
-                await update.message.reply_text(
+                await msg.reply_text(
                     "❌ No pude entender la transacción. Intenta de nuevo con un formato como:\n"
                     "`$50 en comida`\n`Recibí $200 de salario`",
                     parse_mode="Markdown",
@@ -583,7 +587,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["multi_transacciones"] = transacciones
             preview = knowledge._formatear_preview_transacciones(transacciones)
             botones_multi = _crear_botones_multi_transacciones(len(transacciones))
-            await update.message.reply_text(
+            await msg.reply_text(
                 preview,
                 parse_mode="Markdown",
                 reply_markup=botones_multi,
@@ -594,11 +598,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         respuesta = await ai_client.AIResponder().responder(mensaje, usuario)
         botones = _crear_teclado_permanente()
-        await update.message.reply_text(respuesta, parse_mode="Markdown", reply_markup=botones)
+        await msg.reply_text(respuesta, parse_mode="Markdown", reply_markup=botones)
     except Exception as e:
         logger.error("Error procesando mensaje de %s: %s", user.first_name, e)
         botones = _crear_teclado_permanente()
-        await update.message.reply_text(
+        await msg.reply_text(
             "⚠️ Ups, algo salió mal al procesar tu mensaje.\n\n"
             "Intenta con estos comandos:\n"
             "• `Gasté $50 en comida`\n"
