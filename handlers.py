@@ -808,12 +808,6 @@ async def _manejar_boton_teclado(update: Update, context: ContextTypes.DEFAULT_T
                 lineas.append(f"  📉 Gastos: {simbolo}{datos['gastos']:.2f}")
                 lineas.append(f"  💵 Neto: {simbolo}{neto_m:.2f}")
                 lineas.append("")
-            # Totales generales
-            lineas.append("━━━━━━━━━━━━━━━━━")
-            lineas.append(f"📊 **Total general:**")
-            lineas.append(f"  📈 Ingresos: ${balance['ingresos']:.2f}")
-            lineas.append(f"  📉 Gastos: ${balance['gastos']:.2f}")
-            lineas.append(f"  💵 Neto: ${balance['neto']:.2f}")
         else:
             # Sin monedas configuradas, mostrar balance simple
             lineas.append(f"  📈 Ingresos: ${balance['ingresos']:.2f}")
@@ -1040,8 +1034,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     lineas.append(f"  📉 Gastos: {simbolo}{datos['gastos']:.2f}")
                     lineas.append(f"  💵 Neto: {simbolo}{neto_m:.2f}")
                     lineas.append("")
-                lineas.append("━━━━━━━━━━━━━━━━━")
-                lineas.append(f"📊 Total: ${balance['ingresos']:.2f} / ${balance['gastos']:.2f} = ${balance['neto']:.2f}")
             else:
                 lineas.append(f"  📈 Ingresos: ${balance['ingresos']:.2f}")
                 lineas.append(f"  📉 Gastos: ${balance['gastos']:.2f}")

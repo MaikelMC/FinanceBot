@@ -205,10 +205,6 @@ def _procesar_balance(usuario: Dict[str, Any]) -> str:
                 lineas.append(f"  📉 Gastos: {simbolo}{datos['gastos']:.2f}")
                 lineas.append(f"  💵 Neto: {simbolo}{neto_m:.2f}")
                 lineas.append("")
-            lineas.append("━━━━━━━━━━━━━━━━━")
-            lineas.append(f"💵 Total Ingresos: ${balance['ingresos']:.2f}")
-            lineas.append(f"💳 Total Gastos: ${balance['gastos']:.2f}")
-            lineas.append(f"📊 Balance Neto: ${balance['neto']:.2f}")
         else:
             lineas.append(f"💵 Total Ingresos: ${balance['ingresos']:.2f}")
             lineas.append(f"💳 Total Gastos: ${balance['gastos']:.2f}")
