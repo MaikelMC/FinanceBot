@@ -264,6 +264,14 @@ def _detectar_intencion(texto: str) -> str:
     if es_pregunta_ayuda:
         return "ayuda_uso"
 
+    # Detectar configuración de presupuesto/ahorro ANTES de análisis por fecha
+    # (porque "Mi presupuesto para comida es $500 este mes" tiene "este mes" pero es configuración)
+    if es_registro:
+        if any(kw in texto_lower for kw in PRESUPUESTO_KEYWORDS):
+            return "configurar_presupuesto"
+        if any(kw in texto_lower for kw in AHORRO_KEYWORDS):
+            return "configurar_ahorro"
+
     # Detectar análisis por fecha (prioridad alta)
     FECHA_KEYWORDS = [
         "hoy", "ayer", "anteayer", "esta semana", "semana pasada",
@@ -320,6 +328,7 @@ def _detectar_intencion(texto: str) -> str:
         if any(w in texto_lower for w in ["transacci", "historial", "movimient", "operacion", "registro"]):
             return "consultar_transacciones"
 
+    # Fallback: presupuesto/ahorro sin verbo de registro explícito
     if any(kw in texto_lower for kw in PRESUPUESTO_KEYWORDS):
         return "configurar_presupuesto"
 

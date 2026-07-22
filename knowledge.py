@@ -390,7 +390,8 @@ SEPARADORES_MENSAJE = re.compile(
 def _parsear_cantidad(texto: str) -> Optional[float]:
     """
     Parser robusto de cantidades monetarias.
-    Maneja: $248.50, 248,50, 1.248,50, 10 dólares, 50 de, 200 pesos, etc.
+    Convención: punto (.) = decimal SIEMPRE, coma (,) = miles SIEMPRE.
+    Ejemplos: $248.50 → 248.5, 1,500 → 1500, 1,248.50 → 1248.5, 248,50 → 24850 (coma=miles)
     Retorna float o None si no encuentra número.
     """
     # Eliminar espacios que separan miles: "1 248" -> "1248"
@@ -400,34 +401,16 @@ def _parsear_cantidad(texto: str) -> Optional[float]:
     # Eliminar símbolos de moneda
     texto_limpio = re.sub(r'[\$\€\£\¥\¢]', '', texto)
 
-    # Caso 1: coma como decimal (248,50 o 1.248,50)
-    match_coma = re.search(r'(\d{1,3}(?:\.\d{3})*,\d{1,2})\b', texto_limpio)
-    if match_coma:
-        num_str = match_coma.group(1).replace('.', '').replace(',', '.')
+    # Caso 1: Punto como decimal SIEMPRE (248.50, 1,248.50, 1.248.50)
+    match_decimal = re.search(r'(\d{1,3}(?:,\d{3})*\.\d{1,2})\b', texto_limpio)
+    if match_decimal:
+        num_str = match_decimal.group(1).replace(',', '')
         try:
             return float(num_str)
         except ValueError:
             pass
 
-    # Caso 2: punto como decimal (248.50 o 1,248.50)
-    match_punto = re.search(r'(\d{1,3}(?:,\d{3})*\.\d{1,2})\b', texto_limpio)
-    if match_punto:
-        num_str = match_punto.group(1).replace(',', '')
-        try:
-            return float(num_str)
-        except ValueError:
-            pass
-
-    # Caso 3: punto como separador de miles sin decimal (1.500 o 1.248.000)
-    match_miles_punto = re.search(r'(\d{1,3}(?:\.\d{3})+)\b', texto_limpio)
-    if match_miles_punto:
-        num_str = match_miles_punto.group(1).replace('.', '')
-        try:
-            return float(num_str)
-        except ValueError:
-            pass
-
-    # Caso 4: coma como separador de miles sin decimal (1,500 o 1,248,000)
+    # Caso 2: Número con coma como separador de miles, sin decimal (1,500 o 1,248,000)
     match_miles_coma = re.search(r'(\d{1,3}(?:,\d{3})+)\b', texto_limpio)
     if match_miles_coma:
         num_str = match_miles_coma.group(1).replace(',', '')
@@ -436,8 +419,8 @@ def _parsear_cantidad(texto: str) -> Optional[float]:
         except ValueError:
             pass
 
-    # Caso 5: número simple (248, 50, 100)
-    match_simple = re.search(r'(\d+)', texto_limpio)
+    # Caso 3: Número simple (248, 50, 100, 1500)
+    match_simple = re.search(r'(\d+(?:\.\d+)?)', texto_limpio)
     if match_simple:
         try:
             return float(match_simple.group(1))
@@ -521,11 +504,12 @@ def _split_transacciones(mensaje: str) -> List[str]:
     # Paso 2: Separar por marcador fuerte
     fragmentos = [f.strip() for f in re.split(r'\|\|\|', msg) if f.strip()]
 
-    # Paso 3: Separar por puntuación fuerte (punto, punto y coma, dos puntos)
+    # Paso 3: Separar por puntuación fuerte (punto y coma, dos puntos)
+    # NOTA: NO separamos por "." porque el punto es EXCLUSIVAMENTE decimal (234.60)
     fragmentos_puntuacion = []
     for frag in fragmentos:
-        partes = re.split(r'[.;:]\s*', frag)
-        if len(partes) >= 2 and sum(1 for p in partes if re.search(r'\d+', p)) >= 2:
+        partes = re.split(r'[;:]\s*', frag)
+        if len(partes) >= 2 and sum(1 for p in partes if re.search(r'[\d.]+', p)) >= 2:
             fragmentos_puntuacion.extend([p.strip() for p in partes if p.strip()])
         else:
             fragmentos_puntuacion.append(frag)
@@ -535,7 +519,7 @@ def _split_transacciones(mensaje: str) -> List[str]:
     fragmentos_tambien = []
     for frag in fragmentos:
         partes = re.split(r'\s*también\s+|\s*tambien\s*', frag, flags=re.IGNORECASE)
-        if len(partes) >= 2 and sum(1 for p in partes if re.search(r'\d+', p)) >= 2:
+        if len(partes) >= 2 and sum(1 for p in partes if re.search(r'[\d.]+', p)) >= 2:
             fragmentos_tambien.extend([p.strip() for p in partes if p.strip()])
         else:
             fragmentos_tambien.append(frag)
@@ -549,7 +533,7 @@ def _split_transacciones(mensaje: str) -> List[str]:
         partes_coma = re.split(r',\s*', frag_protegido)
         # Restaurar comas protegidas
         partes_coma = [p.replace('{COMA}', ',') for p in partes_coma]
-        if len(partes_coma) >= 2 and sum(1 for p in partes_coma if re.search(r'\d+', p)) >= 2:
+        if len(partes_coma) >= 2 and sum(1 for p in partes_coma if re.search(r'[\d.]+', p)) >= 2:
             fragmentos_expandidos.extend([p.strip() for p in partes_coma if p.strip()])
         else:
             fragmentos_expandidos.append(frag)
@@ -578,27 +562,27 @@ def _split_transacciones(mensaje: str) -> List[str]:
         # También separar por "y" + número (ej: "50 en taxi y 100 en comida")
         partes_finales = []
         for p in partes_expandidas:
-            sub = re.split(r'\s+y\s+(?=\d)', p, flags=re.IGNORECASE)
+            sub = re.split(r'\s+y\s+(?=[\d.])', p, flags=re.IGNORECASE)
             partes_finales.extend(sub)
         # Separar por "y" + palabra de contexto + número (ej: "taxi 50 y uber 30")
         # Usar lookahead para no consumir la palabra de contexto
         CONTEXT_WORDS = r'(?:taxi|uber|bus|comida|supermercado|restaurante|farmacia|ropa|luz|agua|internet|alquiler|salario|sueldo|bonus|regalo|venta|compra|pago|transporte|servicio|ocio|salud|educación)'
         partes_ctx = []
         for p in partes_finales:
-            sub = re.split(r'\s+y\s+(?=' + CONTEXT_WORDS + r'\s+\d)', p, flags=re.IGNORECASE)
+            sub = re.split(r'\s+y\s+(?=' + CONTEXT_WORDS + r'\s+[\d.])', p, flags=re.IGNORECASE)
             partes_ctx.extend(sub)
         resultado.extend([p.strip() for p in partes_ctx if p.strip()])
 
     # Paso 6: Filtrar fragmentos sin número
-    result = [f for f in resultado if re.search(r'\d+', f)]
+    result = [f for f in resultado if re.search(r'[\d.]+', f)]
 
     # Paso 7: Si un fragmento tiene dos números con palabra de contexto entre ellos,
     # separar por la palabra de contexto (ej: "50 taxi 100 comida" → "50 taxi" + "100 comida")
     CTX = r'(?:taxi|uber|bus|comida|supermercado|restaurante|farmacia|ropa|luz|agua|internet|alquiler|salario|sueldo|bonus|regalo|venta|compra|pago|transporte|servicio|ocio|salud|educación)'
     result_final = []
     for f in result:
-        # Buscar patrón: número + palabra_contexto + número
-        match = re.search(r'(\d+)\s+' + CTX + r'\s+(\d+)', f, flags=re.IGNORECASE)
+        # Buscar patrón: número + palabra_contexto + número (preservando decimales)
+        match = re.search(r'([\d.]+)\s+' + CTX + r'\s+([\d.]+)', f, flags=re.IGNORECASE)
         if match:
             # Encontrar el índice donde empieza la palabra de contexto
             ctx_match = re.search(r'\s+' + CTX + r'\s+', f, flags=re.IGNORECASE)
@@ -606,9 +590,9 @@ def _split_transacciones(mensaje: str) -> List[str]:
                 idx = ctx_match.start()
                 primera = f[:idx].strip()
                 segunda = f[idx:].strip()
-                if primera and re.search(r'\d+', primera):
+                if primera and re.search(r'[\d.]+', primera):
                     result_final.append(primera)
-                if segunda and re.search(r'\d+', segunda):
+                if segunda and re.search(r'[\d.]+', segunda):
                     result_final.append(segunda)
                 continue
         result_final.append(f)
