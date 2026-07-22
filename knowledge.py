@@ -185,19 +185,37 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any]) -> str:
 
 
 def _procesar_balance(usuario: Dict[str, Any]) -> str:
-    """Obtiene y muestra el balance del usuario."""
+    """Obtiene y muestra el balance del usuario, agrupado por moneda."""
     try:
         balance = database.obtener_balance(usuario["id"])
+        por_moneda = balance.get("por_moneda", {})
 
         lineas = [
             "💰 **TU BALANCE FINANCIERO ACTUAL**",
             "━━━━━━━━━━━━━━━━━",
-            f"💵 Total Ingresos: ${balance['ingresos']:.2f}",
-            f"💳 Total Gastos: ${balance['gastos']:.2f}",
-            f"📊 Balance Neto: ${balance['neto']:.2f}",
-            "",
-            "¿Necesitas detalles sobre transacciones recientes o quieres configurar un presupuesto?",
         ]
+
+        if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
+            for abrev, datos in por_moneda.items():
+                simbolo = datos.get("simbolo", "$")
+                nombre = datos.get("nombre", abrev)
+                neto_m = datos["ingresos"] - datos["gastos"]
+                lineas.append(f"**{simbolo} {nombre} ({abrev})**")
+                lineas.append(f"  📈 Ingresos: {simbolo}{datos['ingresos']:.2f}")
+                lineas.append(f"  📉 Gastos: {simbolo}{datos['gastos']:.2f}")
+                lineas.append(f"  💵 Neto: {simbolo}{neto_m:.2f}")
+                lineas.append("")
+            lineas.append("━━━━━━━━━━━━━━━━━")
+            lineas.append(f"💵 Total Ingresos: ${balance['ingresos']:.2f}")
+            lineas.append(f"💳 Total Gastos: ${balance['gastos']:.2f}")
+            lineas.append(f"📊 Balance Neto: ${balance['neto']:.2f}")
+        else:
+            lineas.append(f"💵 Total Ingresos: ${balance['ingresos']:.2f}")
+            lineas.append(f"💳 Total Gastos: ${balance['gastos']:.2f}")
+            lineas.append(f"📊 Balance Neto: ${balance['neto']:.2f}")
+
+        lineas.append("")
+        lineas.append("¿Necesitas detalles sobre transacciones recientes o quieres configurar un presupuesto?")
 
         return "\n".join(lineas)
     except Exception as e:

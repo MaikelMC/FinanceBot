@@ -43,7 +43,7 @@ SHEET_NAMES = {
 SHEET_COLUMNS = {
     "usuarios": ["id", "telegram_user_id", "nombre", "created_at", "updated_at"],
     "categorias": ["id", "usuario_id", "nombre", "tipo", "descripcion", "icono_color", "created_at"],
-    "transacciones": ["id", "usuario_id", "categoria_id", "tipo", "cantidad", "descripcion", "fecha", "created_at"],
+    "transacciones": ["id", "usuario_id", "categoria_id", "tipo", "cantidad", "descripcion", "moneda_id", "fecha", "created_at"],
     "presupuestos": ["id", "usuario_id", "categoria_id", "cantidad_planejada", "cantidad_gastada", "periodo", "fecha_inicio", "fecha_fin", "created_at"],
     "metas_ahorro": ["id", "usuario_id", "nombre", "objetivo", "cantidad_actual", "fecha_inicio", "fecha_meta", "created_at"],
     "notificaciones": ["id", "usuario_id", "version", "enviada_en"],
@@ -209,6 +209,12 @@ class GoogleSheetsDB:
                         row["objetivo"] = float(row["objetivo"]) if row["objetivo"] != "" else 0.0
                     except (TypeError, ValueError):
                         row["objetivo"] = 0.0
+                if "moneda_id" in row:
+                    try:
+                        val = row["moneda_id"]
+                        row["moneda_id"] = int(val) if val != "" and val is not None else None
+                    except (TypeError, ValueError):
+                        row["moneda_id"] = None
                 rows.append(row)
             self._cache[name] = rows
 
@@ -335,7 +341,7 @@ class GoogleSheetsDB:
     # TRANSACCIONES
     # ----------------------------------------------------------
 
-    def agregar_transaccion(self, usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "") -> Dict[str, Any]:
+    def agregar_transaccion(self, usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "", moneda_id: Optional[int] = None) -> Dict[str, Any]:
         with LOCK:
             # Validar y normalizar cantidad
             try:
@@ -344,6 +350,14 @@ class GoogleSheetsDB:
                 cantidad = 0.0
             if cantidad <= 0:
                 raise ValueError("La cantidad debe ser mayor a 0")
+
+            # Si no se especifica moneda, usar la default del usuario
+            if moneda_id is None:
+                monedas = self.obtener_monedas(usuario_id)
+                for m in monedas:
+                    if m.get("es_default"):
+                        moneda_id = m["id"]
+                        break
 
             trans = self._cache.get("transacciones", [])
             tid = self._next_id("transacciones")
@@ -355,6 +369,7 @@ class GoogleSheetsDB:
                 "tipo": tipo,
                 "cantidad": cantidad,
                 "descripcion": descripcion,
+                "moneda_id": moneda_id or "",
                 "fecha": now,
                 "created_at": now,
             }
@@ -462,8 +477,12 @@ class GoogleSheetsDB:
 
     def obtener_balance(self, usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:
         trans = self._cache.get("transacciones", [])
+        monedas = self.obtener_monedas(usuario_id)
+        moneda_lookup = {str(m["id"]): m for m in monedas}
+
         ingresos = 0.0
         gastos = 0.0
+        por_moneda: Dict[str, Dict[str, float]] = {}
 
         for t in trans:
             if int(t.get("usuario_id", 0)) != usuario_id:
@@ -474,15 +493,35 @@ class GoogleSheetsDB:
                 cant = float(t.get("cantidad", 0))
             except (TypeError, ValueError):
                 cant = 0.0
+
             if t.get("tipo") == "ingreso":
                 ingresos += cant
             elif t.get("tipo") == "gasto":
                 gastos += cant
 
+            # Agrupar por moneda
+            mid = str(t.get("moneda_id", ""))
+            if mid and mid in moneda_lookup:
+                m = moneda_lookup[mid]
+                key = m["abreviatura"]
+            else:
+                key = "Sin moneda"
+
+            if key not in por_moneda:
+                por_moneda[key] = {"ingresos": 0.0, "gastos": 0.0, "simbolo": "", "nombre": ""}
+            if mid in moneda_lookup:
+                por_moneda[key]["simbolo"] = moneda_lookup[mid].get("simbolo", "$")
+                por_moneda[key]["nombre"] = moneda_lookup[mid].get("nombre", key)
+            if t.get("tipo") == "ingreso":
+                por_moneda[key]["ingresos"] += cant
+            elif t.get("tipo") == "gasto":
+                por_moneda[key]["gastos"] += cant
+
         return {
             "ingresos": round(ingresos, 2),
             "gastos": round(gastos, 2),
             "neto": round(ingresos - gastos, 2),
+            "por_moneda": por_moneda,
         }
 
     def contar_transacciones(self, usuario_id: int) -> Dict[str, Any]:
@@ -726,8 +765,8 @@ def obtener_categorias(usuario_id: int, tipo: Optional[str] = None) -> List[Dict
     return _get_db().obtener_categorias(usuario_id, tipo)
 
 
-def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "") -> Dict[str, Any]:
-    return _get_db().agregar_transaccion(usuario_id, categoria_id, tipo, cantidad, descripcion)
+def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "", moneda_id: Optional[int] = None) -> Dict[str, Any]:
+    return _get_db().agregar_transaccion(usuario_id, categoria_id, tipo, cantidad, descripcion, moneda_id)
 
 
 def obtener_transacciones(usuario_id: int, limite: int = 50, tipo: Optional[str] = None) -> List[Dict[str, Any]]:

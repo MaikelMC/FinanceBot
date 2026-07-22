@@ -651,15 +651,25 @@ async def consultar_usuario(update: Update, context: ContextTypes.DEFAULT_TYPE):
         balance = database.obtener_balance(usuario_id)
         transacciones = database.obtener_transacciones(usuario_id, 5)
         categorias = database.obtener_categorias(usuario_id)
+        monedas = database.obtener_monedas(usuario_id)
+        por_moneda = balance.get("por_moneda", {})
+
+        balance_text = ""
+        if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
+            for abrev, datos in por_moneda.items():
+                simbolo = datos.get("simbolo", "$")
+                nombre = datos.get("nombre", abrev)
+                neto_m = datos["ingresos"] - datos["gastos"]
+                balance_text += f"  {simbolo} {nombre} ({abrev}): +{simbolo}{datos['ingresos']:.2f} / -{simbolo}{datos['gastos']:.2f} = {simbolo}{neto_m:.2f}\n"
+        else:
+            balance_text = f"  Ingresos: ${balance['ingresos']:.2f}\n  Gastos: ${balance['gastos']:.2f}\n  Neto: ${balance['neto']:.2f}\n"
 
         mensaje = (
             f"👤 **Usuario:** {user.first_name}\n"
             f"🆔 **ID:** `{user.id}`\n\n"
-            f"💰 **Balance:**\n"
-            f"  Ingresos: ${balance['ingresos']:.2f}\n"
-            f"  Gastos: ${balance['gastos']:.2f}\n"
-            f"  Neto: ${balance['neto']:.2f}\n\n"
+            f"💰 **Balance:**\n{balance_text}\n"
             f"📁 **Categorías:** {len(categorias)}\n"
+            f"💱 **Monedas:** {len(monedas)}\n"
             f"📝 **Transacciones recientes:** {len(transacciones)}"
         )
         await update.message.reply_text(mensaje, parse_mode="Markdown")
@@ -782,12 +792,35 @@ async def _manejar_boton_teclado(update: Update, context: ContextTypes.DEFAULT_T
 
     if mensaje == BTN_BALANCE:
         balance = database.obtener_balance(usuario_id)
-        texto = (
-            f"💰 **Tu balance actual:**\n\n"
-            f"  📈 Ingresos: ${balance['ingresos']:.2f}\n"
-            f"  📉 Gastos: ${balance['gastos']:.2f}\n"
-            f"  💵 Neto: ${balance['neto']:.2f}"
-        )
+        monedas = database.obtener_monedas(usuario_id)
+        por_moneda = balance.get("por_moneda", {})
+
+        lineas = ["💰 **Tu balance actual:**\n"]
+
+        if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
+            # Mostrar balance por moneda
+            for abrev, datos in por_moneda.items():
+                simbolo = datos.get("simbolo", "$")
+                nombre = datos.get("nombre", abrev)
+                neto_m = datos["ingresos"] - datos["gastos"]
+                lineas.append(f"**{simbolo} {nombre} ({abrev})**")
+                lineas.append(f"  📈 Ingresos: {simbolo}{datos['ingresos']:.2f}")
+                lineas.append(f"  📉 Gastos: {simbolo}{datos['gastos']:.2f}")
+                lineas.append(f"  💵 Neto: {simbolo}{neto_m:.2f}")
+                lineas.append("")
+            # Totales generales
+            lineas.append("━━━━━━━━━━━━━━━━━")
+            lineas.append(f"📊 **Total general:**")
+            lineas.append(f"  📈 Ingresos: ${balance['ingresos']:.2f}")
+            lineas.append(f"  📉 Gastos: ${balance['gastos']:.2f}")
+            lineas.append(f"  💵 Neto: ${balance['neto']:.2f}")
+        else:
+            # Sin monedas configuradas, mostrar balance simple
+            lineas.append(f"  📈 Ingresos: ${balance['ingresos']:.2f}")
+            lineas.append(f"  📉 Gastos: ${balance['gastos']:.2f}")
+            lineas.append(f"  💵 Neto: ${balance['neto']:.2f}")
+
+        texto = "\n".join(lineas)
         await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
 
     elif mensaje == BTN_TRANSACCIONES:
@@ -994,12 +1027,27 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         if query.data == "accion_balance":
             balance = database.obtener_balance(usuario_id)
-            mensaje = (
-                f"💰 **Tu balance actual:**\n\n"
-                f"  📈 Ingresos: ${balance['ingresos']:.2f}\n"
-                f"  📉 Gastos: ${balance['gastos']:.2f}\n"
-                f"  💵 Neto: ${balance['neto']:.2f}"
-            )
+            por_moneda = balance.get("por_moneda", {})
+
+            lineas = ["💰 **Tu balance actual:**\n"]
+            if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
+                for abrev, datos in por_moneda.items():
+                    simbolo = datos.get("simbolo", "$")
+                    nombre = datos.get("nombre", abrev)
+                    neto_m = datos["ingresos"] - datos["gastos"]
+                    lineas.append(f"**{simbolo} {nombre} ({abrev})**")
+                    lineas.append(f"  📈 Ingresos: {simbolo}{datos['ingresos']:.2f}")
+                    lineas.append(f"  📉 Gastos: {simbolo}{datos['gastos']:.2f}")
+                    lineas.append(f"  💵 Neto: {simbolo}{neto_m:.2f}")
+                    lineas.append("")
+                lineas.append("━━━━━━━━━━━━━━━━━")
+                lineas.append(f"📊 Total: ${balance['ingresos']:.2f} / ${balance['gastos']:.2f} = ${balance['neto']:.2f}")
+            else:
+                lineas.append(f"  📈 Ingresos: ${balance['ingresos']:.2f}")
+                lineas.append(f"  📉 Gastos: ${balance['gastos']:.2f}")
+                lineas.append(f"  💵 Neto: ${balance['neto']:.2f}")
+
+            mensaje = "\n".join(lineas)
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=mensaje,

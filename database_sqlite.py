@@ -54,6 +54,7 @@ def crear_tablas():
             tipo TEXT NOT NULL CHECK(tipo IN ('gasto', 'ingreso')),
             cantidad REAL NOT NULL,
             descripcion TEXT,
+            moneda_id INTEGER,
             fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (usuario_id) REFERENCES usuarios (id),
@@ -115,6 +116,17 @@ def crear_tablas():
     """)
 
     conn.commit()
+
+    # Migración: agregar moneda_id si no existe
+    try:
+        cursor.execute("PRAGMA table_info(transacciones)")
+        cols = [row[1] for row in cursor.fetchall()]
+        if "moneda_id" not in cols:
+            cursor.execute("ALTER TABLE transacciones ADD COLUMN moneda_id INTEGER")
+            conn.commit()
+    except Exception:
+        pass
+
     conn.close()
 
 
@@ -195,7 +207,7 @@ def obtener_categorias(usuario_id: int, tipo: Optional[str] = None) -> List[Dict
     return [dict(r) for r in rows]
 
 
-def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "") -> Dict[str, Any]:
+def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "", moneda_id: Optional[int] = None) -> Dict[str, Any]:
     """Agrega una nueva transacción para un usuario."""
     # Validar monto
     try:
@@ -209,15 +221,23 @@ def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad:
     if tipo not in ("gasto", "ingreso"):
         tipo = "gasto"
 
+    # Si no se especifica moneda, usar la default del usuario
+    if moneda_id is None:
+        monedas = obtener_monedas(usuario_id)
+        for m in monedas:
+            if m.get("es_default"):
+                moneda_id = m["id"]
+                break
+
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute(
         """
-        INSERT INTO transacciones (usuario_id, categoria_id, tipo, cantidad, descripcion)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO transacciones (usuario_id, categoria_id, tipo, cantidad, descripcion, moneda_id)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (usuario_id, categoria_id, tipo, cantidad, descripcion)
+        (usuario_id, categoria_id, tipo, cantidad, descripcion, moneda_id)
     )
     transaccion_id = cursor.lastrowid
 
@@ -305,12 +325,12 @@ def obtener_transacciones_por_fecha(usuario_id: int, fecha_inicio: str, fecha_fi
 
 
 def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:
-    """Obtiene el balance financiero de un usuario."""
+    """Obtiene el balance financiero de un usuario, agrupado por moneda."""
     conn = get_connection()
     cursor = conn.cursor()
 
     query = """
-        SELECT tipo, SUM(cantidad) as total
+        SELECT tipo, SUM(cantidad) as total, moneda_id
         FROM transacciones
         WHERE usuario_id = ?
     """
@@ -320,21 +340,54 @@ def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict
         query += " AND fecha >= ?"
         params.append(fecha_inicio)
 
-    query += " GROUP BY tipo"
+    query += " GROUP BY tipo, moneda_id"
 
     cursor.execute(query, params)
     balances = cursor.fetchall()
+
+    # Obtener monedas del usuario
+    monedas = obtener_monedas(usuario_id)
+    moneda_lookup = {m["id"]: m for m in monedas}
+
     conn.close()
 
-    resultado = {"ingresos": 0.0, "gastos": 0.0}
-    for row in balances:
-        if row['tipo'] == 'ingreso':
-            resultado["ingresos"] = row['total']
-        elif row['tipo'] == 'gasto':
-            resultado["gastos"] = row['total']
+    ingresos = 0.0
+    gastos = 0.0
+    por_moneda = {}
 
-    resultado["neto"] = resultado["ingresos"] - resultado["gastos"]
-    return resultado
+    for row in balances:
+        cant = row['total'] or 0.0
+        mid = row['moneda_id']
+
+        if row['tipo'] == 'ingreso':
+            ingresos += cant
+        elif row['tipo'] == 'gasto':
+            gastos += cant
+
+        # Agrupar por moneda
+        if mid and mid in moneda_lookup:
+            m = moneda_lookup[mid]
+            key = m["abreviatura"]
+            simbolo = m.get("simbolo", "$")
+            nombre = m.get("nombre", key)
+        else:
+            key = "Sin moneda"
+            simbolo = "$"
+            nombre = key
+
+        if key not in por_moneda:
+            por_moneda[key] = {"ingresos": 0.0, "gastos": 0.0, "simbolo": simbolo, "nombre": nombre}
+        if row['tipo'] == 'ingreso':
+            por_moneda[key]["ingresos"] += cant
+        elif row['tipo'] == 'gasto':
+            por_moneda[key]["gastos"] += cant
+
+    return {
+        "ingresos": round(ingresos, 2),
+        "gastos": round(gastos, 2),
+        "neto": round(ingresos - gastos, 2),
+        "por_moneda": por_moneda,
+    }
 
 
 def obtener_presupuestos(usuario_id: int) -> List[Dict[str, Any]]:
