@@ -1,393 +1,324 @@
 """
 ai_client.py - Cliente de IA para el bot de finanzas personales
-Implementa conexión con Ollama y Mistral AI para procesamiento avanzado de lenguaje natural.
+Usa intent_parser como pipeline unificado: fast-path regex + IA + ejecuci�n.
 """
 
-import asyncio
 import logging
 from typing import Dict, Any
 
-from mistralai.client import Mistral
-
-import config
 import database
+import intent_parser
+from config import AI_PROVIDER
 
 logger = logging.getLogger(__name__)
 
 
 class AIResponder:
-    """Clase para responder a las consultas de IA del usuario."""
-
-    def __init__(self):
-        self.mistral_client = None
-        self._initialize_clients()
-
-    def _initialize_clients(self):
-        """Inicializa los clientes IA disponibles."""
-        if config.AI_PROVIDER == "mistral" and config.MISTRAL_API_KEY:
-            try:
-                self.mistral_client = Mistral(api_key=config.MISTRAL_API_KEY)
-                logger.info("Cliente Mistral AI inicializado.")
-            except Exception as e:
-                logger.error("Error inicializando cliente Mistral AI: %s", e)
-                self.mistral_client = None
+    """Clase para procesar mensajes usando el pipeline de intenci�n unificado."""
 
     async def responder(self, mensaje: str, usuario: Dict[str, Any]) -> str:
         """
-        Procesa un mensaje del usuario usando IA y retorna una respuesta.
+        Procesa un mensaje del usuario y retorna una respuesta.
+
+        Pipeline:
+        1. intent_parser.analizar_intencion() -> JSON estructurado (fast-path + IA)
+        2. Ejecutar acci�n seg�n la intenci�n detectada
+        3. Retornar respuesta al usuario
 
         Args:
             mensaje: El mensaje del usuario
-            usuario: Información del usuario
+            usuario: Informaci�n del usuario
 
         Returns:
-            Respuesta generada por IA
+            Respuesta en texto para el usuario
         """
-        logger.info("Procesando con IA para %s: %s", usuario["nombre"], mensaje)
-
-        mensaje_lower = mensaje.lower().strip()
-
-        # Palabras clave de modificación y eliminación (prioridad máxima)
-        MOD_KEYWORDS = [
-            "cambiar", "cambia", "modificar", "modifica", "editar", "edita",
-            "actualizar", "actualiza", "corregir", "corrije", "mover", "mueve",
-            "pasar", "pasa", "convertir", "convierte", "cambio", "modificalo",
-        ]
-        DEL_KEYWORDS = [
-            "eliminar", "elimina", "borrar", "borra", "quitar", "quita",
-            "remover", "remueve", "suprimir", "delet",
-        ]
-        MOD_TARGETS = [
-            "transacción", "transaccion", "gasto", "ingreso", "registro",
-            "movimiento", "tipo", "monto", "cantidad", "descripción",
-            "descripcion", "categoría", "categoria", "fecha",
-        ]
-
-        es_modificacion = any(kw in mensaje_lower for kw in MOD_KEYWORDS)
-        es_eliminacion = any(kw in mensaje_lower for kw in DEL_KEYWORDS)
-        tiene_objetivo = any(t in mensaje_lower for t in MOD_TARGETS)
-
-        # Si es modificación/eliminación con objetivo claro, procesar directamente
-        if (es_modificacion or es_eliminacion) and tiene_objetivo:
-            try:
-                from knowledge import _procesar_modificar_transaccion, _procesar_eliminar_transaccion
-                if es_eliminacion:
-                    return _procesar_eliminar_transaccion(mensaje, usuario)
-                return _procesar_modificar_transaccion(mensaje, usuario)
-            except Exception as e:
-                logger.error("Error procesando modificación nativa: %s", e)
-
-        # Detección de saludo: solo si el mensaje ES un saludo (no lo contiene)
-        es_solo_saludo = mensaje_lower in [
-            "hola", "hi", "hey", "buenas", "buenas tardes",
-            "buenos días", "buenas noches", "buen dia", "buenas dias",
-        ] or mensaje_lower.startswith(("hola ", "hi ", "hey ", "buenas ", "buenos "))
-
-        if es_solo_saludo:
-            return self._generar_respuesta_fallback(mensaje, usuario)
+        logger.info("Procesando mensaje para %s: %s", usuario.get("nombre", "?"), mensaje[:60])
 
         try:
-            respuesta_nativa = self._procesar_con_regex_nativo(mensaje, usuario)
-
-            if respuesta_nativa and not respuesta_nativa.startswith("👋 Hola!"):
-                return respuesta_nativa
-
-            if self.mistral_client and config.AI_PROVIDER == "mistral":
-                try:
-                    return await self._consultar_mistral(mensaje, usuario)
-                except Exception as e:
-                    logger.error("Error consultando Mistral AI: %s", e)
-                    return self._generar_respuesta_error(usuario, "IA")
-
-            return self._generar_respuesta_fallback(mensaje, usuario)
-
+            resultado = await intent_parser.analizar_intencion(mensaje, usuario)
         except Exception as e:
-            logger.error("Error inesperado procesando mensaje: %s", e)
+            logger.error("Error en intent_parser: %s", e)
             return self._generar_respuesta_error(usuario, "sistema")
 
-    def _procesar_con_regex_nativo(self, mensaje: str, usuario: Dict[str, Any]) -> str:
-        """
-        Procesa el mensaje usando el sistema regex-based nativo.
+        intencion = resultado.get("intencion", "general")
+        logger.debug("Intenci�n detectada: %s", intencion)
 
-        Returns:
-            Respuesta procesada o None si no es posible
-        """
-        from handlers import _detectar_intencion, _parsear_transaccion
+        # --- AYUDA / CONSULTA DEL USUARIO ---
+        if intencion == "ayuda_uso":
+            return self._procesar_ayuda(resultado, usuario, mensaje)
 
-        intent = _detectar_intencion(mensaje)
+        # --- REGISTRAR TRANSACCI�N ---
+        if intencion == "registrar":
+            return await self._procesar_registro(resultado, usuario, mensaje)
 
-        if intent == "ayuda_uso":
-            try:
-                from knowledge import _responder_ayuda_uso
-                return _responder_ayuda_uso(mensaje)
-            except Exception as e:
-                logger.error("Error generando ayuda contextual: %s", e)
+        # --- CONSULTAR ---
+        if intencion == "consultar":
+            return self._procesar_consulta(resultado, usuario, mensaje)
 
-        if intent == "registrar_transaccion":
-            monedas_usuario = database.obtener_monedas(usuario["id"])
-            categoria_tipo, cantidad, descripcion, fecha, moneda_detectada = _parsear_transaccion(mensaje, monedas_usuario)
+        # --- ANALIZAR POR FECHA ---
+        if intencion == "analizar_por_fecha":
+            return self._procesar_analisis_fecha(usuario, mensaje)
 
-            if not cantidad or cantidad <= 0:
-                return None
+        # --- CONFIGURAR PRESUPUESTO ---
+        if intencion == "configurar_presupuesto":
+            return self._procesar_presupuesto(resultado, usuario, mensaje)
 
-            # Si hay moneda detectada en el texto, usarla directamente
-            # Si no, verificar cuántas monedas tiene el usuario
-            if moneda_detectada is None and len(monedas_usuario) > 1:
-                lineas = [
-                    "💱 **Tienes varias monedas configuradas y no especificaste cuál usar.**",
-                    "",
-                    "Por favor, reescribe tu mensaje indicando la moneda al final:",
-                    ""
-                ]
-                for m in monedas_usuario:
-                    default = " ⭐" if m.get("es_default") else ""
-                    lineas.append(f"  {m['simbolo']} {m['nombre']} ({m['abreviatura']}){default}")
-                lineas.append("")
-                lineas.append("Ejemplo: `Gasté $50 en comida USD` o `Gasté $50 en comida en pesos`")
-                return "\n".join(lineas)
+        # --- CONFIGURAR AHORRO ---
+        if intencion == "configurar_ahorro":
+            return self._procesar_ahorro(resultado, usuario, mensaje)
 
-            try:
-                from knowledge import _procesar_gasto, _procesar_ingreso
-                if categoria_tipo and "gasto" in str(categoria_tipo):
-                    return _procesar_gasto(mensaje, usuario, moneda=moneda_detectada)
-                elif categoria_tipo and "ingreso" in str(categoria_tipo):
-                    return _procesar_ingreso(mensaje, usuario, moneda=moneda_detectada)
-                else:
-                    texto_lower = mensaje.lower()
-                    gasto_kw = ["gasté", "gaste", "compré", "compre", "pagué", "pague",
-                                "costó", "costo", "gasto", "compra", "pago"]
-                    ingreso_kw = ["recibí", "recibi", "ingresé", "ingrese", "cobré", "cobro",
-                                  "gané", "gane", "ingreso", "salario", "sueldo", "bonus",
-                                  "agrega", "agregar"]
-                    if any(kw in texto_lower for kw in gasto_kw):
-                        return _procesar_gasto(mensaje, usuario, moneda=moneda_detectada)
-                    elif any(kw in texto_lower for kw in ingreso_kw):
-                        return _procesar_ingreso(mensaje, usuario, moneda=moneda_detectada)
-                    else:
-                        return (
-                            f"Detecté un monto de **${cantidad:.2f}** en tu mensaje, pero no estoy seguro si es un **gasto** o un **ingreso**.\n\n"
-                            f"¿Podrías confirmarme?\n"
-                            f"• Si es un **gasto**, escribe algo como: `Gasté ${cantidad:.2f} {descripcion}`\n"
-                            f"• Si es un **ingreso**, escribe algo como: `Recibí ${cantidad:.2f} {descripcion}`"
-                        )
-            except Exception as e:
-                logger.error("Error procesando con regex nativo: %s", e)
+        # --- MODIFICAR ---
+        if intencion == "modificar":
+            return self._procesar_modificacion(resultado, usuario, mensaje)
 
-        elif intent == "modificar_transaccion":
-            try:
-                from knowledge import _procesar_modificar_transaccion
-                return _procesar_modificar_transaccion(mensaje, usuario)
-            except Exception as e:
-                logger.error("Error procesando modificación con regex: %s", e)
+        # --- ELIMINAR ---
+        if intencion == "eliminar":
+            return self._procesar_eliminacion(resultado, usuario, mensaje)
 
-        elif intent == "eliminar_transaccion":
-            try:
-                from knowledge import _procesar_eliminar_transaccion
-                return _procesar_eliminar_transaccion(mensaje, usuario)
-            except Exception as e:
-                logger.error("Error procesando eliminación con regex: %s", e)
+        # --- GENERAL / FALLBACK ---
+        return self._procesar_general(resultado, usuario, mensaje)
 
-        elif intent == "consultar_balance":
-            try:
-                from knowledge import _procesar_balance
-                respuesta = _procesar_balance(usuario)
-                return respuesta
-            except Exception as e:
-                logger.error("Error consultando balance con regex: %s", e)
+    # ================================================================
+    # PROCESADORES POR INTENCI�N
+    # ================================================================
 
-        elif intent == "consultar_transacciones":
-            try:
-                from knowledge import _procesar_transacciones
-                respuesta = _procesar_transacciones(usuario)
-                return respuesta
-            except Exception as e:
-                logger.error("Error consultando transacciones con regex: %s", e)
-
-        elif intent == "consultar_gastos":
-            try:
-                from knowledge import _procesar_gastos
-                respuesta = _procesar_gastos(usuario)
-                return respuesta
-            except Exception as e:
-                logger.error("Error consultando gastos con regex: %s", e)
-
-        elif intent == "consultar_ingresos":
-            try:
-                from knowledge import _procesar_ingresos
-                respuesta = _procesar_ingresos(usuario)
-                return respuesta
-            except Exception as e:
-                logger.error("Error consultando ingresos con regex: %s", e)
-
-        elif intent == "analizar_por_fecha":
-            try:
-                from knowledge import _analizar_transacciones_por_fecha
-                respuesta = _analizar_transacciones_por_fecha(usuario, mensaje)
-                if respuesta:
-                    return respuesta
-            except Exception as e:
-                logger.error("Error analizando por fecha con regex: %s", e)
-
-        elif intent == "consultar_presupuesto":
-            try:
-                from knowledge import _procesar_presupuestos
-                respuesta = _procesar_presupuestos(usuario)
-                return respuesta
-            except Exception as e:
-                logger.error("Error consultando presupuestos con regex: %s", e)
-
-        return None
-
-    async def _consultar_mistral(self, mensaje: str, usuario: Dict[str, Any]) -> str:
-        """Consulta Mistral AI con un prompt mejorado."""
-        system_prompt = config.get_system_prompt()
-
-        # Obtener transacciones recientes para contexto
+    def _procesar_ayuda(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
+        """Procesa una solicitud de ayuda contextual."""
+        tipo_ayuda = resultado.get("tipo_ayuda") or resultado.get("subconsulta")
         try:
-            from knowledge import _procesar_transacciones
-            transacciones_texto = _procesar_transacciones(usuario, limite=10)
-        except Exception:
-            transacciones_texto = "No hay transacciones recientes disponibles."
+            from knowledge import _responder_ayuda_uso, _generar_respuesta_no_entendido
+            if tipo_ayuda:
+                mensaje_ficticio = self._tipo_ayuda_a_mensaje(tipo_ayuda)
+                return _responder_ayuda_uso(mensaje_ficticio)
+            return _responder_ayuda_uso(mensaje)
+        except Exception as e:
+            logger.error("Error generando ayuda: %s", e)
+            from knowledge import _generar_respuesta_no_entendido
+            return _generar_respuesta_no_entendido(mensaje, usuario)
 
-        # Construir prompt detallado
-        prompt = f"""
-El usuario '{usuario['nombre']}' está solicitando ayuda financiera personal.
-Su ID de Telegram es: {usuario.get('telegram_user_id', 'desconocido')}.
+    def _tipo_ayuda_a_mensaje(self, tipo: str) -> str:
+        """Convierte un tipo_ayuda a un mensaje que entienda _responder_ayuda_uso."""
+        mapa = {
+            "registrar_gasto": "c�mo registro un gasto",
+            "registrar_ingreso": "c�mo registro un ingreso",
+            "registrar": "c�mo registro un gasto",
+            "ver_balance": "c�mo veo mi balance",
+            "ver_transacciones": "c�mo veo mis transacciones",
+            "presupuesto": "c�mo configuro un presupuesto",
+            "ahorro": "c�mo creo una meta de ahorro",
+            "modificar": "c�mo modifico una transacci�n",
+            "eliminar": "c�mo elimino una transacci�n",
+            "comandos": "qu� comandos tienes",
+        }
+        return mapa.get(tipo, "c�mo funciona el bot")
 
-TRANSACCIONES RECIENTES DEL USUARIO:
-{transacciones_texto}
+    async def _procesar_registro(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
+        """Procesa el registro de una transacci�n."""
+        tipo = resultado.get("tipo")
+        cantidad = resultado.get("cantidad")
+        descripcion = resultado.get("descripcion") or ""
+        moneda_detectada = resultado.get("moneda")
 
-Mensaje del usuario: "{mensaje}"
+        monedas_usuario = database.obtener_monedas(usuario["id"])
 
-Por favor, analiza el mensaje e indica:
-1. Intención: 'registrar_gasto', 'registrar_ingreso', 'consultar_balance', 'consultar_transacciones', 'consultar_gastos', 'consultar_ingresos', 'consultar_presupuesto', 'configurar_presupuesto', 'configurar_ahorro', 'configurar_categoria', 'modificar_transaccion', 'eliminar_transaccion', 'analizar_por_fecha', 'general'
-2. Si es modificación/eliminación:
-   - ACCION_MOD: 'cambiar_tipo' | 'cambiar_monto' | 'cambiar_descripcion' | 'cambiar_categoria' | 'cambiar_fecha' | 'eliminar'
-   - REFERENCIA: cómo identificar la transacción (ej: "ultimo_gasto", "monto_50", "gasto_ayer")
-   - VALOR_NUEVO: el nuevo valor (si aplica)
-3. Cantidad: Si es una transacción nueva, extrae el monto numérico (sin $ ni separadores de miles)
-4. Categoría: Para gastos: 'comida', 'transporte', 'servicio', 'hogar', 'ocio', 'salud', 'otros'
-   Para ingresos: 'salario', 'bonus', 'inversiones', 'regalos', 'otros'
-5. Descripción: Extrae la descripción de la transacción
-6. Fecha: Extrae la fecha si está mencionada (solo YYYY-MM-DD)
+        # Buscar moneda en el resultado o en texto
+        moneda_obj = None
+        if moneda_detectada and monedas_usuario:
+            for m in monedas_usuario:
+                if m.get("abreviatura", "").lower() == moneda_detectada.lower():
+                    moneda_obj = m
+                    break
 
-Responde en este formato exacto:
-INTENTION: [intención]
-ACCION_MOD: [acción de modificación o null]
-REFERENCIA: [referencia de transacción o null]
-VALOR_NUEVO: [nuevo valor o null]
-CANTIDAD: [monto_numérico_o_null]
-CATEGORIA: [categoria_o_null]
-DESCRIPCION: [descripcion_o_null]
-FECHA: [fecha_o_null]
-
-Si no puedes entender la intención, usa 'general'.
-Si no puedes extraer una cantidad numérica, usa 'null'.
-Si no puedes determinar una categoría, usa 'null'.
-"""
-
-        try:
-            chat_response: ChatCompletionResponse = await asyncio.to_thread(
-                self.mistral_client.chat.complete,
-                model=config.MISTRAL_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ]
+        if not cantidad or cantidad <= 0:
+            return (
+                "❌ No pude entender el monto en tu mensaje.\n\n"
+                "Asegurate de incluir un n�mero, por ejemplo:\n"
+                "• `Gast� $50 en comida`\n"
+                "• `Recib� $300 de salario`"
             )
 
-            respuesta_ia = chat_response.choices[0].message.content
-            return self._procesar_respuesta_mistral(respuesta_ia, usuario)
+        # Si tiene m�ltiples monedas y no especific�, pedir que elija
+        if moneda_obj is None and len(monedas_usuario) > 1:
+            lineas = [
+                "💱 **Tienes varias monedas configuradas y no especificaste cu�l usar.**",
+                "",
+                "Por favor, reescribe tu mensaje indicando la moneda:",
+                "",
+            ]
+            for m in monedas_usuario:
+                default = " ⭐" if m.get("es_default") else ""
+                lineas.append(f"  {m['simbolo']} {m['nombre']} ({m['abreviatura']}){default}")
+            lineas.append("")
+            lineas.append("Ej: `Gast� $50 en comida USD` o `Gast� $50 en comida en pesos`")
+            return "\n".join(lineas)
 
-        except Exception as e:
-            logger.error("Error consultando Mistral: %s", e)
-            return "Disculpa, estoy experimentando problemas técnicos con la IA. Por favor, intenta de nuevo más tarde."
-
-    def _procesar_respuesta_mistral(self, respuesta_ia: str, usuario: Dict[str, Any]) -> str:
-        """Procesa la respuesta de Mistral AI."""
         try:
-            # Intentar parsear la respuesta estructurada
-            lines = respuesta_ia.strip().split('\n')
-            datos = {}
+            from knowledge import _procesar_gasto, _procesar_ingreso
 
-            for linea in lines:
-                if ':' in linea:
-                    clave, valor = linea.split(':', 1)
-                    clave = clave.strip().upper()
-                    valor = valor.strip()
+            if tipo == "gasto":
+                return _procesar_gasto(mensaje, usuario, moneda=moneda_obj)
+            elif tipo == "ingreso":
+                return _procesar_ingreso(mensaje, usuario, moneda=moneda_obj)
+            else:
+                # No se pudo determinar el tipo, preguntar
+                return (
+                    f"Detect� un monto de **${cantidad:.2f}**{' en ' + descripcion if descripcion else ''}, "
+                    f"pero no estoy seguro si es un **gasto** o un **ingreso**.\n\n"
+                    f"�Podr�s confirmarme?\n"
+                    f"• Si es un **gasto**: `Gast� ${cantidad:.2f} {descripcion}`\n"
+                    f"• Si es un **ingreso**: `Recib� ${cantidad:.2f} {descripcion}`"
+                )
+        except Exception as e:
+            logger.error("Error registrando transacci�n: %s", e)
+            return "❌ Ocurri� un error al registrar. Por favor, intent� de nuevo."
 
-                    if clave in ['INTENTION', 'CANTIDAD', 'CATEGORIA', 'DESCRIPCION', 'FECHA',
-                                 'ACCION_MOD', 'REFERENCIA', 'VALOR_NUEVO']:
-                        datos[clave] = valor if valor.lower() != 'null' else None
+    def _procesar_consulta(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
+        """Procesa una consulta del usuario."""
+        subconsulta = resultado.get("subconsulta")
 
-            # --- MODIFICACIÓN / ELIMINACIÓN ---
-            if datos.get('INTENTION') == 'modificar_transaccion':
-                from knowledge import _procesar_modificar_transaccion
-                # Construir mensaje rico para el procesador nativo
-                accion = datos.get('ACCION_MOD', '')
-                referencia = datos.get('REFERENCIA', '')
-                valor = datos.get('VALOR_NUEVO', '')
-                mensaje_construido = self._construir_mensaje_modificacion(accion, referencia, valor, datos)
-                return _procesar_modificar_transaccion(mensaje_construido, usuario)
+        try:
+            from knowledge import (
+                _procesar_balance, _procesar_transacciones,
+                _procesar_gastos, _procesar_ingresos,
+                _procesar_presupuestos, _procesar_categorias,
+                _analizar_transacciones_por_fecha,
+            )
 
-            if datos.get('INTENTION') == 'eliminar_transaccion':
-                from knowledge import _procesar_eliminar_transaccion
-                referencia = datos.get('REFERENCIA', '')
-                accion = datos.get('ACCION_MOD', 'eliminar')
-                mensaje_construido = f"eliminar transacción {referencia or ''}"
-                return _procesar_eliminar_transaccion(mensaje_construido, usuario)
-
-            # --- REGISTRO ---
-            if datos.get('INTENTION') == 'registrar_gasto' and datos.get('CANTIDAD'):
-                from knowledge import _procesar_gasto
-                return _procesar_gasto(f"Gasté ${datos['CANTIDAD']} en {datos['DESCRIPCION'] or 'otros'}", usuario)
-
-            elif datos.get('INTENTION') == 'registrar_ingreso' and datos.get('CANTIDAD'):
-                from knowledge import _procesar_ingreso
-                return _procesar_ingreso(f"Recibí ${datos['CANTIDAD']} de {datos['DESCRIPCION'] or 'otros'}", usuario)
-
-            # --- CONSULTAS ---
-            elif datos.get('INTENTION') == 'consultar_balance':
-                from knowledge import _procesar_balance
+            if subconsulta == "balance":
+                return _procesar_balance(usuario)
+            elif subconsulta == "transacciones":
+                return _procesar_transacciones(usuario)
+            elif subconsulta == "gastos":
+                return _procesar_gastos(usuario)
+            elif subconsulta == "ingresos":
+                return _procesar_ingresos(usuario)
+            elif subconsulta == "presupuesto":
+                return _procesar_presupuestos(usuario)
+            elif subconsulta == "categorias":
+                return _procesar_categorias(usuario)
+            else:
+                # Intentar an�lisis por fecha si hay contexto temporal
+                respuesta_fecha = _analizar_transacciones_por_fecha(usuario, mensaje)
+                if respuesta_fecha:
+                    return respuesta_fecha
+                # Fallback a balance
                 return _procesar_balance(usuario)
 
-            elif datos.get('INTENTION') == 'consultar_transacciones':
-                from knowledge import _procesar_transacciones
-                return _procesar_transacciones(usuario)
-
-            elif datos.get('INTENTION') == 'consultar_gastos':
-                from knowledge import _procesar_gastos
-                return _procesar_gastos(usuario)
-
-            elif datos.get('INTENTION') == 'consultar_ingresos':
-                from knowledge import _procesar_ingresos
-                return _procesar_ingresos(usuario)
-
-            elif datos.get('INTENTION') == 'consultar_presupuesto':
-                from knowledge import _procesar_presupuestos
-                return _procesar_presupuestos(usuario)
-
-            # --- ANÁLISIS POR FECHA ---
-            elif datos.get('INTENTION') == 'analizar_por_fecha':
-                from knowledge import _analizar_transacciones_por_fecha
-                respuesta = _analizar_transacciones_por_fecha(usuario, mensaje)
-                if respuesta:
-                    return respuesta
-
-            # --- NO ENTENDIÓ (general) ---
-            elif datos.get('INTENTION') == 'general' or not datos.get('INTENTION'):
-                from knowledge import _generar_respuesta_no_entendido
-                return _generar_respuesta_no_entendido(datos.get('DESCRIPCION', '') or '', usuario)
-
-            return respuesta_ia
-
         except Exception as e:
-            logger.error("Error procesando respuesta de Mistral: %s", e)
+            logger.error("Error en consulta: %s", e)
+            return "❌ Ocurri� un error al consultar tus datos."
+
+    def _procesar_analisis_fecha(self, usuario: Dict[str, Any], mensaje: str) -> str:
+        """Procesa un an�lisis de transacciones por fecha."""
+        try:
+            from knowledge import _analizar_transacciones_por_fecha
+            respuesta = _analizar_transacciones_por_fecha(usuario, mensaje)
+            if respuesta:
+                return respuesta
+            return "📅 No encontr� transacciones para ese per�odo. �Quer�s registrar algo?"
+        except Exception as e:
+            logger.error("Error analizando por fecha: %s", e)
+            return "❌ Ocurri� un error al analizar tus transacciones."
+
+    def _procesar_presupuesto(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
+        """Procesa la configuraci�n de un presupuesto."""
+        cantidad = resultado.get("cantidad")
+        categoria = resultado.get("categoria") or resultado.get("descripcion") or "general"
+
+        if not cantidad or cantidad <= 0:
+            # Intentar extraer con el sistema nativo
+            try:
+                from knowledge import _generar_respuesta_no_entendido
+                return _generar_respuesta_no_entendido(mensaje, usuario)
+            except Exception:
+                return "❌ No pude entender el monto del presupuesto. Us�: `Mi presupuesto para comida es $500`"
+
+        try:
+            tipo_cat = "gastos"
+            categorias = database.obtener_categorias(usuario["id"], tipo_cat)
+            categoria_id = None
+            for cat in categorias:
+                if cat["nombre"].lower() == categoria.lower():
+                    categoria_id = cat["id"]
+                    break
+            if not categoria_id:
+                cat_info = database.crear_categoria(usuario["id"], categoria, tipo_cat)
+                categoria_id = cat_info["id"]
+
+            database.crear_presupuesto(usuario["id"], categoria_id, cantidad)
+            return f"✅ **Presupuesto configurado:** ${cantidad:.2f} para '{categoria}'"
+        except Exception as e:
+            logger.error("Error configurando presupuesto: %s", e)
+            return "❌ Ocurri� un error al configurar el presupuesto."
+
+    def _procesar_ahorro(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
+        """Procesa la configuraci�n de una meta de ahorro."""
+        cantidad = resultado.get("cantidad")
+        descripcion = resultado.get("descripcion") or "meta general"
+
+        if not cantidad or cantidad <= 0:
+            try:
+                from knowledge import _generar_respuesta_no_entendido
+                return _generar_respuesta_no_entendido(mensaje, usuario)
+            except Exception:
+                return "❌ No pude entender el monto de la meta. Us�: `Quiero ahorrar $5000 para vacaciones`"
+
+        try:
+            database.crear_meta_ahorro(usuario["id"], descripcion, cantidad)
+            return f"✅ **Meta de ahorro creada:** ${cantidad:.2f} para '{descripcion}'"
+        except Exception as e:
+            logger.error("Error creando meta de ahorro: %s", e)
+            return "❌ Ocurri� un error al crear la meta de ahorro."
+
+    def _procesar_modificacion(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
+        """Procesa una solicitud de modificaci�n."""
+        try:
+            from knowledge import _procesar_modificar_transaccion
+
+            accion = resultado.get("accion_mod")
+            referencia = resultado.get("referencia")
+            valor = resultado.get("valor_nuevo")
+
+            mensaje_construido = self._construir_mensaje_mod(accion, referencia, valor, resultado)
+            return _procesar_modificar_transaccion(mensaje_construido, usuario)
+        except Exception as e:
+            logger.error("Error procesando modificaci�n: %s", e)
+            return "❌ No pude procesar la modificaci�n. �Podr�s ser m�s espec�fico?"
+
+    def _procesar_eliminacion(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
+        """Procesa una solicitud de eliminaci�n."""
+        try:
+            from knowledge import _procesar_eliminar_transaccion
+            referencia = resultado.get("referencia", "")
+            mensaje_construido = f"eliminar transacci�n {referencia}" if referencia else mensaje
+            return _procesar_eliminar_transaccion(mensaje_construido, usuario)
+        except Exception as e:
+            logger.error("Error procesando eliminaci�n: %s", e)
+            return "❌ No pude procesar la eliminaci�n."
+
+    def _procesar_general(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
+        """Procesa un mensaje general (saludos, no entendido, etc.)."""
+        # Si la IA gener� una respuesta, usarla
+        respuesta_ia = resultado.get("respuesta")
+        if respuesta_ia:
             return respuesta_ia
 
-    def _construir_mensaje_modificacion(self, accion: Optional[str], referencia: Optional[str],
-                                         valor: Optional[str], datos: Dict) -> str:
-        """Construye un mensaje de modificación comprensible para el procesador nativo."""
+        # Fallback: respuesta contextual
+        try:
+            from knowledge import _generar_respuesta_no_entendido
+            return _generar_respuesta_no_entendido(mensaje, usuario)
+        except Exception as e:
+            logger.error("Error en fallback: %s", e)
+            return (
+                f"👋 �Hola {usuario.get('nombre', 'amigo')}!\n\n"
+                "No entend� completamente tu mensaje. �Pod�s intentar con algo como?\n"
+                "• `Gast� $50 en comida`\n"
+                "• `�Cu�nto tengo?`\n"
+                "• `Ayuda` para ver todos los comandos"
+            )
+
+    def _construir_mensaje_mod(self, accion: str, referencia: str, valor, datos: dict) -> str:
+        """Construye un mensaje para el procesador nativo de modificaciones."""
         partes = ["modificar"]
 
         if referencia:
@@ -405,87 +336,41 @@ Si no puedes determinar una categoría, usa 'null'.
                 partes.append("monto")
         elif accion == "cambiar_descripcion":
             if valor:
-                partes.append(f"descripción a {valor}")
+                partes.append(f"descripci�n a {valor}")
             else:
-                partes.append("descripción")
+                partes.append("descripci�n")
         elif accion == "cambiar_categoria":
             if valor:
-                partes.append(f"categoría a {valor}")
+                partes.append(f"categor�a a {valor}")
             else:
-                partes.append("categoría")
+                partes.append("categor�a")
         elif accion == "cambiar_fecha":
             if valor:
                 partes.append(f"fecha a {valor}")
             else:
                 partes.append("fecha")
-        elif accion == "eliminar":
-            partes = ["eliminar transacción"]
-            if referencia:
-                partes.append(referencia)
 
         return " ".join(partes)
 
     def _generar_respuesta_error(self, usuario: Dict[str, Any], tipo_error: str) -> str:
-        """Genera una respuesta de error amigable con guía específica."""
+        """Genera una respuesta de error amigable."""
         nombre = usuario.get("nombre", "amigo")
         if tipo_error == "IA":
             return (
-                f"😔 Disculpa {nombre}, el servicio de IA no está disponible ahora mismo.\n\n"
-                "Mientras tanto, puedes usar **lenguaje natural** directamente:\n\n"
-                "• 💸 `Gasté $50 en comida` —Registrar gasto\n"
-                "• 💰 `Recibí $300 de salario` — Registrar ingreso\n"
-                "• 📊 `¿Cuánto tengo?` — Ver balance\n"
-                "• 📋 `¿Qué gasté hoy?` — Ver transacciones\n"
-                "• ⚙️ `Mi presupuesto es $500 para comida` — Configurar\n\n"
-                "Intenta de nuevo en unos segundos si quieres usar la IA."
+                f"😔 Disculpa {nombre}, el servicio de IA no est� disponible ahora.\n\n"
+                "Mientras tanto, pod�s usar lenguaje natural directamente:\n\n"
+                "• `Gast� $50 en comida` — Registrar gasto\n"
+                "• `Recib� $300 de salario` — Registrar ingreso\n"
+                "• `�Cu�nto tengo?` — Ver balance\n"
+                "• `Ayuda` — Ver comandos\n\n"
+                "Intent� de nuevo en unos segundos."
             )
         else:
             return (
-                f"⚠️ {nombre}, algo salió mal.\n\n"
-                "Intenta con estos comandos:\n"
-                "• `Gasté $50 en comida`\n"
-                "• `¿Cuánto tengo?`\n"
-                "• `¿Qué gasté hoy?`\n\n"
-                "Si el problema persiste, escribe `/help` para ver todos los comandos."
+                f"⚠️ {nombre}, algo sali� mal.\n\n"
+                "Intent� con estos comandos:\n"
+                "• `Gast� $50 en comida`\n"
+                "• `�Cu�nto tengo?`\n"
+                "• `Ayuda`\n\n"
+                "Si el problema persiste, escrib� `/help`."
             )
-
-    def _generar_respuesta_fallback(self, mensaje: str, usuario: Dict[str, Any]) -> str:
-        """Genera una respuesta de fallback cuando IA no está disponible."""
-        from knowledge import _generar_respuesta_no_entendido
-
-        mensaje_lower = mensaje.lower()
-        nombre = usuario.get("nombre", "amigo")
-
-        # Saludos y ayuda: respuestas específicas
-        if any(word in mensaje_lower for word in ["ayuda", "help", "comandos"]):
-            return "\n".join([
-                "🤖 **COMANDOS DE FINANZAS BOT:**",
-                "",
-                "📝 **Registrar:**",
-                "• `Gasté $50 en comida` —Registrar gasto",
-                "• `Recibí $300 de salario` — Registrar ingreso",
-                "• `$20 en transporte` — Formato corto",
-                "• `Pagué $100 de alquiler` — Pago registrado",
-                "",
-                "📊 **Consultar:**",
-                "• `¿Cuánto tengo?` — Balance general",
-                "• `¿Qué gasté hoy?` — Transacciones recientes",
-                "• `¿Cuánto gasté en comida?` — Por categoría",
-                "• `¿Cuánto ingresé?` — Ver ingresos",
-                "",
-                "⚙️ **Configurar:**",
-                "• `Mi presupuesto es $500 para comida`",
-                "• `Quiero ahorrar $2000 para vacaciones`",
-                "",
-                "✏️ **Modificar:**",
-                "• `Cambiar mi último gasto a $75`",
-                "• `Eliminar mi último gasto`",
-                "",
-                "📋 **Comandos del bot:**",
-                "• /start — Iniciar el bot",
-                "• /user — Ver tu información",
-                "• /help — Ver esta ayuda",
-            ])
-
-        # Todo lo demás: respuesta contextual inteligente
-        return _generar_respuesta_no_entendido(mensaje, usuario)

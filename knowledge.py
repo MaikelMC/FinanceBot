@@ -44,79 +44,7 @@ def _detectar_moneda_en_texto(texto: str, monedas_usuario: List[Dict[str, Any]])
     return None
 
 
-def consultar_ia_finanzas(user_message: str, usuario: Dict[str, Any]) -> str:
-    """
-    Consulta la IA para interpretar y procesar mensajes financieros.
-    """
-    logger.info("Consulta IA de %s: %s", usuario["nombre"], user_message)
 
-    # Intentar parsear primero con regex básico
-    intent = _detectar_intencion_usuario(user_message)
-
-    if intent:
-        return _procesar_intencion_finanzas(intent, user_message, usuario)
-
-    # Si no se puede parsear, responder con IA generica
-    return _generar_respuesta_ia_finanzas(user_message, usuario)
-
-
-def _detectar_intencion_usuario(mensaje: str) -> str:
-    """Detecta la intención del usuario en un mensaje financiero."""
-    mensaje_lower = mensaje.lower()
-
-    # Patrones para diferentes tipos de transacciones
-    patrones_gasto = [
-        r"gasté\s+\$?(\d+(?:\.\d+)?)",
-        r"compré\s+\$?(\d+(?:\.\d+)?)",
-        r"pagó\s+\$?(\d+(?:\.\d+)?)",
-        r"\$?(\d+(?:\.\d+)?)\s+en\s+",
-        r"\$?(\d+(?:\.\d+)?)\s+para\s+",
-    ]
-
-    patrones_ingreso = [
-        r"recibí\s+\$?(\d+(?:\.\d+)?)",
-        r"salario\s+\$?(\d+(?:\.\d+)?)",
-        r"pagaron\s+\$?(\d+(?:\.\d+)?)",
-        r"ingresé\s+\$?(\d+(?:\.\d+)?)",
-        r"\$?(\d+(?:\.\d+)?)\s+como\s+",
-    ]
-
-    for patron in patrones_gasto:
-        if re.search(patron, mensaje_lower):
-            return "gasto"
-
-    for patron in patrones_ingreso:
-        if re.search(patron, mensaje_lower):
-            return "ingreso"
-
-    # Detectar preguntas sobre balance
-    if any(word in mensaje_lower for word in ["balance", "saldo", "total"]):
-        return "balance"
-
-    # Detectar preguntas sobre categorías
-    if any(word in mensaje_lower for word in ["categoria", "categoría", "gastos", "ingresos"]):
-        return "categorias"
-
-    return None
-
-
-def _procesar_intencion_finanzas(intencion: str, mensaje: str, usuario: Dict[str, Any]) -> str:
-    """Procesa una intención financiera detectada."""
-
-    if intencion == "gasto":
-        return _procesar_gasto(mensaje, usuario)
-    elif intencion == "ingreso":
-        return _procesar_ingreso(mensaje, usuario)
-    elif intencion == "balance":
-        return _procesar_balance(usuario)
-    elif intencion == "categorias":
-        return _procesar_categorias(usuario)
-    elif intencion == "modificar_transaccion":
-        return _procesar_modificar_transaccion(mensaje, usuario)
-    elif intencion == "eliminar_transaccion":
-        return _procesar_eliminar_transaccion(mensaje, usuario)
-
-    return _generar_respuesta_ia_finanzas(mensaje, usuario)
 
 
 def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None) -> str:
@@ -366,51 +294,6 @@ def _procesar_categorias(usuario: Dict[str, Any]) -> str:
     except Exception as e:
         logger.error("Error al obtener categorías: %s", e)
         return "❌ Ocurrió un error al obtener tus categorías. Por favor, inténtalo de nuevo."
-
-
-def _generar_respuesta_ia_finanzas(mensaje: str, usuario: Dict[str, Any]) -> str:
-    """
-    Genera una respuesta genérica cuando la IA no puede determinar la intención exacta.
-    """
-    mensaje_lower = mensaje.lower()
-
-    if any(word in mensaje_lower for word in ["hola", "hi", "buenas"]):
-        return f"¡Hola! 👋 Soy FinanzasBot. ¿Cómo puedo ayudarte con tus finanzas hoy?"
-
-    if any(word in mensaje_lower for word in ["ayuda", "help", "comandos"]):
-        return "\n".join([
-            "🤖 **COMANDOS DE FINANZAS BOT:**",
-            "• /start - Iniciar/Reiniciar el bot",
-            "• /user - Ver tu información de usuario",
-            "• /help - Ver esta lista de comandos",
-            "",
-            "📝 Ejemplos de comandos en lenguaje natural:",
-            "• 'Gasté $50 en comida para el desayuno'",
-            "• 'Mi presupuesto para comida es $500 este mes'",
-            "• 'Quiero ahorrar $2000 para unas vacaciones'",
-            "• '¿Cuál es mi balance actual?'",
-            "",
-            "✏️ Modificar datos:",
-            "• 'Cambia el gasto de $50 a ingreso'",
-            "• 'Modifica la descripción de mi último gasto'",
-            "• 'Elimina la transacción de $30'",
-        ])
-
-    # Para mensajes no reconocidos, intentar un último intento de parseo
-    if "$" in mensaje or any(c in mensaje_lower for c in ["dólar", "usd", "cup"]):
-        cantidad_val = _parsear_cantidad(mensaje)
-        if cantidad_val:
-            return f"👋 ¡Hola! Registré una transacción de ${cantidad_val:.2f}. ¿Podrías especificarme el tipo (gasto/ingreso) y categoría?"
-
-    return (
-        f"👋 Hola! No entendí completamente tu mensaje: \"{mensaje}\".\n\n"
-        "¿Podrías ser más específico? Por ejemplo:\n"
-        "• 'Gasté $50 en comida' para registrar un gasto\n"
-        "• 'Mi presupuesto es $300 para el mes' para configurar un presupuesto\n"
-        "• '¿Cuál es mi balance?' para consultar tu saldo\n"
-        "• 'Cambia el gasto a ingreso' para modificar datos\n"
-        "¿Cómo puedo ayudarte mejor?"
-    )
 
 
 # ============================================================

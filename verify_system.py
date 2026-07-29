@@ -138,36 +138,35 @@ def main():
         print_status("Verificación de base de datos", False, f"Error: {e}")
         all_good = False
     
-    # === VERIFICAR HANDLERS ===
-    print("\n🔧 VERIFICACIÓN DE HANDLERS:")
+    # === VERIFICAR INTENT PARSER ===
+    print("\n🔧 VERIFICACIÓN DE INTENT PARSER:")
     try:
-        from handlers import _detectar_intencion, _parsear_transaccion
-        
-        # Test detección de intenciones
-        intent_tests = [
-            ("¿Cuál es mi balance actual?", "consultar_balance"),
-            ("Gasté $50 en comida para el desayuno", "registrar_transaccion"),
-            ("Mi presupuesto para comida es $500 este mes", "configurar_presupuesto"),
+        import intent_parser
+        from database import obtener_o_crear_usuario
+
+        usuario_test = obtener_o_crear_usuario(999999, "Test")
+        import asyncio
+
+        tests = [
+            ("Gasté $50 en comida", "registrar", "gasto"),
+            ("Recibí $2000 de salario", "registrar", "ingreso"),
+            ("¿Cuánto tengo?", "consultar", None),
+            ("ayuda", "ayuda_uso", None),
         ]
-        
-        for mensaje, expected_intent in intent_tests:
-            actual_intent = _detectar_intencion(mensaje)
-            if actual_intent == expected_intent:
-                print_status(f"Detección de intención: {mensaje[:40]}...", True, f"→ {actual_intent}")
+
+        for mensaje, expected_intent, expected_tipo in tests:
+            resultado = asyncio.run(intent_parser.analizar_intencion(mensaje, usuario_test))
+            intent_ok = resultado.get("intencion") == expected_intent
+            tipo_ok = expected_tipo is None or resultado.get("tipo") == expected_tipo
+            if intent_ok and tipo_ok:
+                print_status(f"Intent Parser: {mensaje[:40]}...", True, f"→ {resultado.get('intencion')}")
             else:
-                print_status(f"Detección de intención: {mensaje[:40]}...", False, f"Esperado: {expected_intent}, Obtenido: {actual_intent}")
+                print_status(f"Intent Parser: {mensaje[:40]}...", False,
+                             f"Esperado: {expected_intent}/{expected_tipo}, Obtenido: {resultado.get('intencion')}/{resultado.get('tipo')}")
                 all_good = False
-        
-        # Test parseo de transacción
-        cat_tipo, cantidad, descripcion, fecha = _parsear_transaccion('Gasté $50 en comida para el desayuno')
-        if cat_tipo and cantidad:
-            print_status(f"Parseo de transacción: {cantidad} {descripcion}", True)
-        else:
-            print_status("Parseo de transacción", False)
-            all_good = False
-            
+
     except Exception as e:
-        print_status("Verificación de handlers", False, f"Error: {e}")
+        print_status("Verificación de Intent Parser", False, f"Error: {e}")
         all_good = False
     
     # === RESUMEN FINAL ===
