@@ -250,10 +250,16 @@ def _validar_resultado(datos: dict) -> dict:
 
     cantidad = datos.get("cantidad")
     if cantidad is not None:
-        try:
-            resultado["cantidad"] = float(cantidad)
-        except (ValueError, TypeError):
-            pass
+        if isinstance(cantidad, str):
+            from knowledge import _parsear_cantidad
+            cantidad_parsed = _parsear_cantidad(cantidad)
+            if cantidad_parsed is not None:
+                resultado["cantidad"] = cantidad_parsed
+        else:
+            try:
+                resultado["cantidad"] = float(cantidad)
+            except (ValueError, TypeError):
+                pass
 
     descripcion = datos.get("descripcion")
     if descripcion and isinstance(descripcion, str):

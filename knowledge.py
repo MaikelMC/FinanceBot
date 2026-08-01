@@ -16,32 +16,41 @@ logger = logging.getLogger(__name__)
 def _detectar_moneda_en_texto(texto: str, monedas_usuario: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
     Detecta si el texto menciona una moneda configurada por el usuario.
-    Busca por nombre, abreviatura o símbolo.
+    Busca por abreviatura, nombre o símbolo.
+    Usa límites de palabra para evitar colisiones por substring
+    (ej: "USDT" no debe matchear la abreviatura "USD") y prioriza la
+    coincidencia más larga (USDT gana sobre USD, USD gana sobre US).
     Retorna la moneda encontrada o None.
     """
     if not monedas_usuario:
         return None
-    
+
     texto_lower = texto.lower()
-    
+    coincidencias = []
+
     for moneda in monedas_usuario:
-        nombre = moneda.get("nombre", "").lower()
-        abreviatura = moneda.get("abreviatura", "").lower()
+        abreviatura = moneda.get("abreviatura", "").lower().strip()
+        nombre = moneda.get("nombre", "").lower().strip()
         simbolo = moneda.get("simbolo", "")
-        
-        # Buscar por nombre (ej: "pesos", "dólares", "euros")
-        if nombre and nombre in texto_lower:
-            return moneda
-        
-        # Buscar por abreviatura (ej: "USD", "ARS", "EUR")
-        if abreviatura and abreviatura in texto_lower:
-            return moneda
-        
-        # Buscar por símbolo (ej: "$", "€", "₿")
+
+        if abreviatura:
+            if re.search(r'(?<![a-z0-9])' + re.escape(abreviatura) + r'(?![a-z0-9])', texto_lower):
+                coincidencias.append((len(abreviatura), abreviatura, moneda))
+                continue
+
+        if nombre and len(nombre) > 1:
+            if re.search(r'(?<![a-z0-9])' + re.escape(nombre) + r's?(?![a-z0-9])', texto_lower):
+                coincidencias.append((len(nombre), nombre, moneda))
+                continue
+
         if simbolo and simbolo in texto:
-            return moneda
-    
-    return None
+            coincidencias.append((1, simbolo, moneda))
+
+    if not coincidencias:
+        return None
+
+    coincidencias.sort(key=lambda x: x[0], reverse=True)
+    return coincidencias[0][2]
 
 
 
@@ -313,11 +322,52 @@ SEPARADORES_MENSAJE = re.compile(
 )
 
 
+def _normalizar_separador_decimal(num_str: str) -> str:
+    """
+    Normaliza el separador decimal de un número según el contexto.
+    Prioridad: punto (.) = decimal (formato americano/estándar de programación).
+    Reglas:
+      - "322.45"      -> "322.45"   (punto decimal)
+      - "1,234.56"    -> "1234.56"  (coma miles, punto decimal)
+      - "322,45"      -> "322.45"   (coma decimal)
+      - "1.234,56"    -> "1234.56"  (punto miles, coma decimal)
+      - "1,500"       -> "1500"     (coma miles)
+      - "1.248.50"    -> "1248.50"  (puntos miles, último decimal)
+    """
+    if ',' in num_str and '.' in num_str:
+        ultima_coma = num_str.rfind(',')
+        ultimo_punto = num_str.rfind('.')
+        if ultima_coma > ultimo_punto and 1 <= len(num_str) - ultima_coma - 1 <= 2:
+            # Formato europeo: "1.234,56" -> coma decimal, puntos miles
+            return num_str.replace('.', '').replace(',', '.')
+        if ultimo_punto > ultima_coma and 1 <= len(num_str) - ultimo_punto - 1 <= 2:
+            # Formato americano: "1,234.56" -> coma miles, punto decimal
+            return num_str.replace(',', '')
+        return num_str.replace(',', '')
+    if ',' in num_str:
+        partes = num_str.split(',')
+        if 1 <= len(partes[-1]) <= 2:
+            # "322,45" -> coma decimal
+            return partes[0] + '.' + partes[-1]
+        # "1,500" / "1,500,000" -> coma miles
+        return num_str.replace(',', '')
+    if '.' in num_str:
+        partes = num_str.split('.')
+        if len(partes) > 2 and 1 <= len(partes[-1]) <= 2 and all(1 <= len(p) <= 3 for p in partes[:-1]):
+            # "1.248.50" -> puntos miles, último decimal
+            return partes[0] + ''.join(partes[1:-1]) + '.' + partes[-1]
+        # "322.45" -> punto decimal (prioridad)
+        return num_str
+    return num_str
+
+
 def _parsear_cantidad(texto: str) -> Optional[float]:
     """
     Parser robusto de cantidades monetarias.
-    Convención: punto (.) = decimal SIEMPRE, coma (,) = miles SIEMPRE.
-    Ejemplos: $248.50 → 248.5, 1,500 → 1500, 1,248.50 → 1248.5, 248,50 → 24850 (coma=miles)
+    El punto (.) es decimal por prioridad; la coma (,) se interpreta como
+    decimal o miles según el contexto.
+    Ejemplos: $248.50 → 248.5, 1,500 → 1500, 1,248.50 → 1248.5,
+              322.45 → 322.45, 322,45 → 322.45, 1.234,56 → 1234.56
     Retorna float o None si no encuentra número.
     """
     # Eliminar espacios que separan miles: "1 248" -> "1248"
@@ -327,33 +377,16 @@ def _parsear_cantidad(texto: str) -> Optional[float]:
     # Eliminar símbolos de moneda
     texto_limpio = re.sub(r'[\$\€\£\¥\¢]', '', texto)
 
-    # Caso 1: Punto como decimal SIEMPRE (248.50, 1,248.50, 1.248.50)
-    match_decimal = re.search(r'(\d{1,3}(?:,\d{3})*\.\d{1,2})\b', texto_limpio)
-    if match_decimal:
-        num_str = match_decimal.group(1).replace(',', '')
-        try:
-            return float(num_str)
-        except ValueError:
-            pass
+    # Tomar el candidato numérico más significativo (más largo)
+    candidatos = re.findall(r'\d+(?:[.,]\d+)*', texto_limpio)
+    if not candidatos:
+        return None
 
-    # Caso 2: Número con coma como separador de miles, sin decimal (1,500 o 1,248,000)
-    match_miles_coma = re.search(r'(\d{1,3}(?:,\d{3})+)\b', texto_limpio)
-    if match_miles_coma:
-        num_str = match_miles_coma.group(1).replace(',', '')
-        try:
-            return float(num_str)
-        except ValueError:
-            pass
-
-    # Caso 3: Número simple (248, 50, 100, 1500)
-    match_simple = re.search(r'(\d+(?:\.\d+)?)', texto_limpio)
-    if match_simple:
-        try:
-            return float(match_simple.group(1))
-        except ValueError:
-            pass
-
-    return None
+    num_str = max(candidatos, key=len)
+    try:
+        return float(_normalizar_separador_decimal(num_str))
+    except ValueError:
+        return None
 
 
 def _esensaje_multi_transaccion(mensaje: str) -> bool:

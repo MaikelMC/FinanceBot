@@ -121,13 +121,21 @@ class AIResponder:
 
         monedas_usuario = database.obtener_monedas(usuario["id"])
 
-        # Buscar moneda en el resultado o en texto
+        # Buscar moneda en el resultado de la IA
         moneda_obj = None
         if moneda_detectada and monedas_usuario:
             for m in monedas_usuario:
                 if m.get("abreviatura", "").lower() == moneda_detectada.lower():
                     moneda_obj = m
                     break
+
+        # Fallback: detectar la moneda directamente desde el texto del mensaje
+        # (evita que "gaste 50 usdt" quede sin moneda y se acumule en la default)
+        if moneda_obj is None and monedas_usuario:
+            from knowledge import _detectar_moneda_en_texto
+            moneda_obj = _detectar_moneda_en_texto(mensaje, monedas_usuario)
+            if moneda_obj is None and len(monedas_usuario) == 1:
+                moneda_obj = monedas_usuario[0]
 
         if not cantidad or cantidad <= 0:
             return (
