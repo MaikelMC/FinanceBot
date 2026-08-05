@@ -159,5 +159,69 @@ class TestIntenciónAI(unittest.TestCase):
         self.assertEqual(r["cantidad"], 322.45)
 
 
+class TestCargaGSheets(unittest.TestCase):
+    """Bug 3: la recarga desde Google Sheets no debe corromper cantidades ni
+    moneda_id cuando el spreadsheet usa locale es_ES. Prueba la normalización
+    (lectura UNFORMATTED) sin conexión de red."""
+
+    def setUp(self):
+        import database_gsheets
+        self.db = database_gsheets.GoogleSheetsDB()
+
+    def test_serial_excel_a_fecha(self):
+        iso = self.db._serial_excel_a_fecha(46236.81736111111)
+        self.assertTrue(iso.startswith("2026-"), iso)
+        self.assertEqual(
+            self.db._serial_excel_a_fecha("2026-08-02 19:34:21"),
+            "2026-08-02 19:34:21",
+        )
+        self.assertEqual(self.db._serial_excel_a_fecha(5), 5)  # fuera de rango: intacto
+        self.assertIsNone(self.db._serial_excel_a_fecha(None))
+
+    def test_carga_cantidades_con_es_es(self):
+        from database_gsheets import SHEET_COLUMNS
+        raw = [SHEET_COLUMNS["transacciones"]]
+        raw.append([17, 2, 5, "ingreso", 248.58, "Sueldo", 5, 46236.81736111111, 46236.81736111111])
+        raw.append([18, 2, 5, "ingreso", 103.77, "Sueldo", 3, 46236.81736111111, 46236.81736111111])
+        filas = self.db._filas_desde_valores("transacciones", raw)
+        self.assertEqual(len(filas), 2)
+        self.assertEqual(filas[0]["cantidad"], 248.58)
+        self.assertEqual(filas[0]["moneda_id"], 5)
+        self.assertEqual(filas[1]["cantidad"], 103.77)
+        self.assertEqual(filas[1]["moneda_id"], 3)
+        self.assertIn("2026-", filas[0]["fecha"])
+
+    def test_balance_separa_monedas_tras_recarga(self):
+        """Tras recargar la hoja, USD y USDT siguen separados (regresión Bug 1)."""
+        from database_gsheets import SHEET_COLUMNS
+
+        mraw = [SHEET_COLUMNS["monedas"]]
+        mraw.append([1, 2, "Peso cubano", "$", "CUP", 1, 46236.8])
+        mraw.append([3, 2, "Tether", "₮", "USDT", 0, 46236.8])
+        mraw.append([5, 2, "Dolar", "$", "USD", 0, 46236.8])
+        self.db._cache["monedas"] = self.db._filas_desde_valores("monedas", mraw)
+
+        traw = [SHEET_COLUMNS["transacciones"]]
+        traw.append([17, 2, 5, "ingreso", 248.58, "Sueldo", 5, 46236.81736111111, 46236.81736111111])
+        traw.append([18, 2, 5, "ingreso", 103.77, "Sueldo", 3, 46236.81736111111, 46236.81736111111])
+        self.db._cache["transacciones"] = self.db._filas_desde_valores("transacciones", traw)
+
+        balance = self.db.obtener_balance(2)
+        self.assertEqual(balance["por_moneda"]["USD"]["ingresos"], 248.58)
+        self.assertEqual(balance["por_moneda"]["USDT"]["ingresos"], 103.77)
+        self.assertNotIn("CUP", balance["por_moneda"])  # no mezcla monedas
+        self.assertEqual(balance["ingresos"], 0.0)      # planos solo en CUP default
+
+    def test_legacy_texto_es_es(self):
+        """Celdas de texto legacy formateadas ('248,58') aún se parsean bien."""
+        from database_gsheets import SHEET_COLUMNS
+        raw = [SHEET_COLUMNS["transacciones"]]
+        raw.append([17, 2, 5, "ingreso", "248,58", "Sueldo",
+                    "1900-01-04 0:00:00", "2026-08-02 19:34:21", "2026-08-02 19:34:21"])
+        filas = self.db._filas_desde_valores("transacciones", raw)
+        self.assertEqual(filas[0]["cantidad"], 248.58)
+        self.assertIsNone(filas[0]["moneda_id"])  # texto legacy irrecuperable -> None (sin crash)
+
+
 if __name__ == "__main__":
     unittest.main()

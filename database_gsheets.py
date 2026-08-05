@@ -12,14 +12,12 @@ import random
 import tempfile
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 import gspread
 from gspread.exceptions import APIError
-import pandas as pd
-from gspread_dataframe import set_with_dataframe, get_as_dataframe
 
 import config
 
@@ -48,6 +46,13 @@ SHEET_COLUMNS = {
     "metas_ahorro": ["id", "usuario_id", "nombre", "objetivo", "cantidad_actual", "fecha_inicio", "fecha_meta", "created_at"],
     "notificaciones": ["id", "usuario_id", "version", "enviada_en"],
     "monedas": ["id", "usuario_id", "nombre", "simbolo", "abreviatura", "es_default", "created_at"],
+}
+
+# Columnas de fecha: pueden venir como seriales de fecha de Excel (días desde
+# 1899-12-30) cuando Google las interpretó como fecha al escribir.
+DATE_COLUMNS = {
+    "created_at", "updated_at", "fecha",
+    "fecha_inicio", "fecha_fin", "fecha_meta", "enviada_en",
 }
 
 LOCK = threading.Lock()
@@ -175,32 +180,17 @@ class GoogleSheetsDB:
             self._load_sheet(name)
 
     def _load_sheet(self, name: str):
-        """Carga una hoja a la caché."""
+        """Carga una hoja a la caché.
+
+        Lee con value_render_option='UNFORMATTED_VALUE' para obtener los valores
+        crudos, independientes del locale del spreadsheet. Con locale es_ES,
+        get_all_records() devolvía valores formateados ("248,58", fechas como
+        "1900-01-04"), lo que corrompía cantidades y moneda_id al recargar.
+        """
         try:
             ws = self._spreadsheet.worksheet(name)
-            records = ws.get_all_records()
-            # Normalizar: asegurar que todos los campos existen y tipos correctos
-            rows = []
-            for r in records:
-                row = {col: r.get(col, "") for col in SHEET_COLUMNS[name]}
-                # Castear campos numéricos para evitar strings en la caché
-                if "cantidad" in row:
-                    row["cantidad"] = self._parse_number_locale_aware(row["cantidad"])
-                if "cantidad_planejada" in row:
-                    row["cantidad_planejada"] = self._parse_number_locale_aware(row["cantidad_planejada"])
-                if "cantidad_gastada" in row:
-                    row["cantidad_gastada"] = self._parse_number_locale_aware(row["cantidad_gastada"])
-                if "cantidad_actual" in row:
-                    row["cantidad_actual"] = self._parse_number_locale_aware(row["cantidad_actual"])
-                if "objetivo" in row:
-                    row["objetivo"] = self._parse_number_locale_aware(row["objetivo"])
-                if "moneda_id" in row:
-                    try:
-                        val = row["moneda_id"]
-                        row["moneda_id"] = int(val) if val != "" and val is not None else None
-                    except (TypeError, ValueError):
-                        row["moneda_id"] = None
-                rows.append(row)
+            raw = ws.get_all_values(value_render_option="UNFORMATTED_VALUE")
+            rows = self._filas_desde_valores(name, raw)
             self._cache[name] = rows
 
             # Calcular próximo ID
@@ -214,19 +204,73 @@ class GoogleSheetsDB:
             self._cache[name] = []
             self._next_ids[name] = 1
 
+    def _filas_desde_valores(self, name: str, raw: List[List[Any]]) -> List[Dict[str, Any]]:
+        """Convierte la matriz cruda de valores (UNFORMATTED) en registros normalizados.
+
+        Extraído de _load_sheet para poder probarlo sin red. Maneja:
+        - valores numéricos crudos (independientes del locale es_ES)
+        - celdas de texto legacy formateadas ("248,58")
+        - fechas seriales de Excel en las columnas de DATE_COLUMNS
+        """
+        rows = []
+        if not raw:
+            return rows
+        header = raw[0]
+        header_idx = {str(h).strip(): i for i, h in enumerate(header)}
+        for r in raw[1:]:
+            if not any(str(v).strip() for v in r):
+                continue  # saltar filas vacías
+            row = {}
+            for col in SHEET_COLUMNS[name]:
+                i = header_idx.get(col)
+                row[col] = r[i] if (i is not None and i < len(r)) else ""
+            # Castear campos numéricos para evitar strings en la caché
+            for num_col in ("cantidad", "cantidad_planejada",
+                            "cantidad_gastada", "cantidad_actual", "objetivo"):
+                if num_col in row:
+                    row[num_col] = self._parse_number_locale_aware(row[num_col])
+            # Castear moneda_id a int o None
+            if "moneda_id" in row:
+                val = row["moneda_id"]
+                try:
+                    row["moneda_id"] = int(val) if val != "" and val is not None else None
+                except (TypeError, ValueError):
+                    row["moneda_id"] = None
+            # Convertir fechas seriales de Excel a ISO
+            for date_col in DATE_COLUMNS:
+                if date_col in row:
+                    row[date_col] = self._serial_excel_a_fecha(row[date_col])
+            rows.append(row)
+        return rows
+
     def _flush_sheet(self, name: str):
-        """Escribe la caché modificada de vuelta a la hoja con formato numérico explícito."""
+        """Escribe la caché modificada de vuelta a la hoja.
+
+        Usa value_input_option='RAW' para que Google NO reinterprete los valores
+        según el locale del spreadsheet (es_ES). Los números se guardan como
+        números y las fechas como texto, evitando seriales de fecha y formatos
+        accidentales que rompían la lectura posterior.
+        """
         if name not in self._cache_dirty:
             return
         try:
             ws = self._spreadsheet.worksheet(name)
             cols = SHEET_COLUMNS[name]
-            df = pd.DataFrame(self._cache[name], columns=cols)
+
+            rows_data = []
+            for row in self._cache[name]:
+                fila = []
+                for c in cols:
+                    val = row.get(c, "")
+                    if val is None:
+                        val = ""
+                    fila.append(val)
+                rows_data.append(fila)
+
             ws.clear()
-            set_with_dataframe(ws, df, include_column_header=True, resize=True)
+            ws.update([cols] + rows_data, "A1", raw=True)
 
             # Aplicar formato numérico explícito a columnas monetarias
-            # Esto evita que Google Sheets interprete mal los decimales según locale
             numeric_cols = self._get_numeric_columns(name)
             for col_name in numeric_cols:
                 if col_name in cols:
@@ -269,6 +313,22 @@ class GoogleSheetsDB:
 
     def _today(self) -> str:
         return datetime.now().strftime("%Y-%m-%d")
+
+    def _serial_excel_a_fecha(self, value) -> Any:
+        """
+        Convierte un serial de fecha de Excel (días desde 1899-12-30) a un
+        string ISO 'YYYY-MM-DD HH:MM:SS'. Si el valor no parece un serial
+        (ej. ya es texto), lo retorna tal cual.
+        """
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            serial = float(value)
+            if 20000.0 <= serial <= 80000.0:  # rango plausible ~1954-2119
+                try:
+                    dt = datetime(1899, 12, 30) + timedelta(days=serial)
+                    return dt.strftime("%Y-%m-%d %H:%M:%S")
+                except (OverflowError, ValueError):
+                    pass
+        return value
 
     def _parse_number_locale_aware(self, value) -> float:
         """
