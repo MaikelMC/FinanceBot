@@ -4,6 +4,7 @@ Usa intent_parser como pipeline unificado: fast-path regex + IA + ejecución.
 """
 
 import logging
+import re
 from typing import Dict, Any, Optional, Tuple
 
 import database
@@ -245,7 +246,7 @@ class AIResponder:
             return "❌ Ocurrió un error al analizar tus transacciones."
 
     def _procesar_presupuesto(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
-        """Procesa la configuración de un presupuesto."""
+        """Procesa la configuración o actualización de un presupuesto."""
         cantidad = resultado.get("cantidad")
         categoria = resultado.get("categoria") or resultado.get("descripcion") or "general"
 
@@ -256,6 +257,8 @@ class AIResponder:
                 return _generar_respuesta_no_entendido(mensaje, usuario)
             except Exception:
                 return "❌ No pude entender el monto del presupuesto. Usa: `Mi presupuesto para comida es $500`"
+
+        modo = resultado.get("modo_presupuesto") or self._detectar_modo_presupuesto(mensaje)
 
         try:
             tipo_cat = "gastos"
@@ -269,15 +272,25 @@ class AIResponder:
                 cat_info = database.crear_categoria(usuario["id"], categoria, tipo_cat)
                 categoria_id = cat_info["id"]
 
-            from datetime import date
-            database.crear_presupuesto(
-                usuario["id"], categoria_id, cantidad,
-                periodo="mensual", fecha_inicio=date.today().isoformat(),
-            )
-            return f"✅ **Presupuesto configurado:** ${cantidad:.2f} para '{categoria}'"
+            presupuesto = database.guardar_presupuesto(usuario["id"], categoria_id, cantidad, modo)
+            total = presupuesto.get("cantidad_planejada", cantidad)
+
+            if modo == "sumar":
+                return (
+                    f"✅ **Añadido ${cantidad:.2f} al presupuesto de '{categoria}'.**\n"
+                    f"📊 Total disponible: ${total:.2f}"
+                )
+            return f"✅ **Presupuesto configurado:** ${total:.2f} para '{categoria}'"
         except Exception as e:
             logger.error("Error configurando presupuesto: %s", e)
             return "❌ Ocurrió un error al configurar el presupuesto."
+
+    @staticmethod
+    def _detectar_modo_presupuesto(mensaje: str) -> str:
+        """Detecta si el mensaje pide sumar o reemplazar un presupuesto (fallback sin IA)."""
+        if re.search(r'\b(?:a[ñn]ade|agrega|suma|aumenta|incrementa|mete|pon[eí])\b', mensaje, re.IGNORECASE):
+            return "sumar"
+        return "reemplazar"
 
     def _procesar_ahorro(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa la configuración de una meta de ahorro."""

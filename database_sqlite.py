@@ -449,6 +449,38 @@ def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: fl
     }
 
 
+def guardar_presupuesto(usuario_id: int, categoria_id: int, cantidad: float, modo: str = "reemplazar") -> Dict[str, Any]:
+    """Crea o actualiza el presupuesto activo de una categoría.
+
+    modo 'sumar': suma 'cantidad' al presupuesto existente (o crea uno si no existe).
+    modo 'reemplazar': fija la cantidad planejada al valor indicado (o crea uno si no existe).
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, cantidad_planejada FROM presupuestos
+        WHERE usuario_id = ? AND categoria_id = ?
+        ORDER BY fecha_inicio DESC, id DESC LIMIT 1
+        """,
+        (usuario_id, categoria_id)
+    )
+    presupuesto = cursor.fetchone()
+    if presupuesto:
+        nueva = (presupuesto["cantidad_planejada"] + cantidad) if modo == "sumar" else cantidad
+        cursor.execute(
+            "UPDATE presupuestos SET cantidad_planejada = ? WHERE id = ?",
+            (nueva, presupuesto["id"])
+        )
+        conn.commit()
+        conn.close()
+        return {**dict(presupuesto), "cantidad_planejada": nueva}
+    conn.close()
+
+    from datetime import date
+    return crear_presupuesto(usuario_id, categoria_id, cantidad, "mensual", date.today().isoformat())
+
+
 def obtener_metas_ahorro(usuario_id: int) -> List[Dict[str, Any]]:
     """Obtiene todas las metas de ahorro de un usuario."""
     conn = get_connection()

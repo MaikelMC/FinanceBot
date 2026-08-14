@@ -713,6 +713,31 @@ class GoogleSheetsDB:
             logger.info("Presupuesto creado: $%.2f para categoría %d", cantidad_planejada, categoria_id)
             return dict(nuevo)
 
+    def guardar_presupuesto(self, usuario_id: int, categoria_id: int, cantidad: float, modo: str = "reemplazar") -> Dict[str, Any]:
+        """Crea o actualiza el presupuesto activo de la categoría.
+
+        modo 'sumar': suma 'cantidad' al presupuesto existente (o crea uno si no existe).
+        modo 'reemplazar': fija la cantidad planejada al valor indicado (o crea uno si no existe).
+        """
+        with LOCK:
+            pres = self._cache.get("presupuestos", [])
+            candidatos = [
+                p for p in pres
+                if int(p.get("usuario_id", 0)) == usuario_id
+                and str(p.get("categoria_id", "")) == str(categoria_id)
+            ]
+            if candidatos:
+                candidatos.sort(key=lambda x: str(x.get("fecha_inicio", "")), reverse=True)
+                target = candidatos[0]
+                actual = float(target.get("cantidad_planejada", 0))
+                target["cantidad_planejada"] = (actual + cantidad) if modo == "sumar" else cantidad
+                self._cache_dirty.add("presupuestos")
+                self._schedule_flush()
+                logger.info("Presupuesto %s: %.2f para categoría %d", modo, target["cantidad_planejada"], categoria_id)
+                return dict(target)
+        # Sin presupuesto previo: crear uno nuevo (crear_presupuesto toma LOCK por su cuenta)
+        return self.crear_presupuesto(usuario_id, categoria_id, cantidad, "mensual", self._today())
+
     def obtener_presupuestos(self, usuario_id: int) -> List[Dict[str, Any]]:
         pres = self._cache.get("presupuestos", [])
         cats = self._cache.get("categorias", [])
@@ -959,6 +984,10 @@ def obtener_presupuestos(usuario_id: int) -> List[Dict[str, Any]]:
 
 def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: float, periodo: str, fecha_inicio: str, fecha_fin: Optional[str] = None) -> Dict[str, Any]:
     return _get_db().crear_presupuesto(usuario_id, categoria_id, cantidad_planejada, periodo, fecha_inicio, fecha_fin)
+
+
+def guardar_presupuesto(usuario_id: int, categoria_id: int, cantidad: float, modo: str = "reemplazar") -> Dict[str, Any]:
+    return _get_db().guardar_presupuesto(usuario_id, categoria_id, cantidad, modo)
 
 
 def obtener_metas_ahorro(usuario_id: int) -> List[Dict[str, Any]]:

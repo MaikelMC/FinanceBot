@@ -113,7 +113,11 @@ _FAST_PATTERNS = [
 
     # --- CONFIGURAR: presupuesto ---
     (re.compile(r'(?:mi\s+)?presupuesto\s+(?:para|de)\s+(.+?)\s+(?:es|de)\s+\$?([\d,.]+)', re.IGNORECASE),
-     lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(1).strip(), "cantidad": _parse_float(m.group(2)), "confianza": 0.98}),
+     lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(1).strip(), "cantidad": _parse_float(m.group(2)), "modo_presupuesto": "reemplazar", "confianza": 0.98}),
+
+    # --- ACTUALIZAR: añadir monto a presupuesto existente ---
+    (re.compile(r'(?:a[ñn]ade|agrega|suma|aumenta|incrementa)\s+\$?([\d,.]+)\s+(?:al|a|para|en)\s+presupuesto\s+(?:de|para)?\s*(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(2).strip() or "general", "cantidad": _parse_float(m.group(1)), "modo_presupuesto": "sumar", "confianza": 0.97}),
 
     # --- SALUDO ---
     (re.compile(r'^(?:hola|buenas|buen[oa]s?\s+(?:d[ií]as|tardes|noches)|hey|hi|qu[eé]\s+(?:tal|onda))$', re.IGNORECASE),
@@ -153,6 +157,7 @@ REGLAS:
 - Detecta cualquier variante de dialecto (argentino, mexicano, venezolano, chileno, colombiano, etc.).
 - Para "registrar": si no se puede determinar si es gasto o ingreso, dejar tipo como null.
 - La fecha debe ir en formato YYYY-MM-DD cuando sea explícita, o null si no se menciona.
+- Para "configurar_presupuesto": si el usuario quiere AÑADIR/SUMAR/AGREGAR un monto a un presupuesto existente (ej: "añade 500 al presupuesto de comida"), usa modo_presupuesto: "sumar". Si lo está definiendo o reemplazando (ej: "mi presupuesto para comida es 500"), usa modo_presupuesto: "reemplazar".
 - La respuesta debe ser en español neutro, amigable, con emojis y sin regionalismos.
 
 JSON DE SALIDA:
@@ -167,6 +172,7 @@ JSON DE SALIDA:
   "accion_mod": "cambiar_tipo|cambiar_monto|cambiar_descripcion|cambiar_categoria|cambiar_fecha|null",
   "referencia": "ultimo_gasto|ultimo_ingreso|monto_X|texto|null",
   "valor_nuevo": "texto | null",
+  "modo_presupuesto": "sumar|reemplazar|null",
   "es_consulta_ayuda": true | false,
   "tipo_ayuda": "registrar_gasto|registrar_ingreso|ver_balance|ver_transacciones|presupuesto|ahorro|modificar|eliminar|comandos|general|null",
   "respuesta": "Texto amigable de respuesta al usuario"
@@ -201,6 +207,7 @@ _RESULTADO_VACIO: Dict[str, Any] = {
     "tipo_ayuda": None,
     "respuesta": None,
     "confianza": 0.0,
+    "modo_presupuesto": None,
 }
 
 
@@ -312,6 +319,10 @@ def _validar_resultado(datos: dict) -> dict:
     respuesta = datos.get("respuesta")
     if respuesta and isinstance(respuesta, str):
         resultado["respuesta"] = respuesta.strip()
+
+    modo_presupuesto = datos.get("modo_presupuesto")
+    if modo_presupuesto in ("sumar", "reemplazar"):
+        resultado["modo_presupuesto"] = modo_presupuesto
 
     return resultado
 
