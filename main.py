@@ -8,7 +8,7 @@ import logging
 import signal
 import sys
 from urllib.parse import urlparse
-from telegram import Bot
+from telegram import Bot, BotCommand, MenuButtonCommands
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -28,6 +28,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+COMANDOS_MENU = [
+    BotCommand("start", "Iniciar o reiniciar el bot y ver tu balance"),
+    BotCommand("help", "Ver todos los comandos y ejemplos de uso"),
+    BotCommand("user", "Ver tu información de usuario"),
+    BotCommand("delete", "Borrar todo el historial de transacciones"),
+]
+
+
+async def _post_init(application):
+    """Registra el menú de comandos de Telegram (sugerencias al escribir '/')."""
+    await application.bot.set_my_commands(COMANDOS_MENU)
+    await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    logger.info("Menú de comandos registrado (%d comandos).", len(COMANDOS_MENU))
+
 
 def _build_app():
     """Construye y configura la aplicación del bot con todos los handlers."""
@@ -40,7 +54,7 @@ def _build_app():
     database.crear_tablas()
     logger.info("Base de datos de finanzas inicializada.")
 
-    app = ApplicationBuilder().token(config.TELEGRAM_BOT_TOKEN).build()
+    app = ApplicationBuilder().token(config.TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
 
     # === COMANDOS PRINCIPALES ===
     app.add_handler(CommandHandler("start", start))
