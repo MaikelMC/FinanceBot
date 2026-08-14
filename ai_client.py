@@ -87,7 +87,12 @@ class AIResponder:
     # ================================================================
 
     def _procesar_ayuda(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
-        """Procesa una solicitud de ayuda contextual."""
+        """Procesa una solicitud de ayuda o una pregunta del usuario."""
+        # Si la IA generó una respuesta contextual, usarla (preguntas/consejos).
+        respuesta_ia = resultado.get("respuesta")
+        if respuesta_ia:
+            return respuesta_ia
+
         tipo_ayuda = resultado.get("tipo_ayuda") or resultado.get("subconsulta")
         try:
             from knowledge import _responder_ayuda_uso, _generar_respuesta_no_entendido
@@ -248,7 +253,8 @@ class AIResponder:
     def _procesar_presupuesto(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa la configuración o actualización de un presupuesto."""
         cantidad = resultado.get("cantidad")
-        categoria = resultado.get("categoria") or resultado.get("descripcion") or "general"
+        categoria = (resultado.get("categoria") or resultado.get("descripcion") or "general").strip()
+        nombre = (resultado.get("nombre") or resultado.get("descripcion") or resultado.get("categoria") or "general").strip()
 
         if not cantidad or cantidad <= 0:
             # Intentar extraer con el sistema nativo
@@ -272,15 +278,16 @@ class AIResponder:
                 cat_info = database.crear_categoria(usuario["id"], categoria, tipo_cat)
                 categoria_id = cat_info["id"]
 
-            presupuesto = database.guardar_presupuesto(usuario["id"], categoria_id, cantidad, modo)
+            presupuesto = database.guardar_presupuesto(usuario["id"], categoria_id, cantidad, modo, nombre=nombre)
             total = presupuesto.get("cantidad_planejada", cantidad)
+            label = presupuesto.get("nombre") or categoria
 
             if modo == "sumar":
                 return (
-                    f"✅ **Añadido ${cantidad:.2f} al presupuesto de '{categoria}'.**\n"
+                    f"✅ **Añadido ${cantidad:.2f} al presupuesto de '{label}'.**\n"
                     f"📊 Total disponible: ${total:.2f}"
                 )
-            return f"✅ **Presupuesto configurado:** ${total:.2f} para '{categoria}'"
+            return f"✅ **Presupuesto configurado:** ${total:.2f} para '{label}'"
         except Exception as e:
             logger.error("Error configurando presupuesto: %s", e)
             return "❌ Ocurrió un error al configurar el presupuesto."
@@ -327,8 +334,16 @@ class AIResponder:
             return "❌ No pude procesar la modificación. ¿Podrás ser más específico?"
 
     def _procesar_eliminacion(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
-        """Procesa una solicitud de eliminación."""
+        """Procesa una solicitud de eliminación (transacción o presupuesto)."""
         try:
+            eliminar_objeto = resultado.get("eliminar_objeto")
+            if eliminar_objeto == "presupuesto" or re.search(r'\bpresupuesto\b', mensaje, re.IGNORECASE):
+                nombre = resultado.get("categoria") or resultado.get("referencia") or resultado.get("descripcion")
+                if not nombre:
+                    return "Para eliminar un presupuesto dime su nombre. Por ejemplo: `Elimina el presupuesto de comida`"
+                from knowledge import _procesar_eliminar_presupuesto
+                return _procesar_eliminar_presupuesto(usuario, nombre)
+
             from knowledge import _procesar_eliminar_transaccion
             referencia = resultado.get("referencia", "")
             mensaje_construido = f"eliminar transacción {referencia}" if referencia else mensaje

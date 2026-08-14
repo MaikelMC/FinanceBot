@@ -244,7 +244,7 @@ def _procesar_presupuestos(usuario: Dict[str, Any]) -> str:
 
         lineas = ["📋 **TUS PRESUPUESTOS**", "━━━━━━━━━━━━━━━━━"]
         for p in presupuestos:
-            cat = p.get("categoria_nombre", "General")
+            cat = p.get("nombre") or p.get("categoria_nombre", "General")
             planeado = p["cantidad_planejada"]
             gastado = p["cantidad_gastada"]
             restante = planeado - gastado
@@ -1709,6 +1709,32 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
         "• `Eliminar mi último gasto`\n\n"
         "¿Qué necesitas? 😊"
     )
+
+
+def _procesar_eliminar_presupuesto(usuario: Dict[str, Any], nombre: str) -> str:
+    """Elimina un presupuesto por su nombre (o categoría)."""
+    try:
+        nombre = nombre.strip()
+        if not nombre:
+            return "❌ Dime el nombre del presupuesto a eliminar."
+
+        # Resolver la categoría si el nombre coincide con una existente
+        categoria_id = None
+        for cat in database.obtener_categorias(usuario["id"], "gastos"):
+            if cat["nombre"].strip().lower() == nombre.lower():
+                categoria_id = cat["id"]
+                break
+
+        borrados = database.eliminar_presupuesto(usuario["id"], nombre=nombre, categoria_id=categoria_id)
+        if borrados:
+            return f"🗑️ **Presupuesto eliminado:** '{nombre}'"
+        return (
+            f"❌ No encontré un presupuesto llamado '{nombre}'.\n"
+            "Verifica su nombre con `Ver presupuestos`."
+        )
+    except Exception as e:
+        logger.error("Error eliminando presupuesto: %s", e)
+        return "❌ Ocurrió un error al eliminar el presupuesto."
 
 
 def _procesar_eliminar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> str:

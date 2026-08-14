@@ -4,9 +4,19 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.4"
+VERSION_ACTUAL = "2.5"
 
 CHANGELOG = {
+    "2.5": {
+        "titulo": "🧠 Respuestas reales y presupuestos por nombre",
+        "mejoras": [
+            "Eliminá presupuestos en lenguaje natural: 'Elimina el presupuesto de comida'",
+            "Los presupuestos tienen nombre propio y se reutilizan si repetís el mismo nombre (sin duplicados)",
+            "Las preguntas y pedidos de consejo financiero ahora se responden con una respuesta relacionada a lo que preguntás",
+            "Agregar monto a un presupuesto funciona aunque tengas varios de la misma categoría"
+        ],
+        "emoji": "🧠"
+    },
     "2.4": {
         "titulo": "💰 Presupuestos que se actualizan",
         "mejoras": [

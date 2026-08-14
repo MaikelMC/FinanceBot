@@ -107,6 +107,10 @@ _FAST_PATTERNS = [
     (re.compile(r'(?:cambia|modifica)\s+(?:el\s+)?(?:monto|cantidad|precio)\s+de\s+\$?([\d,.]+)\s+a\s+\$?([\d,.]+)', re.IGNORECASE),
      lambda m: {"intencion": "modificar", "accion_mod": "cambiar_monto", "valor_nuevo": _parse_float(m.group(2)), "confianza": 0.97}),
 
+    # --- ELIMINAR: presupuesto ---
+    (re.compile(r'(?:elimina|borra|quita|suprime|eliminar|borrar|quitar|suprimir)\s+(?:el\s+|mi\s+|la\s+)?presupuesto\s+(?:de\s+|para\s+|en\s+)?(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "eliminar", "eliminar_objeto": "presupuesto", "categoria": m.group(1).strip(), "confianza": 0.97}),
+
     # --- ELIMINAR ---
     (re.compile(r'(?:elimina|borra|quita|eliminar|borrar)\s+(?:el|mi|la|ese|esa)?\s*(?:[úu]ltimo\s+)?(?:gasto|ingreso|transacci[óo]n)', re.IGNORECASE),
      lambda m: {"intencion": "eliminar", "confianza": 0.97}),
@@ -158,7 +162,10 @@ REGLAS:
 - Para "registrar": si no se puede determinar si es gasto o ingreso, dejar tipo como null.
 - La fecha debe ir en formato YYYY-MM-DD cuando sea explícita, o null si no se menciona.
 - Para "configurar_presupuesto": si el usuario quiere AÑADIR/SUMAR/AGREGAR un monto a un presupuesto existente (ej: "añade 500 al presupuesto de comida"), usa modo_presupuesto: "sumar". Si lo está definiendo o reemplazando (ej: "mi presupuesto para comida es 500"), usa modo_presupuesto: "reemplazar".
+- Para "configurar_presupuesto": el campo "nombre" es el nombre del presupuesto (puede diferir de la categoría). Si el usuario da una etiqueta propia (ej: "mi presupuesto para salidas con amigos es 300"), usa nombre: "salidas con amigos". Si no, usa nombre igual a la categoría.
+- Para "eliminar": si el usuario quiere borrar un PRESUPUESTO (ej: "elimina el presupuesto de comida"), usa eliminar_objeto: "presupuesto" y categoria: "comida". Para transacciones usa eliminar_objeto: "transaccion".
 - La respuesta debe ser en español neutro, amigable, con emojis y sin regionalismos.
+- Cuando el usuario haga una PREGUNTA general o pida un consejo financiero (no una operación de registrar/consultar/configurar), respóndele DIRECTAMENTE y con sustancia en el campo "respuesta" usando intencion "general" o "ayuda_uso". No devuelvas un menú genérico de comandos.
 
 JSON DE SALIDA:
 {
@@ -167,12 +174,14 @@ JSON DE SALIDA:
   "cantidad": numero | null,
   "descripcion": "texto | null",
   "categoria": "comida|transporte|salario|entretenimiento|servicios|salud|educacion|ropa|hogar|transporte|otros|null",
+  "nombre": "nombre propio del presupuesto | null",
   "fecha": "YYYY-MM-DD | hoy | ayer | null",
   "moneda": "codigo_moneda | null",
   "accion_mod": "cambiar_tipo|cambiar_monto|cambiar_descripcion|cambiar_categoria|cambiar_fecha|null",
   "referencia": "ultimo_gasto|ultimo_ingreso|monto_X|texto|null",
   "valor_nuevo": "texto | null",
   "modo_presupuesto": "sumar|reemplazar|null",
+  "eliminar_objeto": "transaccion|presupuesto|null",
   "es_consulta_ayuda": true | false,
   "tipo_ayuda": "registrar_gasto|registrar_ingreso|ver_balance|ver_transacciones|presupuesto|ahorro|modificar|eliminar|comandos|general|null",
   "respuesta": "Texto amigable de respuesta al usuario"
@@ -208,6 +217,8 @@ _RESULTADO_VACIO: Dict[str, Any] = {
     "respuesta": None,
     "confianza": 0.0,
     "modo_presupuesto": None,
+    "eliminar_objeto": None,
+    "nombre": None,
 }
 
 
@@ -287,6 +298,10 @@ def _validar_resultado(datos: dict) -> dict:
     if categoria and isinstance(categoria, str):
         resultado["categoria"] = categoria.strip()
 
+    nombre = datos.get("nombre")
+    if nombre and isinstance(nombre, str):
+        resultado["nombre"] = nombre.strip()
+
     fecha = datos.get("fecha")
     if fecha and isinstance(fecha, str):
         resultado["fecha"] = fecha.strip()
@@ -323,6 +338,10 @@ def _validar_resultado(datos: dict) -> dict:
     modo_presupuesto = datos.get("modo_presupuesto")
     if modo_presupuesto in ("sumar", "reemplazar"):
         resultado["modo_presupuesto"] = modo_presupuesto
+
+    eliminar_objeto = datos.get("eliminar_objeto")
+    if eliminar_objeto in ("transaccion", "presupuesto", "meta_ahorro"):
+        resultado["eliminar_objeto"] = eliminar_objeto
 
     return resultado
 

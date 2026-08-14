@@ -67,6 +67,7 @@ def crear_tablas():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             usuario_id INTEGER NOT NULL,
             categoria_id INTEGER,
+            nombre TEXT,
             cantidad_planejada REAL NOT NULL,
             cantidad_gastada REAL DEFAULT 0.0,
             periodo TEXT NOT NULL CHECK(periodo IN ('mensual', 'anual')),
@@ -77,6 +78,12 @@ def crear_tablas():
             FOREIGN KEY (categoria_id) REFERENCES categorias (id)
         )
     """)
+
+    # Migración: agregar columna 'nombre' a presupuestos en BD existentes
+    try:
+        cursor.execute("ALTER TABLE presupuestos ADD COLUMN nombre TEXT")
+    except Exception:
+        pass
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS metas_ahorro (
@@ -408,7 +415,7 @@ def obtener_presupuestos(usuario_id: int) -> List[Dict[str, Any]]:
     cursor.execute(
         """
         SELECT p.id, p.cantidad_planejada, p.cantidad_gastada, p.periodo,
-               p.fecha_inicio, p.fecha_fin, c.nombre as categoria_nombre
+               p.fecha_inicio, p.fecha_fin, p.nombre, c.nombre as categoria_nombre
         FROM presupuestos p
         LEFT JOIN categorias c ON p.categoria_id = c.id
         WHERE p.usuario_id = ?
@@ -421,17 +428,17 @@ def obtener_presupuestos(usuario_id: int) -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: float, periodo: str, fecha_inicio: str, fecha_fin: Optional[str] = None) -> Dict[str, Any]:
+def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: float, periodo: str, fecha_inicio: str, fecha_fin: Optional[str] = None, nombre: Optional[str] = None) -> Dict[str, Any]:
     """Crea un nuevo presupuesto para un usuario."""
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute(
         """
-        INSERT INTO presupuestos (usuario_id, categoria_id, cantidad_planejada, cantidad_gastada, periodo, fecha_inicio, fecha_fin)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO presupuestos (usuario_id, categoria_id, nombre, cantidad_planejada, cantidad_gastada, periodo, fecha_inicio, fecha_fin)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (usuario_id, categoria_id, cantidad_planejada, 0.0, periodo, fecha_inicio, fecha_fin)
+        (usuario_id, categoria_id, nombre, cantidad_planejada, 0.0, periodo, fecha_inicio, fecha_fin)
     )
     presupuesto_id = cursor.lastrowid
     conn.commit()
@@ -441,6 +448,7 @@ def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: fl
         "id": presupuesto_id,
         "usuario_id": usuario_id,
         "categoria_id": categoria_id,
+        "nombre": nombre,
         "cantidad_planejada": cantidad_planejada,
         "cantidad_gastada": 0.0,
         "periodo": periodo,
@@ -449,36 +457,92 @@ def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: fl
     }
 
 
-def guardar_presupuesto(usuario_id: int, categoria_id: int, cantidad: float, modo: str = "reemplazar") -> Dict[str, Any]:
-    """Crea o actualiza el presupuesto activo de una categoría.
+def guardar_presupuesto(usuario_id: int, categoria_id: int, cantidad: float, modo: str = "reemplazar", nombre: Optional[str] = None) -> Dict[str, Any]:
+    """Crea o actualiza un presupuesto por nombre o por categoría.
 
-    modo 'sumar': suma 'cantidad' al presupuesto existente (o crea uno si no existe).
-    modo 'reemplazar': fija la cantidad planejada al valor indicado (o crea uno si no existe).
+    Prioridad de coincidencia: primero por nombre (si se indica), luego por
+    categoría. modo 'sumar' suma al monto existente, 'reemplazar' lo fija.
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT id, cantidad_planejada FROM presupuestos
-        WHERE usuario_id = ? AND categoria_id = ?
-        ORDER BY fecha_inicio DESC, id DESC LIMIT 1
-        """,
-        (usuario_id, categoria_id)
-    )
-    presupuesto = cursor.fetchone()
-    if presupuesto:
-        nueva = (presupuesto["cantidad_planejada"] + cantidad) if modo == "sumar" else cantidad
+
+    target = None
+    if nombre and str(nombre).strip():
         cursor.execute(
-            "UPDATE presupuestos SET cantidad_planejada = ? WHERE id = ?",
-            (nueva, presupuesto["id"])
+            """
+            SELECT id, cantidad_planejada, nombre FROM presupuestos
+            WHERE usuario_id = ? AND LOWER(TRIM(nombre)) = LOWER(TRIM(?))
+            ORDER BY fecha_inicio DESC, id DESC LIMIT 1
+            """,
+            (usuario_id, nombre)
         )
+        target = cursor.fetchone()
+
+    if target is None:
+        cursor.execute(
+            """
+            SELECT id, cantidad_planejada, nombre FROM presupuestos
+            WHERE usuario_id = ? AND categoria_id = ?
+            ORDER BY fecha_inicio DESC, id DESC LIMIT 1
+            """,
+            (usuario_id, categoria_id)
+        )
+        target = cursor.fetchone()
+
+    if target:
+        nueva = (target["cantidad_planejada"] + cantidad) if modo == "sumar" else cantidad
+        sets = ["cantidad_planejada = ?"]
+        params: list = [nueva]
+        if nombre and str(nombre).strip():
+            sets.append("nombre = ?")
+            params.append(nombre.strip())
+        if categoria_id is not None:
+            sets.append("categoria_id = ?")
+            params.append(categoria_id)
+        params.append(target["id"])
+        cursor.execute(f"UPDATE presupuestos SET {', '.join(sets)} WHERE id = ?", params)
         conn.commit()
         conn.close()
-        return {**dict(presupuesto), "cantidad_planejada": nueva}
+        return {
+            "id": target["id"],
+            "nombre": (nombre.strip() if nombre and str(nombre).strip() else target["nombre"]),
+            "cantidad_planejada": nueva,
+        }
     conn.close()
 
     from datetime import date
-    return crear_presupuesto(usuario_id, categoria_id, cantidad, "mensual", date.today().isoformat())
+    return crear_presupuesto(usuario_id, categoria_id, cantidad, "mensual", date.today().isoformat(), nombre=nombre)
+
+
+def eliminar_presupuesto(usuario_id: int, nombre: Optional[str] = None, categoria_id: Optional[int] = None) -> int:
+    """Elimina un presupuesto por nombre o por categoría. Retorna cuántos se borraron."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    borrados = 0
+
+    if nombre and str(nombre).strip():
+        cursor.execute(
+            """
+            DELETE FROM presupuestos
+            WHERE usuario_id = ? AND LOWER(TRIM(nombre)) = LOWER(TRIM(?))
+            """,
+            (usuario_id, nombre)
+        )
+        borrados = cursor.rowcount
+
+    if borrados == 0 and categoria_id is not None:
+        cursor.execute(
+            """
+            DELETE FROM presupuestos
+            WHERE usuario_id = ? AND categoria_id = ?
+            """,
+            (usuario_id, categoria_id)
+        )
+        borrados = cursor.rowcount
+
+    conn.commit()
+    conn.close()
+    return borrados
 
 
 def obtener_metas_ahorro(usuario_id: int) -> List[Dict[str, Any]]:
