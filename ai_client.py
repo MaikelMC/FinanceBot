@@ -254,7 +254,13 @@ class AIResponder:
         """Procesa la configuración o actualización de un presupuesto."""
         cantidad = resultado.get("cantidad")
         categoria = (resultado.get("categoria") or resultado.get("descripcion") or "general").strip()
-        nombre = (resultado.get("nombre") or resultado.get("descripcion") or resultado.get("categoria") or "general").strip()
+        nombre = (
+            resultado.get("nombre")
+            or self._extraer_nombre_presupuesto(mensaje)
+            or resultado.get("descripcion")
+            or resultado.get("categoria")
+            or "general"
+        ).strip()
 
         if not cantidad or cantidad <= 0:
             # Intentar extraer con el sistema nativo
@@ -291,6 +297,23 @@ class AIResponder:
         except Exception as e:
             logger.error("Error configurando presupuesto: %s", e)
             return "❌ Ocurrió un error al configurar el presupuesto."
+
+    @staticmethod
+    def _extraer_nombre_presupuesto(mensaje: str) -> Optional[str]:
+        """Extrae el nombre del presupuesto desde el texto del usuario.
+
+        Busca la etiqueta que el usuario escribió describiendo el presupuesto,
+        justo después del monto (ej: "tengo un presupuesto de 1000 cup para barbería").
+        """
+        m = re.search(
+            r'presupuesto\s+(?:de\s+)?\$?[\d][\d.,]*\s*(?:\S{1,14}\s+)?\b(?:para|en|de)\s+(.+)',
+            mensaje, re.IGNORECASE
+        )
+        if m:
+            nombre = m.group(1).strip().strip(' .,;:')
+            nombre = re.sub(r'^(?:el|la|un|una|este|esta|los|las)\s+', '', nombre, flags=re.IGNORECASE)
+            return nombre or None
+        return None
 
     @staticmethod
     def _detectar_modo_presupuesto(mensaje: str) -> str:

@@ -601,7 +601,7 @@ async def _manejar_boton_teclado(update: Update, context: ContextTypes.DEFAULT_T
         else:
             lineas = ["📊 **Tus presupuestos:**\n"]
             for p in presupuestos:
-                cat = p.get("categoria_nombre", "General")
+                cat = p.get("nombre") or p.get("categoria_nombre", "General")
                 planeado = p["cantidad_planejada"]
                 gastado = p["cantidad_gastada"]
                 restante = planeado - gastado
