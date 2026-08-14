@@ -4,9 +4,18 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.6"
+VERSION_ACTUAL = "2.7"
 
 CHANGELOG = {
+    "2.7": {
+        "titulo": "📉 Gastos ligados a presupuestos",
+        "mejoras": [
+            "Si registrás un gasto mencionando tu presupuesto (ej: 'gasté 500 del presupuesto para barbería'), se descuenta automáticamente de ese presupuesto",
+            "La respuesta te muestra cuánto llevás gastado y cuánto te queda del presupuesto",
+            "Aumentá el dinero de un presupuesto con lenguaje natural: 'añade 500 al presupuesto de barbería'"
+        ],
+        "emoji": "📉"
+    },
     "2.6": {
         "titulo": "💱 Presupuestos con moneda",
         "mejoras": [

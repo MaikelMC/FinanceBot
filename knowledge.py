@@ -57,6 +57,45 @@ def _detectar_moneda_en_texto(texto: str, monedas_usuario: List[Dict[str, Any]])
 
 
 
+def _normalizar_texto(texto: str) -> str:
+    """Convierte a minúsculas y elimina acentos/diacríticos para comparaciones robustas."""
+    import unicodedata
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', texto)
+        if unicodedata.category(c) != 'Mn'
+    ).lower()
+
+
+def _detectar_presupuesto_en_gasto(mensaje: str, usuario: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Detecta si un gasto hace referencia a un presupuesto.
+
+    Busca la etiqueta del presupuesto (nombre o categoría) en el mensaje y
+    verifica que aparezca ligada a la palabra "presupuesto" (ej: "del presupuesto
+    para barbería"). Devuelve el presupuesto o None.
+    """
+    if "presupuesto" not in mensaje.lower():
+        return None
+    presupuestos = database.obtener_presupuestos(usuario["id"])
+    if not presupuestos:
+        return None
+
+    msg = _normalizar_texto(mensaje)
+    presupuestos.sort(key=lambda p: max(
+        len(p.get("nombre") or ""), len(p.get("categoria_nombre") or "")), reverse=True)
+
+    for p in presupuestos:
+        for etiqueta in [p.get("nombre") or "", p.get("categoria_nombre") or ""]:
+            etiqueta = _normalizar_texto(etiqueta)
+            if not etiqueta:
+                continue
+            idx = msg.find(etiqueta)
+            if idx >= 0:
+                ventana = msg[max(0, idx - 35):idx]
+                if "presupuesto" in ventana:
+                    return p
+    return None
+
+
 def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None) -> str:
     """Procesa una transacción de gasto."""
     cantidad = None
@@ -81,23 +120,61 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
     moneda_id = moneda["id"] if moneda else None
 
     try:
-        categorias = database.obtener_categorias(usuario["id"], "gastos")
-        categoria_id = None
+        # Si el gasto hace referencia a un presupuesto ("del presupuesto para X"),
+        # registrarlo en la categoría del presupuesto para descontarlo del mismo.
+        presupuesto = _detectar_presupuesto_en_gasto(mensaje, usuario)
+        if presupuesto:
+            categoria_id = presupuesto["categoria_id"]
+            categoria = presupuesto.get("categoria_nombre") or presupuesto.get("nombre") or categoria
+        else:
+            categorias = database.obtener_categorias(usuario["id"], "gastos")
+            categoria_id = None
 
-        for cat in categorias:
-            if cat["nombre"].lower() == categoria.lower():
-                categoria_id = cat["id"]
-                break
+            for cat in categorias:
+                if cat["nombre"].lower() == categoria.lower():
+                    categoria_id = cat["id"]
+                    break
 
-        if not categoria_id:
-            categoria_info = database.crear_categoria(usuario["id"], categoria, "gastos")
-            categoria_id = categoria_info["id"]
+            if not categoria_id:
+                categoria_info = database.crear_categoria(usuario["id"], categoria, "gastos")
+                categoria_id = categoria_info["id"]
 
         database.agregar_transaccion(usuario["id"], categoria_id, "gasto", cantidad,
                                    mensaje, moneda_id=moneda_id)
 
         simbolo = moneda.get("simbolo", "$") if moneda else "$"
         nombre_moneda = f" ({moneda['nombre']})" if moneda else ""
+
+        if presupuesto:
+            updated = next(
+                (p for p in database.obtener_presupuestos(usuario["id"]) if p.get("id") == presupuesto.get("id")),
+                None,
+            )
+            if updated:
+                label = presupuesto.get("nombre") or categoria
+                planeado = updated.get("cantidad_planejada", 0)
+                gastado = updated.get("cantidad_gastada", 0)
+                restante = max(planeado - gastado, 0)
+                pct = (gastado / planeado * 100) if planeado > 0 else 0
+                moneda_b = None
+                if updated.get("moneda_id"):
+                    for m in database.obtener_monedas(usuario["id"]):
+                        if m["id"] == updated["moneda_id"]:
+                            moneda_b = m
+                            break
+                s_b = moneda_b.get("simbolo", "$") if moneda_b else "$"
+                n_b = f" ({moneda_b['abreviatura']})" if moneda_b else ""
+                return (
+                    f"✅ Gasto registrado: {simbolo}{cantidad:.2f}{nombre_moneda} del presupuesto de '{label}'\n"
+                    f"📊 Presupuesto '{label}': {s_b}{planeado:.2f}{n_b} planeado, "
+                    f"{s_b}{gastado:.2f}{n_b} usado ({pct:.0f}%). "
+                    f"Te quedan {s_b}{restante:.2f}{n_b}."
+                )
+            return (
+                f"✅ Gasto registrado: {simbolo}{cantidad:.2f}{nombre_moneda} "
+                f"del presupuesto de '{presupuesto.get('nombre') or categoria}'"
+            )
+
         return f"✅ Gasto registrado: {simbolo}{cantidad:.2f}{nombre_moneda} en '{categoria}'"
     except Exception as e:
         logger.error("Error al procesar gasto: %s", e)

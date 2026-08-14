@@ -419,7 +419,7 @@ def obtener_presupuestos(usuario_id: int) -> List[Dict[str, Any]]:
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT p.id, p.cantidad_planejada, p.cantidad_gastada, p.periodo,
+        SELECT p.id, p.categoria_id, p.cantidad_planejada, p.cantidad_gastada, p.periodo,
                p.fecha_inicio, p.fecha_fin, p.nombre, p.moneda_id, c.nombre as categoria_nombre
         FROM presupuestos p
         LEFT JOIN categorias c ON p.categoria_id = c.id
