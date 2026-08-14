@@ -7,6 +7,7 @@ import logging
 from typing import Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
 
@@ -698,6 +699,28 @@ async def _manejar_flujo_moneda(update: Update, context: ContextTypes.DEFAULT_TY
 # CALLBACKS DE MONEDAS (InlineKeyboard)
 # ============================================================
 
+async def _responder_editando(query, texto: str, reply_markup: Optional[InlineKeyboardMarkup] = None):
+    """Reemplaza el mensaje del botón por la respuesta final (evita llenar el chat).
+    Si el mensaje ya no existe o no se puede editar, envía uno nuevo como respaldo."""
+    if reply_markup is None:
+        reply_markup = InlineKeyboardMarkup([])
+    try:
+        await query.edit_message_text(texto, parse_mode="Markdown", reply_markup=reply_markup)
+    except BadRequest as e:
+        if "not modified" in str(e).lower():
+            return
+        try:
+            await query.message.reply_text(texto, parse_mode="Markdown",
+                                           reply_markup=_crear_teclado_permanente())
+        except Exception:
+            pass
+    except Exception:
+        try:
+            await query.message.reply_text(texto, parse_mode="Markdown",
+                                           reply_markup=_crear_teclado_permanente())
+        except Exception:
+            pass
+
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja los callbacks de los botones inline."""
     query = update.callback_query
@@ -771,27 +794,15 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         elif query.data == "multi_confirm":
             transacciones_pendientes = context.user_data.get("multi_transacciones", [])
             if not transacciones_pendientes:
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text="⚠️ No hay transacciones pendientes para guardar.",
-                )
+                await _responder_editando(query, "⚠️ No hay transacciones pendientes para guardar.")
                 return
             resultado = knowledge._guardar_multi_transacciones(transacciones_pendientes, usuario)
             context.user_data.pop("multi_transacciones", None)
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=resultado,
-                parse_mode="Markdown",
-                reply_markup=botones,
-            )
+            await _responder_editando(query, resultado)
 
         elif query.data == "multi_cancel":
             context.user_data.pop("multi_transacciones", None)
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text="❌ Transacciones canceladas. No se guardó nada.",
-                reply_markup=botones,
-            )
+            await _responder_editando(query, "❌ Transacciones canceladas. No se guardó nada.")
 
         elif query.data.startswith("multi_remove_"):
             idx = int(query.data.split("_")[-1])
@@ -801,21 +812,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 context.user_data["multi_transacciones"] = transacciones_pendientes
 
                 if not transacciones_pendientes:
-                    await context.bot.send_message(
-                        chat_id=query.message.chat_id,
-                        text="❌ No quedan transacciones. Proceso cancelado.",
-                        reply_markup=botones,
-                    )
+                    await _responder_editando(query, "❌ No quedan transacciones. Proceso cancelado.")
                     return
 
                 preview = knowledge._formatear_preview_transacciones(transacciones_pendientes)
                 botones_multi = _crear_botones_multi_transacciones(len(transacciones_pendientes))
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text=f"🗑️ Eliminada: ${eliminada['cantidad']:.2f} - {eliminada.get('descripcion', '')}\n\n{preview}",
-                    parse_mode="Markdown",
-                    reply_markup=botones_multi,
-                )
+                texto = f"🗑️ Eliminada: ${eliminada['cantidad']:.2f} - {eliminada.get('descripcion', '')}\n\n{preview}"
+                await _responder_editando(query, texto, botones_multi)
 
         elif query.data.startswith("multi_edit_"):
             idx = int(query.data.split("_")[-1])
@@ -852,10 +855,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             clave = query.data.replace("moneda_preset_", "")
             preset = MONEDAS_PRESET.get(clave)
             if not preset:
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text="❌ Opción inválida.",
-                )
+                await _responder_editando(query, "❌ Opción inválida.")
                 return
             monedas = database.obtener_monedas(usuario_id)
             existente = next(
@@ -863,24 +863,17 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 None,
             )
             if existente:
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text=(
-                        f"📝 Ya tienes **{existente['nombre']} ({existente['abreviatura']})** "
-                        f"en tus monedas."
-                    ),
-                    parse_mode="Markdown",
+                await _responder_editando(
+                    query,
+                    f"📝 Ya tienes **{existente['nombre']} ({existente['abreviatura']})** "
+                    f"en tus monedas.",
                 )
                 return
             database.crear_moneda(usuario_id, preset["nombre"], preset["simbolo"], preset["abreviatura"])
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=(
-                    f"✅ Moneda agregada: **{preset['simbolo']} {preset['nombre']} "
-                    f"({preset['abreviatura']})**."
-                ),
-                parse_mode="Markdown",
-                reply_markup=_crear_teclado_permanente(),
+            await _responder_editando(
+                query,
+                f"✅ Moneda agregada: **{preset['simbolo']} {preset['nombre']} "
+                f"({preset['abreviatura']})**.",
             )
 
         elif query.data == "moneda_manual":
@@ -938,30 +931,20 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             monedas = database.obtener_monedas(usuario_id)
             moneda = next((m for m in monedas if m["id"] == moneda_id), None)
             if not moneda:
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text="❌ Esa moneda ya no existe.",
-                )
+                await _responder_editando(query, "❌ Esa moneda ya no existe.")
                 return
             if moneda.get("es_default"):
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text=(
-                        "⚠️ No puedes eliminar la moneda predeterminada.\n"
-                        "Primero cambia la predeterminada a otra moneda."
-                    ),
-                    parse_mode="Markdown",
+                await _responder_editando(
+                    query,
+                    "⚠️ No puedes eliminar la moneda predeterminada.\n"
+                    "Primero cambia la predeterminada a otra moneda.",
                 )
                 return
             database.eliminar_moneda(usuario_id, moneda_id)
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=(
-                    f"🗑️ Moneda eliminada: **{moneda['simbolo']} {moneda['nombre']} "
-                    f"({moneda['abreviatura']})**."
-                ),
-                parse_mode="Markdown",
-                reply_markup=_crear_teclado_permanente(),
+            await _responder_editando(
+                query,
+                f"🗑️ Moneda eliminada: **{moneda['simbolo']} {moneda['nombre']} "
+                f"({moneda['abreviatura']})**.",
             )
 
         elif query.data == "moneda_default_menu":
@@ -995,20 +978,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             monedas = database.obtener_monedas(usuario_id)
             moneda = next((m for m in monedas if m["id"] == moneda_id), None)
             if not moneda:
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text="❌ Esa moneda ya no existe.",
-                )
+                await _responder_editando(query, "❌ Esa moneda ya no existe.")
                 return
             database.establecer_moneda_default(usuario_id, moneda_id)
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=(
-                    f"⭐ **{moneda['nombre']} ({moneda['abreviatura']})** es ahora "
-                    f"tu moneda predeterminada."
-                ),
-                parse_mode="Markdown",
-                reply_markup=_crear_teclado_permanente(),
+            await _responder_editando(
+                query,
+                f"⭐ **{moneda['nombre']} ({moneda['abreviatura']})** es ahora "
+                f"tu moneda predeterminada.",
             )
 
         elif query.data.startswith("moneda_info_"):
@@ -1017,24 +993,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             moneda = next((m for m in monedas if m["id"] == moneda_id), None)
             if moneda:
                 default = " ⭐ predeterminada" if moneda.get("es_default") else ""
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text=(
-                        f"💱 **{moneda['nombre']}**\n\n"
-                        f"  Símbolo: {moneda['simbolo']}\n"
-                        f"  Abreviatura: {moneda['abreviatura']}{default}"
-                    ),
-                    parse_mode="Markdown",
+                await _responder_editando(
+                    query,
+                    f"💱 **{moneda['nombre']}**\n\n"
+                    f"  Símbolo: {moneda['simbolo']}\n"
+                    f"  Abreviatura: {moneda['abreviatura']}{default}",
                 )
 
         # === CALLBACKS DE TRANSACCIÓN PENDIENTE ===
         elif query.data in ("tipo_gasto", "tipo_ingreso"):
             pendiente = context.user_data.get("transaccion_pendiente")
             if not pendiente or pendiente.get("accion") != "elegir_tipo":
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text="No hay ninguna transacción pendiente.",
-                )
+                await _responder_editando(query, "No hay ninguna transacción pendiente.")
                 return
             tipo = "gasto" if query.data == "tipo_gasto" else "ingreso"
             try:
@@ -1043,29 +1013,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 logger.error("Error completando transacción pendiente: %s", e)
                 texto = "❌ Ocurrió un error al registrar. Por favor, intenta de nuevo."
             context.user_data.pop("transaccion_pendiente", None)
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=texto,
-                parse_mode="Markdown",
-                reply_markup=_crear_teclado_permanente(),
-            )
+            await _responder_editando(query, texto)
 
         elif query.data.startswith("moneda_confirmar_"):
             moneda_id = int(query.data.replace("moneda_confirmar_", ""))
             pendiente = context.user_data.get("transaccion_pendiente")
             if not pendiente or pendiente.get("accion") != "elegir_moneda":
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text="No hay ninguna transacción pendiente.",
-                )
+                await _responder_editando(query, "No hay ninguna transacción pendiente.")
                 return
             monedas = database.obtener_monedas(usuario_id)
             moneda = next((m for m in monedas if m["id"] == moneda_id), None)
             if not moneda:
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text="❌ Esa moneda ya no existe.",
-                )
+                await _responder_editando(query, "❌ Esa moneda ya no existe.")
                 return
             tipo = pendiente.get("tipo")
             try:
@@ -1074,57 +1033,34 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 logger.error("Error completando transacción pendiente: %s", e)
                 texto = "❌ Ocurrió un error al registrar. Por favor, intenta de nuevo."
             context.user_data.pop("transaccion_pendiente", None)
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=texto,
-                parse_mode="Markdown",
-                reply_markup=_crear_teclado_permanente(),
-            )
+            await _responder_editando(query, texto)
 
         elif query.data == "pendiente_cancel":
             context.user_data.pop("transaccion_pendiente", None)
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text="❌ Registro cancelado.",
-                reply_markup=_crear_teclado_permanente(),
-            )
+            await _responder_editando(query, "❌ Registro cancelado.")
 
         # === CALLBACKS DE ELIMINAR HISTORIAL (/delete) ===
         elif query.data == "delete_confirm":
             eliminadas = database.eliminar_transacciones(usuario_id)
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=(
-                    f"🗑️ **Historial eliminado.** Se borraron **{eliminadas}** transacciones.\n\n"
-                    f"Tu balance ahora está en $0.00."
-                ),
-                parse_mode="Markdown",
-                reply_markup=_crear_teclado_permanente(),
+            await _responder_editando(
+                query,
+                f"🗑️ **Historial eliminado.** Se borraron **{eliminadas}** transacciones.\n\n"
+                f"Tu balance ahora está en $0.00.",
             )
 
         elif query.data == "delete_cancel":
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text="❌ Operación cancelada.",
-                reply_markup=_crear_teclado_permanente(),
-            )
+            await _responder_editando(query, "❌ Operación cancelada.")
 
         # === CALLBACKS DE ANUNCIO ===
         elif query.data == "anuncio_enviar":
             # Verificar que sea el admin
             if user.id != ADMIN_USER_ID:
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text="🚫 No tienes permiso para realizar esta acción.",
-                )
+                await _responder_editando(query, "🚫 No tienes permiso para realizar esta acción.")
                 return
 
             mensaje_anuncio = context.user_data.pop("anuncio_pendiente", None)
             if not mensaje_anuncio:
-                await context.bot.send_message(
-                    chat_id=query.message.chat_id,
-                    text="⚠️ No hay anuncio pendiente para enviar.",
-                )
+                await _responder_editando(query, "⚠️ No hay anuncio pendiente para enviar.")
                 return
 
             # Enviar a todos los usuarios
@@ -1143,18 +1079,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     logger.warning("No se pudo enviar anuncio a %s: %s", u.get("nombre", "?"), e)
                     fallidos += 1
 
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=f"✅ Anuncio enviado a **{enviados}** usuarios." + (f"\n⚠️ {fallidos} no pudieron recibirllo." if fallidos else ""),
-                parse_mode="Markdown",
+            await _responder_editando(
+                query,
+                f"✅ Anuncio enviado a **{enviados}** usuarios." + (f"\n⚠️ {fallidos} no pudieron recibirllo." if fallidos else ""),
             )
 
         elif query.data == "anuncio_cancelar":
             context.user_data.pop("anuncio_pendiente", None)
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text="❌ Anuncio cancelado.",
-            )
+            await _responder_editando(query, "❌ Anuncio cancelado.")
 
     except Exception as e:
         logger.error("Error en callback query: %s", e)

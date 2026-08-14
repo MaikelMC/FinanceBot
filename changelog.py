@@ -4,9 +4,18 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.2"
+VERSION_ACTUAL = "2.3"
 
 CHANGELOG = {
+    "2.3": {
+        "titulo": "💬 Conversaciones más limpias",
+        "mejoras": [
+            "Al confirmar una acción, el bot reemplaza el mensaje con los botones por la respuesta final",
+            "Menos mensajes repetidos al gestionar monedas, borrar historial y registrar transacciones",
+            "El preview de varias transacciones se actualiza en un solo mensaje al quitar elementos"
+        ],
+        "emoji": "💬"
+    },
     "2.2": {
         "titulo": "📋 Nuevos comandos y correcciones",
         "mejoras": [
