@@ -47,6 +47,16 @@ _FAST_PATTERNS = [
     (re.compile(r'(?:quiero\s+)?ahorrar\s+\$?([\d,.]+)\s+(?:para\s+|de\s+)?(.+)', re.IGNORECASE),
      lambda m: {"intencion": "configurar_ahorro", "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "confianza": 0.96}),
 
+    # --- CONFIGURAR: presupuesto ---
+    # Va antes del formato corto de registro para que "presupuesto de 1000 para X"
+    # no se interprete como una transacción.
+    # Formato: "presupuesto para X es/de $Y" (categoría antes del monto)
+    (re.compile(r'(?:mi\s+)?presupuesto\s+(?:para|de)\s+(.+?)\s+(?:es|de)\s+\$?([\d,.]+)', re.IGNORECASE),
+     lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(1).strip(), "nombre": m.group(1).strip(), "cantidad": _parse_float(m.group(2)), "modo_presupuesto": "reemplazar", "confianza": 0.98}),
+    # Formato: "presupuesto de $Y [moneda] para/en X" (monto antes de la categoría)
+    (re.compile(r'\bpresupuesto\s+(?:de\s+)?\$?([\d.,]+)\s+(?:[a-z]{2,8}\s+)?(?:para|en|de)\s+(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(2).strip(), "nombre": m.group(2).strip(), "cantidad": _parse_float(m.group(1)), "modo_presupuesto": "reemplazar", "confianza": 0.98}),
+
     # --- REGISTRO: formato corto $X en/para/de Y ---
     (re.compile(r'\$?([\d,.]+)\s+(?:en\s+|para\s+|de\s+)(.+)', re.IGNORECASE),
      lambda m: {"intencion": "registrar", "tipo": None, "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.95}),
@@ -88,7 +98,7 @@ _FAST_PATTERNS = [
      lambda m: {"intencion": "ayuda_uso", "tipo_ayuda": "comandos", "confianza": 0.99}),
 
     # --- AYUDA: cómo configurar presupuesto ---
-    (re.compile(r'c[oó]mo\s+(?:configurar|poner|crear|hacer)\s+(?:un\s+)?presupuesto', re.IGNORECASE),
+    (re.compile(r'c[oó]mo\s+(?:configurar|configuro|poner|pongo|crear|creo|hacer|hago)\s+(?:un\s+)?presupuesto', re.IGNORECASE),
      lambda m: {"intencion": "ayuda_uso", "tipo_ayuda": "presupuesto", "confianza": 0.99}),
 
     # --- AYUDA: cómo ahorrar/meta ---
@@ -114,10 +124,6 @@ _FAST_PATTERNS = [
     # --- ELIMINAR ---
     (re.compile(r'(?:elimina|borra|quita|eliminar|borrar)\s+(?:el|mi|la|ese|esa)?\s*(?:[úu]ltimo\s+)?(?:gasto|ingreso|transacci[óo]n)', re.IGNORECASE),
      lambda m: {"intencion": "eliminar", "confianza": 0.97}),
-
-    # --- CONFIGURAR: presupuesto ---
-    (re.compile(r'(?:mi\s+)?presupuesto\s+(?:para|de)\s+(.+?)\s+(?:es|de)\s+\$?([\d,.]+)', re.IGNORECASE),
-     lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(1).strip(), "cantidad": _parse_float(m.group(2)), "modo_presupuesto": "reemplazar", "confianza": 0.98}),
 
     # --- ACTUALIZAR: añadir monto a presupuesto existente ---
     (re.compile(r'(?:a[ñn]ade|agrega|suma|aumenta|incrementa)\s+\$?([\d,.]+)\s+(?:al|a|para|en)\s+presupuesto\s+(?:de|para)?\s*(.+)', re.IGNORECASE),
