@@ -4,7 +4,7 @@ Usa intent_parser como pipeline unificado: fast-path regex + IA + ejecución.
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Tuple
 
 import database
 import intent_parser
@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 class AIResponder:
     """Clase para procesar mensajes usando el pipeline de intención unificado."""
 
-    async def responder(self, mensaje: str, usuario: Dict[str, Any]) -> str:
+    async def responder(self, mensaje: str, usuario: Dict[str, Any]) -> Tuple[str, Optional[dict]]:
         """
-        Procesa un mensaje del usuario y retorna una respuesta.
+        Procesa un mensaje del usuario y retorna (texto, pendiente).
 
         Pipeline:
         1. intent_parser.analizar_intencion() -> JSON estructurado (fast-path + IA)
@@ -31,7 +31,9 @@ class AIResponder:
             usuario: Información del usuario
 
         Returns:
-            Respuesta en texto para el usuario
+            Tupla (respuesta en texto, dict de acción pendiente o None).
+            Si pendiente no es None, el handler debe ofrecer botones para
+            completar la acción (elegir tipo gasto/ingreso o elegir moneda).
         """
         logger.info("Procesando mensaje para %s: %s", usuario.get("nombre", "?"), mensaje[:60])
 
@@ -39,14 +41,14 @@ class AIResponder:
             resultado = await intent_parser.analizar_intencion(mensaje, usuario)
         except Exception as e:
             logger.error("Error en intent_parser: %s", e)
-            return self._generar_respuesta_error(usuario, "sistema")
+            return self._generar_respuesta_error(usuario, "sistema"), None
 
         intencion = resultado.get("intencion", "general")
         logger.debug("Intención detectada: %s", intencion)
 
         # --- AYUDA / CONSULTA DEL USUARIO ---
         if intencion == "ayuda_uso":
-            return self._procesar_ayuda(resultado, usuario, mensaje)
+            return self._procesar_ayuda(resultado, usuario, mensaje), None
 
         # --- REGISTRAR TRANSACCIÓN ---
         if intencion == "registrar":
@@ -54,30 +56,30 @@ class AIResponder:
 
         # --- CONSULTAR ---
         if intencion == "consultar":
-            return self._procesar_consulta(resultado, usuario, mensaje)
+            return self._procesar_consulta(resultado, usuario, mensaje), None
 
         # --- ANALIZAR POR FECHA ---
         if intencion == "analizar_por_fecha":
-            return self._procesar_analisis_fecha(usuario, mensaje)
+            return self._procesar_analisis_fecha(usuario, mensaje), None
 
         # --- CONFIGURAR PRESUPUESTO ---
         if intencion == "configurar_presupuesto":
-            return self._procesar_presupuesto(resultado, usuario, mensaje)
+            return self._procesar_presupuesto(resultado, usuario, mensaje), None
 
         # --- CONFIGURAR AHORRO ---
         if intencion == "configurar_ahorro":
-            return self._procesar_ahorro(resultado, usuario, mensaje)
+            return self._procesar_ahorro(resultado, usuario, mensaje), None
 
         # --- MODIFICAR ---
         if intencion == "modificar":
-            return self._procesar_modificacion(resultado, usuario, mensaje)
+            return self._procesar_modificacion(resultado, usuario, mensaje), None
 
         # --- ELIMINAR ---
         if intencion == "eliminar":
-            return self._procesar_eliminacion(resultado, usuario, mensaje)
+            return self._procesar_eliminacion(resultado, usuario, mensaje), None
 
         # --- GENERAL / FALLBACK ---
-        return self._procesar_general(resultado, usuario, mensaje)
+        return self._procesar_general(resultado, usuario, mensaje), None
 
     # ================================================================
     # PROCESADORES POR INTENCIÓN
@@ -113,7 +115,8 @@ class AIResponder:
         }
         return mapa.get(tipo, "cómo funciona el bot")
 
-    async def _procesar_registro(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
+    async def _procesar_registro(self, resultado: dict, usuario: Dict[str, Any],
+                                 mensaje: str) -> Tuple[str, Optional[dict]]:
         """Procesa el registro de una transacción."""
         tipo = resultado.get("tipo")
         cantidad = resultado.get("cantidad")
@@ -144,42 +147,54 @@ class AIResponder:
                 "Asegurate de incluir un número, por ejemplo:\n"
                 "• `Gasté $50 en comida`\n"
                 "• `Recibí $300 de salario`"
-            )
+            ), None
 
         # Si tiene múltiples monedas y no especificó, pedir que elija
         if moneda_obj is None and len(monedas_usuario) > 1:
             lineas = [
                 "💱 **Tienes varias monedas configuradas y no especificaste cuál usar.**",
                 "",
-                "Por favor, reescribe tu mensaje indicando la moneda:",
+                "Elige la moneda para registrar:",
                 "",
             ]
             for m in monedas_usuario:
                 default = " ⭐" if m.get("es_default") else ""
                 lineas.append(f"  {m['simbolo']} {m['nombre']} ({m['abreviatura']}){default}")
-            lineas.append("")
-            lineas.append("Ej: `Gasté $50 en comida USD` o `Gasté $50 en comida en pesos`")
-            return "\n".join(lineas)
+            pendiente = {
+                "accion": "elegir_moneda",
+                "mensaje": mensaje,
+                "tipo": tipo,
+                "cantidad": cantidad,
+                "descripcion": descripcion,
+            }
+            return "\n".join(lineas), pendiente
 
         try:
             from knowledge import _procesar_gasto, _procesar_ingreso
 
             if tipo == "gasto":
-                return _procesar_gasto(mensaje, usuario, moneda=moneda_obj)
+                return _procesar_gasto(mensaje, usuario, moneda=moneda_obj), None
             elif tipo == "ingreso":
-                return _procesar_ingreso(mensaje, usuario, moneda=moneda_obj)
+                return _procesar_ingreso(mensaje, usuario, moneda=moneda_obj), None
             else:
                 # No se pudo determinar el tipo, preguntar
-                return (
+                texto = (
                     f"Detecté un monto de **${cantidad:.2f}**{' en ' + descripcion if descripcion else ''}, "
                     f"pero no estoy seguro si es un **gasto** o un **ingreso**.\n\n"
-                    f"¿Podrías confirmarme?\n"
-                    f"• Si es un **gasto**: `Gasté ${cantidad:.2f} {descripcion}`\n"
-                    f"• Si es un **ingreso**: `Recibí ${cantidad:.2f} {descripcion}`"
+                    f"¿Podrías confirmar con un botón?"
                 )
+                pendiente = {
+                    "accion": "elegir_tipo",
+                    "mensaje": mensaje,
+                    "tipo": tipo,
+                    "cantidad": cantidad,
+                    "descripcion": descripcion,
+                    "moneda_id": moneda_obj["id"] if moneda_obj else None,
+                }
+                return texto, pendiente
         except Exception as e:
             logger.error("Error registrando transacción: %s", e)
-            return "❌ Ocurrió un error al registrar. Por favor, intenta de nuevo."
+            return "❌ Ocurrió un error al registrar. Por favor, intenta de nuevo.", None
 
     def _procesar_consulta(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa una consulta del usuario."""

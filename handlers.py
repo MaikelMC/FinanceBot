@@ -25,6 +25,14 @@ BTN_PRESUPUESTOS = "📊 Presupuestos"
 BTN_MONEDAS = "💱 Monedas"
 TECLADO_BUTTONS = {BTN_BALANCE, BTN_TRANSACCIONES, BTN_PRESUPUESTOS, BTN_MONEDAS}
 
+# Monedas comunes para el botón de agregar moneda (auto-completar)
+MONEDAS_PRESET = {
+    "usd": {"nombre": "Dólar estadounidense", "simbolo": "$", "abreviatura": "USD"},
+    "eur": {"nombre": "Euro", "simbolo": "€", "abreviatura": "EUR"},
+    "usdt": {"nombre": "USDT", "simbolo": "₮", "abreviatura": "USDT"},
+    "cup": {"nombre": "Peso cubano", "simbolo": "$", "abreviatura": "CUP"},
+}
+
 
 def _formatear_notificacion(ultima_vista: Optional[str]) -> Optional[str]:
     """Construye el mensaje de notificación con las versiones no vistas por el usuario."""
@@ -107,6 +115,67 @@ def _crear_botones_multi_transacciones(cantidad: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(f"🗑️ Quitar #{i+1}", callback_data=f"multi_remove_{i}"),
         ])
     return InlineKeyboardMarkup(botones)
+
+
+def _crear_botones_moneda_presets() -> InlineKeyboardMarkup:
+    """Crea los botones de monedas comunes para agregar sin escribir."""
+    botones = [
+        [
+            InlineKeyboardButton("🇺🇸 USD · Dólar", callback_data="moneda_preset_usd"),
+            InlineKeyboardButton("🇪🇺 EUR · Euro", callback_data="moneda_preset_eur"),
+        ],
+        [
+            InlineKeyboardButton("🪙 USDT · Tether", callback_data="moneda_preset_usdt"),
+            InlineKeyboardButton("🇨🇺 CUP · Peso cubano", callback_data="moneda_preset_cup"),
+        ],
+        [
+            InlineKeyboardButton("✍️ Otra moneda", callback_data="moneda_manual"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="moneda_cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(botones)
+
+
+def _crear_botones_pendiente(pendiente: dict, usuario_id: int) -> Optional[InlineKeyboardMarkup]:
+    """Crea los botones para completar una transacción pendiente (tipo o moneda)."""
+    accion = pendiente.get("accion")
+    if accion == "elegir_tipo":
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📉 Es un gasto", callback_data="tipo_gasto"),
+                InlineKeyboardButton("📈 Es un ingreso", callback_data="tipo_ingreso"),
+            ],
+            [InlineKeyboardButton("❌ Cancelar", callback_data="pendiente_cancel")],
+        ])
+    if accion == "elegir_moneda":
+        filas = []
+        for m in database.obtener_monedas(usuario_id):
+            filas.append([
+                InlineKeyboardButton(
+                    f"{m['simbolo']} {m['nombre']} ({m['abreviatura']})",
+                    callback_data=f"moneda_confirmar_{m['id']}",
+                )
+            ])
+        filas.append([InlineKeyboardButton("❌ Cancelar", callback_data="pendiente_cancel")])
+        return InlineKeyboardMarkup(filas)
+    return None
+
+
+def _completar_pendiente(pendiente: dict, tipo: str, usuario: dict,
+                         moneda: Optional[dict] = None) -> str:
+    """Completa el registro de una transacción pendiente usando el mensaje original."""
+    mensaje = pendiente.get("mensaje", "")
+    moneda_obj = moneda
+    if moneda_obj is None:
+        moneda_id = pendiente.get("moneda_id")
+        if moneda_id:
+            for m in database.obtener_monedas(usuario["id"]):
+                if m["id"] == moneda_id:
+                    moneda_obj = m
+                    break
+    if tipo == "ingreso":
+        return knowledge._procesar_ingreso(mensaje, usuario, moneda=moneda_obj)
+    return knowledge._procesar_gasto(mensaje, usuario, moneda=moneda_obj)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -204,16 +273,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _manejar_flujo_moneda(update, context, mensaje, usuario)
         return
 
-    # --- Flujo conversacional: eliminar moneda ---
-    if context.user_data.get("eliminando_moneda"):
-        await _manejar_eliminar_moneda(update, context, mensaje, usuario)
-        return
-
-    # --- Flujo conversacional: moneda default ---
-    if context.user_data.get("cambiando_default_moneda"):
-        await _manejar_cambiar_default(update, context, mensaje, usuario)
-        return
-
     # --- Manejo de botones del teclado persistente ---
     if mensaje in TECLADO_BUTTONS:
         await _manejar_boton_teclado(update, context, mensaje, usuario)
@@ -235,9 +294,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Flujo normal: una sola transacción o consulta
     try:
-        respuesta = await ai_client.AIResponder().responder(mensaje, usuario)
+        respuesta, pendiente = await ai_client.AIResponder().responder(mensaje, usuario)
         botones = _crear_teclado_permanente()
-        await msg.reply_text(respuesta, parse_mode="Markdown", reply_markup=botones)
+        reply_markup = botones
+        if pendiente:
+            context.user_data["transaccion_pendiente"] = pendiente
+            botones_pendiente = _crear_botones_pendiente(pendiente, usuario_id)
+            if botones_pendiente:
+                reply_markup = botones_pendiente
+        await msg.reply_text(respuesta, parse_mode="Markdown", reply_markup=reply_markup)
     except Exception as e:
         logger.error("Error procesando mensaje de %s: %s", user.first_name, e)
         botones = _crear_teclado_permanente()
@@ -331,23 +396,24 @@ async def consultar_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def eliminar_historial(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja el comando /delete para borrar todo el historial."""
+    """Pide confirmación antes de borrar todo el historial."""
     try:
-        user = update.effective_user
-
-        if "usuario_id" not in context.user_data:
-            context.user_data["telegram_user_id"] = user.id
-            context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, user.first_name)["id"]
-
-        usuario_id = context.user_data["usuario_id"]
-        eliminadas = database.eliminar_transacciones(usuario_id)
-
-        botones = _crear_botones_rapidos()
-        mensaje = f"🗑️ **Historial eliminado.** Se borraron **{eliminadas}** transacciones.\n\nTu balance ahora está en $0.00."
-        await update.message.reply_text(mensaje, parse_mode="Markdown", reply_markup=botones)
+        botones_confirm = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Sí, borrar todo", callback_data="delete_confirm"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="delete_cancel"),
+            ],
+        ])
+        await update.message.reply_text(
+            "⚠️ **¿Estás seguro?**\n\n"
+            "Se eliminarán **TODAS** tus transacciones y tu balance quedará en $0.00.\n"
+            "Esta acción no se puede deshacer.",
+            parse_mode="Markdown",
+            reply_markup=botones_confirm,
+        )
     except Exception as e:
         logger.error("Error en /delete: %s", e)
-        await update.message.reply_text("⚠️ Ocurrió un error al eliminar el historial.")
+        await update.message.reply_text("⚠️ Ocurrió un error al procesar la solicitud.")
 
 
 # ============================================================
@@ -552,74 +618,6 @@ async def _manejar_flujo_moneda(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
 
-async def _manejar_eliminar_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                     mensaje: str, usuario: dict):
-    """Maneja la eliminación de monedas por selección numérica."""
-    botones = _crear_teclado_permanente()
-    usuario_id = context.user_data["usuario_id"]
-    monedas = database.obtener_monedas(usuario_id)
-
-    if mensaje.lower() in ("cancelar", "❌ cancelar", "salir"):
-        context.user_data.pop("eliminando_moneda", None)
-        await update.message.reply_text("❌ Eliminación cancelada.", reply_markup=botones)
-        return
-
-    try:
-        idx = int(mensaje.strip()) - 1
-        if 0 <= idx < len(monedas):
-            m = monedas[idx]
-            if m.get("es_default"):
-                await update.message.reply_text(
-                    "⚠️ No puedes eliminar la moneda predeterminada.\n"
-                    "Primero cambia la predeterminada a otra moneda.",
-                    reply_markup=botones,
-                )
-            else:
-                database.eliminar_moneda(usuario_id, m["id"])
-                await update.message.reply_text(
-                    f"🗑️ Moneda eliminada: {m['simbolo']} {m['nombre']} ({m['abreviatura']})",
-                    reply_markup=botones,
-                )
-        else:
-            await update.message.reply_text("❌ Número fuera de rango. Intenta de nuevo.", reply_markup=botones)
-            return
-    except ValueError:
-        await update.message.reply_text("❌ Envía el número de la moneda a eliminar.", reply_markup=botones)
-        return
-
-    context.user_data.pop("eliminando_moneda", None)
-
-
-async def _manejar_cambiar_default(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                     mensaje: str, usuario: dict):
-    """Maneja el cambio de moneda predeterminada por selección numérica."""
-    botones = _crear_teclado_permanente()
-    usuario_id = context.user_data["usuario_id"]
-    monedas = database.obtener_monedas(usuario_id)
-
-    if mensaje.lower() in ("cancelar", "❌ cancelar", "salir"):
-        context.user_data.pop("cambiando_default_moneda", None)
-        await update.message.reply_text("❌ Cancelado.", reply_markup=botones)
-        return
-
-    try:
-        idx = int(mensaje.strip()) - 1
-        if 0 <= idx < len(monedas):
-            m = monedas[idx]
-            database.establecer_moneda_default(usuario_id, m["id"])
-            context.user_data.pop("cambiando_default_moneda", None)
-            await update.message.reply_text(
-                f"⭐ **{m['nombre']} ({m['abreviatura']})** es ahora tu moneda predeterminada.",
-                parse_mode="Markdown", reply_markup=botones,
-            )
-        else:
-            await update.message.reply_text("❌ Número fuera de rango. Intenta de nuevo.", reply_markup=botones)
-            return
-    except ValueError:
-        await update.message.reply_text("❌ Envía el número de la moneda.", reply_markup=botones)
-        return
-
-
 # ============================================================
 # CALLBACKS DE MONEDAS (InlineKeyboard)
 # ============================================================
@@ -764,17 +762,70 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         # === CALLBACKS DE MONEDAS ===
         elif query.data == "moneda_agregar":
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=(
+                    "➕ **Agregar moneda**\n\n"
+                    "Elige una moneda común o agrégala manualmente:"
+                ),
+                parse_mode="Markdown",
+                reply_markup=_crear_botones_moneda_presets(),
+            )
+
+        elif query.data.startswith("moneda_preset_"):
+            clave = query.data.replace("moneda_preset_", "")
+            preset = MONEDAS_PRESET.get(clave)
+            if not preset:
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="❌ Opción inválida.",
+                )
+                return
+            monedas = database.obtener_monedas(usuario_id)
+            existente = next(
+                (m for m in monedas if m["abreviatura"].lower() == preset["abreviatura"].lower()),
+                None,
+            )
+            if existente:
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=(
+                        f"📝 Ya tienes **{existente['nombre']} ({existente['abreviatura']})** "
+                        f"en tus monedas."
+                    ),
+                    parse_mode="Markdown",
+                )
+                return
+            database.crear_moneda(usuario_id, preset["nombre"], preset["simbolo"], preset["abreviatura"])
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=(
+                    f"✅ Moneda agregada: **{preset['simbolo']} {preset['nombre']} "
+                    f"({preset['abreviatura']})**."
+                ),
+                parse_mode="Markdown",
+                reply_markup=_crear_teclado_permanente(),
+            )
+
+        elif query.data == "moneda_manual":
             context.user_data["agregando_moneda_paso"] = 1
             context.user_data["agregando_moneda_datos"] = {}
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=(
-                    "➕ **Agregar moneda**\n\n"
+                    "✍️ **Agregar moneda manualmente**\n\n"
                     "¿Cómo se llama la moneda?\n"
                     "(ej: Euro, Peso cubano, USDT)\n\n"
                     "Escribe `cancelar` para salir."
                 ),
                 parse_mode="Markdown",
+            )
+
+        elif query.data == "moneda_cancel":
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="❌ Operación cancelada.",
+                reply_markup=_crear_teclado_permanente(),
             )
 
         elif query.data == "monedaeliminar_menu":
@@ -785,17 +836,56 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     text="📝 No tienes monedas para eliminar.",
                 )
                 return
-            lineas = ["🗑️ **Elige la moneda a eliminar:**\n"]
-            for i, m in enumerate(monedas, 1):
-                default = " ⭐" if m.get("es_default") else ""
-                lineas.append(f"  {i}. {m['simbolo']} {m['nombre']} ({m['abreviatura']}){default}")
-            lineas.append("\nEnvía el número de la moneda a eliminar.")
-            lineas.append("Escribe `cancelar` para salir.")
-            context.user_data["eliminando_moneda"] = True
+            filas = []
+            for m in monedas:
+                if m.get("es_default"):
+                    continue
+                filas.append([
+                    InlineKeyboardButton(
+                        f"{m['simbolo']} {m['nombre']} ({m['abreviatura']})",
+                        callback_data=f"moneda_eliminar_{m['id']}",
+                    )
+                ])
+            filas.append([InlineKeyboardButton("❌ Cancelar", callback_data="moneda_cancel")])
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text="\n".join(lineas),
+                text=(
+                    "🗑️ **Elige la moneda a eliminar:**\n\n"
+                    "La moneda predeterminada no aparece porque no se puede eliminar."
+                ),
                 parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(filas),
+            )
+
+        elif query.data.startswith("moneda_eliminar_"):
+            moneda_id = int(query.data.replace("moneda_eliminar_", ""))
+            monedas = database.obtener_monedas(usuario_id)
+            moneda = next((m for m in monedas if m["id"] == moneda_id), None)
+            if not moneda:
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="❌ Esa moneda ya no existe.",
+                )
+                return
+            if moneda.get("es_default"):
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=(
+                        "⚠️ No puedes eliminar la moneda predeterminada.\n"
+                        "Primero cambia la predeterminada a otra moneda."
+                    ),
+                    parse_mode="Markdown",
+                )
+                return
+            database.eliminar_moneda(usuario_id, moneda_id)
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=(
+                    f"🗑️ Moneda eliminada: **{moneda['simbolo']} {moneda['nombre']} "
+                    f"({moneda['abreviatura']})**."
+                ),
+                parse_mode="Markdown",
+                reply_markup=_crear_teclado_permanente(),
             )
 
         elif query.data == "moneda_default_menu":
@@ -806,17 +896,43 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     text="📝 Necesitas al menos 2 monedas para cambiar la predeterminada.",
                 )
                 return
-            lineas = ["⭐ **Elige la moneda predeterminada:**\n"]
-            for i, m in enumerate(monedas, 1):
-                default = " (actual)" if m.get("es_default") else ""
-                lineas.append(f"  {i}. {m['simbolo']} {m['nombre']} ({m['abreviatura']}){default}")
-            lineas.append("\nEnvía el número de la moneda.")
-            lineas.append("Escribe `cancelar` para salir.")
-            context.user_data["cambiando_default_moneda"] = True
+            filas = []
+            for m in monedas:
+                if m.get("es_default"):
+                    continue
+                filas.append([
+                    InlineKeyboardButton(
+                        f"{m['simbolo']} {m['nombre']} ({m['abreviatura']})",
+                        callback_data=f"moneda_default_{m['id']}",
+                    )
+                ])
+            filas.append([InlineKeyboardButton("❌ Cancelar", callback_data="moneda_cancel")])
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text="\n".join(lineas),
+                text="⭐ **Elige la nueva moneda predeterminada:**",
                 parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(filas),
+            )
+
+        elif query.data.startswith("moneda_default_"):
+            moneda_id = int(query.data.replace("moneda_default_", ""))
+            monedas = database.obtener_monedas(usuario_id)
+            moneda = next((m for m in monedas if m["id"] == moneda_id), None)
+            if not moneda:
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="❌ Esa moneda ya no existe.",
+                )
+                return
+            database.establecer_moneda_default(usuario_id, moneda_id)
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=(
+                    f"⭐ **{moneda['nombre']} ({moneda['abreviatura']})** es ahora "
+                    f"tu moneda predeterminada."
+                ),
+                parse_mode="Markdown",
+                reply_markup=_crear_teclado_permanente(),
             )
 
         elif query.data.startswith("moneda_info_"):
@@ -834,6 +950,88 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     ),
                     parse_mode="Markdown",
                 )
+
+        # === CALLBACKS DE TRANSACCIÓN PENDIENTE ===
+        elif query.data in ("tipo_gasto", "tipo_ingreso"):
+            pendiente = context.user_data.get("transaccion_pendiente")
+            if not pendiente or pendiente.get("accion") != "elegir_tipo":
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="No hay ninguna transacción pendiente.",
+                )
+                return
+            tipo = "gasto" if query.data == "tipo_gasto" else "ingreso"
+            try:
+                texto = _completar_pendiente(pendiente, tipo, usuario)
+            except Exception as e:
+                logger.error("Error completando transacción pendiente: %s", e)
+                texto = "❌ Ocurrió un error al registrar. Por favor, intenta de nuevo."
+            context.user_data.pop("transaccion_pendiente", None)
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=texto,
+                parse_mode="Markdown",
+                reply_markup=_crear_teclado_permanente(),
+            )
+
+        elif query.data.startswith("moneda_confirmar_"):
+            moneda_id = int(query.data.replace("moneda_confirmar_", ""))
+            pendiente = context.user_data.get("transaccion_pendiente")
+            if not pendiente or pendiente.get("accion") != "elegir_moneda":
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="No hay ninguna transacción pendiente.",
+                )
+                return
+            monedas = database.obtener_monedas(usuario_id)
+            moneda = next((m for m in monedas if m["id"] == moneda_id), None)
+            if not moneda:
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="❌ Esa moneda ya no existe.",
+                )
+                return
+            tipo = pendiente.get("tipo")
+            try:
+                texto = _completar_pendiente(pendiente, tipo or "gasto", usuario, moneda=moneda)
+            except Exception as e:
+                logger.error("Error completando transacción pendiente: %s", e)
+                texto = "❌ Ocurrió un error al registrar. Por favor, intenta de nuevo."
+            context.user_data.pop("transaccion_pendiente", None)
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=texto,
+                parse_mode="Markdown",
+                reply_markup=_crear_teclado_permanente(),
+            )
+
+        elif query.data == "pendiente_cancel":
+            context.user_data.pop("transaccion_pendiente", None)
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="❌ Registro cancelado.",
+                reply_markup=_crear_teclado_permanente(),
+            )
+
+        # === CALLBACKS DE ELIMINAR HISTORIAL (/delete) ===
+        elif query.data == "delete_confirm":
+            eliminadas = database.eliminar_transacciones(usuario_id)
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=(
+                    f"🗑️ **Historial eliminado.** Se borraron **{eliminadas}** transacciones.\n\n"
+                    f"Tu balance ahora está en $0.00."
+                ),
+                parse_mode="Markdown",
+                reply_markup=_crear_teclado_permanente(),
+            )
+
+        elif query.data == "delete_cancel":
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="❌ Operación cancelada.",
+                reply_markup=_crear_teclado_permanente(),
+            )
 
         # === CALLBACKS DE ANUNCIO ===
         elif query.data == "anuncio_enviar":
