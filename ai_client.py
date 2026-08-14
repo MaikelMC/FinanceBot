@@ -155,6 +155,16 @@ class AIResponder:
                 "• `Recibí $300 de salario`"
             ), None
 
+        # Si la transacción referencia un presupuesto existente con moneda configurada,
+        # reutilizar esa moneda en vez de preguntar de nuevo al usuario.
+        if moneda_obj is None and len(monedas_usuario) > 1:
+            from knowledge import _detectar_presupuesto_en_gasto
+            presupuesto = _detectar_presupuesto_en_gasto(mensaje, usuario)
+            if presupuesto and presupuesto.get("moneda_id"):
+                moneda_obj = next(
+                    (m for m in monedas_usuario if m["id"] == presupuesto["moneda_id"]), None
+                )
+
         # Si tiene múltiples monedas y no especificó, pedir que elija
         if moneda_obj is None and len(monedas_usuario) > 1:
             lineas = [

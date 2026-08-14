@@ -123,6 +123,13 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
         # Si el gasto hace referencia a un presupuesto ("del presupuesto para X"),
         # registrarlo en la categoría del presupuesto para descontarlo del mismo.
         presupuesto = _detectar_presupuesto_en_gasto(mensaje, usuario)
+        # Reutilizar la moneda del presupuesto si el gasto se liga a él y no hay moneda aún
+        if moneda_id is None and presupuesto and presupuesto.get("moneda_id"):
+            for m in database.obtener_monedas(usuario["id"]):
+                if m["id"] == presupuesto["moneda_id"]:
+                    moneda = m
+                    moneda_id = m["id"]
+                    break
         if presupuesto:
             categoria_id = presupuesto["categoria_id"]
             categoria = presupuesto.get("categoria_nombre") or presupuesto.get("nombre") or categoria
