@@ -2,56 +2,79 @@
 
 ## 1. Resumen
 
-Bot de Telegram para finanzas personales con procesamiento de lenguaje natural en español/inglés. Permite registrar gastos, ingresos, presupuestos y metas de ahorro mediante mensajes de texto conversacionales. Usa un pipeline híbrido: regex nativo rápido + IA (Mistral/Ollama) para comprensión avanzada.
+Bot de Telegram para finanzas personales con procesamiento de lenguaje natural en español/inglés. Permite registrar gastos e ingresos, gestionar presupuestos (con nombre propio y moneda), metas de ahorro y múltiples monedas mediante mensajes conversacionales. Usa un pipeline híbrido: **fast-path regex** (cero costo, ~80% de mensajes) + **IA** (Mistral/Ollama) para comprensión avanzada, con caché de resultados. Persistencia en **SQLite (local)** o **Google Sheets (nube)** vía backend intercambiable.
+
+Versión actual: `changelog.VERSION_ACTUAL` (2.8). El bot notifica a los usuarios las novedades de cada versión al arrancar.
 
 ---
 
 ## 2. Arquitectura General
 
 ```
-Usuario ──> Telegram ──> python-telegram-bot ──> handlers.py (intent detection)
-                                                    │
-                                          ┌─────────┴──────────┐
-                                          ▼                    ▼
-                                    Regex nativo          AI Client
-                                    (handlers.py)     (ai_client.py)
-                                          │                    │
-                                          ▼                    ▼
-                                     knowledge.py ────> Mistral / Ollama
-                                          │
-                                          ▼
-                                     database.py ───> SQLite
+Usuario ──> Telegram ──> python-telegram-bot ──> main.py (handlers registrados)
+                                                     │
+                                     ┌───────────────┴───────────────┐
+                                     ▼                               ▼
+                            handlers.py (comandos,          knowledge.py (procesa
+                            callbacks, teclados,             y responde; multi-
+                            flujos de moneda)                transacción, fechas)
+                                     │                               │
+                                     └───────────┬───────────────────┘
+                                                 ▼
+                                    ai_client.py (AIResponder.responder)
+                                                 │
+                                                 ▼
+                                    intent_parser.py (clasificación)
+                                     • fast-path regex
+                                     • IA Mistral / Ollama (JSON)
+                                     • caché de intenciones
+                                                 │
+                                                 ▼
+                                    database.py (proxy DB_BACKEND)
+                                   ┌────────────┴────────────┐
+                                   ▼                         ▼
+                        database_sqlite.py           database_gsheets.py
+                          (data/finanzas.db)        (Google Sheets + caché)
 ```
 
-**Pipeline de mensaje:**
+**Pipeline de mensaje (lenguaje natural):**
 ```
-Mensaje → handle_message()
-         → AIResponder.responder()
-             → _procesar_con_regex_nativo()  (intento rápido)
-                 → _detectar_intencion()     (clasifica intento)
-                 → función específica        (procesa y responde)
-             → fallback: _consultar_mistral() (IA avanzada)
-                 → parsea respuesta estructurada
-                 → redirige a función nativa
+Mensaje → handlers.handle_message()
+         → ai_client.AIResponder().responder()
+             → intent_parser.analizar_intencion()
+                 → _fast_path()      (regex determinista; si match, retorna)
+                 → caché (por mensaje)
+                 → _call_ai()        (Mistral → fallback Ollama → vacío)
+                     → _validar_resultado()   (normaliza el JSON de la IA)
+             → despacho por intención (registrar, consultar, configurar, etc.)
+             → knowledge.py procesa con datos reales de la BD y arma la respuesta
 ```
+
+**Flujos paralelos en handlers.py:**
+- **Comandos** (`/start`, `/resumen`, `/gastos`, ...) → función directa.
+- **Botones inline** (callbacks) → `handle_callback_query` (edita el mensaje, nunca reenvía uno nuevo).
+- **Teclado persistente** (💰 Balance, 📋 Transacciones, 📊 Presupuestos, 💱 Monedas).
+- **Multi-transacción** (ej: "$50 en comida y $30 en taxi") → preview con botones para editar/quitar/guardar.
+- **Flujo de moneda** (`_manejar_flujo_moneda`) y pendientes (`transaccion_pendiente`).
 
 ---
 
 ## 3. Stack Tecnológico
 
-| Componente        | Tecnología                     | Versión |
-|------------------|--------------------------------|---------|
-| Lenguaje         | Python                         | 3.14    |
-| Bot framework    | python-telegram-bot            | 22.8    |
-| Base de datos    | SQLite (local)                 | —       |
-| Cache / sesión   | telegram.ext.ContextTypes      | —       |
-| IA proveedor 1   | Mistral AI (API)               | 2.5.1   |
-| IA proveedor 2   | Ollama (local)                 | —       |
-| Cliente HTTP     | httpx                          | 0.28    |
-| Env config       | python-dotenv                  | 1.2     |
-| Tipos            | pydantic (vía mistralai)       | 2.13    |
+| Componente          | Tecnología                        | Versión |
+|---------------------|-----------------------------------|---------|
+| Lenguaje            | Python                            | 3.10+ (venv local) |
+| Bot framework       | python-telegram-bot[webhooks]     | >=22.8  |
+| Base de datos local | SQLite (`data/finanzas.db`)       | —       |
+| Base de datos nube  | Google Sheets (gspread)           | >=6.2   |
+| Cache / sesión      | telegram.ext.ContextTypes         | —       |
+| IA proveedor 1      | Mistral AI (API)                  | >=2.5   |
+| IA proveedor 2      | Ollama (local)                    | —       |
+| Cliente HTTP        | httpx (vía python-telegram-bot)   | —       |
+| Env config          | python-dotenv                     | >=1.2.2 |
+| Spreadsheets        | pandas, gspread-dataframe         | >=3.0 / >=4.0 |
 
-**Sistema operativo objetivo:** Windows / Linux (compatible con ambos).
+**Sistema operativo objetivo:** Windows (desarrollo) / Linux (Render.com, producción). Se usa virtualenv (`venv/`) — no hay instalaciones globales.
 
 ---
 
@@ -59,257 +82,389 @@ Mensaje → handle_message()
 
 ```
 personal-finance-bot/
-├── main.py                  ← Entry point. Arranca polling y registra handlers.
-├── config.py                ← Lee .env, expone constantes (DB_PATH, tokens, etc.)
-├── database.py              ← Capa de datos SQLite (5 tablas, CRUD completo).
-├── handlers.py              ← Intents: detección con keywords + parsing regex.
-├── knowledge.py             ← Funciones de procesamiento: balance, gastos, presupuestos.
-├── ai_client.py             ← Cliente Mistral/Ollama con fallback.
-├── verify_system.py         ← Script de verificación de integridad.
+├── main.py                  ← Entry point. Registra comandos/handlers, arranca polling o webhook.
+├── config.py                ← Lee .env, expone constantes (DB_PATH, tokens, webhook, etc.) y valida.
+├── database.py              ← Proxy de BD: redirige a sqlite o gsheets según DB_BACKEND.
+├── database_sqlite.py       ← Capa de datos SQLite (7 tablas, CRUD completo + migraciones ALTER).
+├── database_gsheets.py      ← Capa de datos Google Sheets (misma interfaz, caché en memoria + flush).
+├── intent_parser.py         ← Motor de intenciones: fast-path regex + IA (Mistral/Ollama) + caché.
+├── ai_client.py             ← AIResponder: orquesta el pipeline y ejecuta la intención detectada.
+├── handlers.py              ← Handlers de Telegram: comandos, callbacks, teclados, flujos de moneda.
+├── knowledge.py             ← Procesamiento: gastos, ingresos, balance, presupuestos, metas, fechas, ayuda.
+├── changelog.py             ← VERSION_ACTUAL + historial de versiones (notificaciones al usuario).
+├── verify_system.py         ← Verificación de integridad del sistema.
 ├── check_structure.py       ← Verifica estructura de archivos.
-├── create_venv.py           ← Crea entorno virtual desde cero.
+├── create_venv.py           ← Crea entorno virtual desde cero (setup completo).
+├── create_venv_simple.py    ← Setup rápido de venv.
 ├── setup_environment.py     ← Setup completo (venv + deps + verificación).
+├── install_bot.py           ← Instalador opcional.
+├── INSTALAR.bat             ← Instalador para Windows.
+├── test_parsing_bugs.py     ← Suites de tests (unittest, 17 casos de regresión).
+├── requirements.txt         ← Dependencias (ver sección 12).
 ├── prompts/
-│   └── system_prompt.txt    ← Prompt del sistema para la IA.
+│   └── system_prompt.txt    ← Prompt del sistema para la IA (referencia).
 ├── data/
-│   └── finanzas.db          ← Base de datos SQLite (se crea sola).
-├── .env                     ← Token de Telegram + API keys.
-├── AGENTS.md                ← Instrucciones para OpenCode.
+│   ├── finanzas.db          ← Base de datos SQLite (se crea sola).
+│   └── images/              ← Imágenes del bot.
+├── credentials.json         ← Credenciales de service account de Google (no subir a GitHub).
+├── .env                     ← Token de Telegram + API keys (en .gitignore).
+├── .gitignore
+├── AGENTS.md                ← Instrucciones para agentes de IA (OpenCode).
 ├── STACK.md                 ← Este documento.
-└── requirements.txt / pyproject.toml  ← (no existe, deps se instalan directo)
+└── README.md                ← Resumen para usuarios.
 ```
 
 ---
 
-## 5. Base de Datos — SQLite
+## 5. Base de Datos — Dos Backends
 
-Archivo: `data/finanzas.db` (creación automática en `database.crear_tablas()`).
+`database.py` es un **proxy**: importa `*` de `database_sqlite` o `database_gsheets` según `DB_BACKEND` en `.env`. Las 14 funciones públicas tienen firmas idénticas en ambos backends; cambiar de backend no requiere tocar código.
 
-### 5.1 Tabla `usuarios`
-| Columna           | Tipo     | Descripción                  |
-|------------------|----------|------------------------------|
-| id               | INTEGER  | PK autoincrement             |
-| telegram_user_id | INTEGER  | UNIQUE, ID de Telegram       |
-| nombre           | TEXT     | Nombre del usuario           |
-| created_at       | TIMESTAMP| Fecha de creación            |
-| updated_at       | TIMESTAMP| Fecha de actualización       |
+### 5.1 Backend SQLite (`database_sqlite.py`)
 
-### 5.2 Tabla `categorias`
-| Columna     | Tipo     | Descripción                          |
-|------------|----------|--------------------------------------|
-| id         | INTEGER  | PK                                   |
-| usuario_id | INTEGER  | FK → usuarios.id                     |
-| nombre     | TEXT     | Nombre de la categoría               |
-| tipo       | TEXT     | CHECK: gastos, ingresos, ahorros, inversiones |
-| descripcion| TEXT     | Opcional                             |
-| icono_color| TEXT     | Color hexadecimal (ej: #3498db)       |
+Archivo: `data/finanzas.db`. `crear_tablas()` crea las 7 tablas y aplica migraciones idempotentes (`ALTER TABLE ... ADD COLUMN` con try/except) para columnas nuevas en BD existentes.
 
-### 5.3 Tabla `transacciones`
-| Columna      | Tipo     | Descripción                     |
-|-------------|----------|----------------------------------|
-| id          | INTEGER  | PK                               |
-| usuario_id  | INTEGER  | FK → usuarios.id                 |
-| categoria_id| INTEGER  | FK → categorias.id (nullable)    |
-| tipo        | TEXT     | CHECK: gasto, ingreso            |
-| cantidad    | REAL     | Monto numérico                   |
-| descripcion | TEXT     | Descripción textual              |
-| fecha       | TIMESTAMP| Fecha (default CURRENT_TIMESTAMP)|
+**usuarios**
+| Columna           | Tipo      | Descripción                    |
+|-------------------|-----------|--------------------------------|
+| id                | INTEGER   | PK autoincrement               |
+| telegram_user_id  | INTEGER   | UNIQUE, ID de Telegram         |
+| nombre            | TEXT      | Nombre del usuario             |
+| created_at        | TIMESTAMP | Fecha de creación              |
+| updated_at        | TIMESTAMP | Fecha de actualización         |
 
-### 5.4 Tabla `presupuestos`
-| Columna           | Tipo     | Descripción                     |
-|------------------|----------|----------------------------------|
-| id               | INTEGER  | PK                               |
-| usuario_id       | INTEGER  | FK → usuarios.id                 |
-| categoria_id     | INTEGER  | FK → categorias.id               |
-| cantidad_planejada| REAL    | Límite del presupuesto           |
-| cantidad_gastada | REAL     | Gasto acumulado (default 0)      |
-| periodo          | TEXT     | CHECK: mensual, anual            |
-| fecha_inicio     | DATE     | Inicio del período               |
-| fecha_fin        | DATE     | Fin del período (opcional)       |
+**categorias**
+| Columna      | Tipo     | Descripción                                  |
+|--------------|----------|----------------------------------------------|
+| id           | INTEGER  | PK                                           |
+| usuario_id   | INTEGER  | FK → usuarios.id                             |
+| nombre       | TEXT     | Nombre de la categoría                       |
+| tipo         | TEXT     | CHECK: gastos, ingresos, ahorros, inversiones|
+| descripcion  | TEXT     | Opcional                                     |
+| icono_color  | TEXT     | Color hexadecimal (ej: #3498db)              |
+| created_at   | TIMESTAMP|                                              |
 
-### 5.5 Tabla `metas_ahorro`
-| Columna        | Tipo     | Descripción                     |
-|---------------|----------|----------------------------------|
-| id            | INTEGER  | PK                               |
-| usuario_id    | INTEGER  | FK → usuarios.id                 |
-| nombre        | TEXT     | Nombre de la meta                |
-| objetivo      | REAL     | Meta total                       |
-| cantidad_actual| REAL    | Progreso actual (default 0)      |
-| fecha_inicio  | DATE     | Inicio                           |
-| fecha_meta    | DATE     | Fecha objetivo                   |
+**transacciones**
+| Columna      | Tipo      | Descripción                          |
+|--------------|-----------|--------------------------------------|
+| id           | INTEGER   | PK                                   |
+| usuario_id   | INTEGER   | FK → usuarios.id                     |
+| categoria_id | INTEGER   | FK → categorias.id (nullable)        |
+| tipo         | TEXT      | CHECK: gasto, ingreso                |
+| cantidad     | REAL      | Monto numérico                       |
+| descripcion  | TEXT      | Descripción textual                  |
+| moneda_id    | INTEGER   | FK → monedas.id (nullable)           |
+| fecha        | TIMESTAMP | Default CURRENT_TIMESTAMP            |
+| created_at   | TIMESTAMP |                                      |
+
+**presupuestos**
+| Columna            | Tipo      | Descripción                     |
+|--------------------|-----------|----------------------------------|
+| id                 | INTEGER   | PK                               |
+| usuario_id         | INTEGER   | FK → usuarios.id                 |
+| categoria_id       | INTEGER   | FK → categorias.id (nullable)    |
+| nombre             | TEXT      | Nombre propio (puede diferir de la categoría) |
+| moneda_id          | INTEGER   | FK → monedas.id                  |
+| cantidad_planejada | REAL      | Límite del presupuesto           |
+| cantidad_gastada   | REAL      | Gasto acumulado (default 0)      |
+| periodo            | TEXT      | CHECK: mensual, anual            |
+| fecha_inicio       | DATE      | Inicio del período               |
+| fecha_fin          | DATE      | Fin del período (opcional)       |
+| created_at         | TIMESTAMP |                                  |
+
+**metas_ahorro**
+| Columna         | Tipo      | Descripción                     |
+|-----------------|-----------|---------------------------------|
+| id              | INTEGER   | PK                               |
+| usuario_id      | INTEGER   | FK → usuarios.id                 |
+| nombre          | TEXT      | Nombre de la meta                |
+| objetivo        | REAL      | Meta total                       |
+| cantidad_actual | REAL      | Progreso actual (default 0)      |
+| fecha_inicio    | DATE      | Inicio                           |
+| fecha_meta      | DATE      | Fecha objetivo                   |
+| created_at      | TIMESTAMP |                                  |
+
+**notificaciones**
+| Columna     | Tipo      | Descripción                          |
+|-------------|-----------|--------------------------------------|
+| id          | INTEGER   | PK                                   |
+| usuario_id  | INTEGER   | FK → usuarios.id                     |
+| version     | TEXT      | Versión ya notificada                |
+| enviada_en  | TIMESTAMP | Cuando se notificó                   |
+
+**monedas**
+| Columna     | Tipo      | Descripción                          |
+|-------------|-----------|--------------------------------------|
+| id          | INTEGER   | PK                                   |
+| usuario_id  | INTEGER   | FK → usuarios.id                     |
+| nombre      | TEXT      | Nombre (Peso cubano, Dólar, ...)     |
+| simbolo     | TEXT      | Símbolo (ej: $, ₮, €) default '$'    |
+| abreviatura | TEXT      | Código (CUP, USD, USDT, ...)         |
+| es_default  | INTEGER   | 0/1, moneda por defecto              |
+| created_at  | TIMESTAMP |                                      |
+
+### 5.2 Backend Google Sheets (`database_gsheets.py`)
+
+Cada "tabla" es una hoja del spreadsheet (mismas columnas que el esquema SQLite; `SHEET_COLUMNS`). Características:
+- **Caché en memoria** por hoja; escrituras diferidas con `flush` programado (3 s) y `flush_all()` al apagar.
+- **IDs** autogenerados por hoja (contadores en memoria).
+- **Fechas**: maneja seriales de Excel y cadenas (`DATE_COLUMNS`).
+- **Reintentos** contra la API de Google (429/500/502/503 con backoff).
+- Soporta credenciales como **archivo** (`GOOGLE_SHEETS_CREDENTIALS`) o **JSON string** (`GOOGLE_SHEETS_CREDENTIALS_JSON`, para Render).
 
 ---
 
-## 6. Detección de Intenciones (handlers.py)
+## 6. Detección de Intenciones (`intent_parser.py`)
 
-### 6.1 Intenciones Reconocidas
+### 6.1 Intenciones Reconocidas (`_INTENCIONES_VALIDAS`)
 
-| Intención                    | Ejemplos de entrada                                     |
-|------------------------------|--------------------------------------------------------|
-| `registrar_transaccion`      | "gasté 50 en comida", "recibí 2000 de salario"        |
-| `consultar_gastos`           | "ver mis gastos", "historial de gastos"               |
-| `consultar_ingresos`         | "mostrarme los ingresos", "ingresos del mes"          |
-| `consultar_transacciones`    | "dame el historial", "muestrame las transacciones"    |
-| `consultar_balance`          | "cual es mi balance", "saldo actual"                  |
-| `consultar_presupuesto`      | "como va mi presupuesto", "ver presupuestos"          |
-| `consultar_categorias`       | "ver mis categorias"                                   |
-| `configurar_presupuesto`     | "fijar presupuesto de 500 para comida"                |
-| `configurar_ahorro`          | "quiero ahorrar 2000 para vacaciones"                 |
-| `start`                      | "hola", "/start"                                       |
-| `general`                    | Mensajes no reconocidos                                |
+| Intención                | Ejemplos de entrada                                            |
+|--------------------------|---------------------------------------------------------------|
+| `registrar`              | "gasté 50 en comida", "recibí 2000 de salario", "compré $30 de ropa" |
+| `consultar`              | "cuánto tengo", "ver mis gastos", "ver presupuestos"          |
+| `configurar_presupuesto` | "mi presupuesto para comida es $500", "añade 500 al presupuesto de barbería" |
+| `configurar_ahorro`      | "quiero ahorrar 2000 para vacaciones"                          |
+| `modificar`              | "cambia el monto del último gasto a 200", "cambia el tipo de X a ingreso" |
+| `eliminar`               | "elimina el presupuesto de comida", "borra el último gasto"    |
+| `analizar_por_fecha`     | "qué gasté hoy", "ver transacciones de esta semana"            |
+| `ayuda_uso`              | "cómo registro un gasto", "para qué sirve", "ayuda"            |
+| `general`                | Saludos y mensajes no reconocidos                               |
 
-### 6.2 Mecanismo
-1. **Keywords de consulta** (`ver`, `mostrar`, `dame`, `historial`, etc.)
-2. **Keywords de registro** (`gasté`, `compré`, `recibí`, etc.)
-3. **Keywords de presupuesto/ahorro** (`fijar`, `establecer`, `presupuesto`, `ahorrar`)
-4. Fallback a `general`
+### 6.2 Subconsultas (`consultar` → `subconsulta`)
 
-### 6.3 Parsing de Transacciones
-- Extracción de `cantidad` mediante regex (`\d+(?:\.\d+)?`)
-- Detección de tipo (gasto/ingreso) por palabras clave
-- Categorización automática por palabras como "comida", "salario", etc.
-- Las palabras de relleno se filtran (artículos, preposiciones, etc.)
+| Subconsulta                 | Qué responde                                          |
+|-----------------------------|-------------------------------------------------------|
+| `balance`                   | Saldo/balance agrupado por moneda                      |
+| `transacciones` / `gastos` / `ingresos` | Lista de movimientos (filtrados por tipo)  |
+| `presupuesto`               | Lista de presupuestos con progreso                     |
+| `categorias`                | Categorías agrupadas por tipo                          |
+| `presupuesto_especifico`    | Restante/disponible de UN presupuesto ("¿cuánto me queda de barbería?") |
+| `mayor_gasto`               | Mayor gasto + top 3 de un período                      |
+| `gastos_por_presupuestos`   | Cuánto gastó en un período desglosado por presupuesto + total |
+| `gastos_por_fecha`          | Total gastado/recibido de un período, por moneda       |
+
+### 6.3 Mecanismo (orden)
+
+1. **Fast-path regex** (`_FAST_PATTERNS`): registro, ahorro, presupuesto (antes que el formato corto), consultas con fecha (antes que balance), ayuda, modificar, eliminar, saludo, categorías, presupuestos. Confianza 0.95-0.99.
+2. **Caché** por mensaje (`_INTENT_CACHE`) — evita re-llamadas a IA.
+3. **IA** (`_call_ai`): Mistral primero, Ollama como fallback. Envía `_SYSTEM_PROMPT` + prompt de usuario **con contexto real** (nombres de presupuestos y monedas del usuario) para que elija etiquetas exactas.
+4. **Validación** (`_validar_resultado`): normaliza el JSON contra `_RESULTADO_VACIO`, filtros de intenciones/tipos/subconsultas válidas y re-parser de cantidades.
+
+La IA **solo clasifica**; los números y respuestas los calcula el bot con datos reales de la BD (determinista).
 
 ---
 
-## 7. Pipeline de IA (ai_client.py + knowledge.py)
+## 7. Pipeline de IA (`ai_client.py`)
 
-### 7.1 Orden de Procesamiento
-```
-1. Regex nativo en handlers._detectar_intencion()
-2. Si intención clara → procesar con función de knowledge.py
-3. Si no clara → consultar Mistral / Ollama
-4. Mistral responde con estructura: INTENTION, CANTIDAD, CATEGORIA, etc.
-5. Se parsea la respuesta y se redirige a la función nativa correspondiente
-```
+### 7.1 AIResponder.responder(mensaje, usuario) → (texto, pendiente)
+
+| Método                     | Intención que ejecuta                              |
+|----------------------------|----------------------------------------------------|
+| `_procesar_ayuda`          | `ayuda_uso` (respuesta contextual o `_responder_ayuda_uso`) |
+| `_procesar_registro`       | `registrar` (gasto/ingreso; detecta moneda, reutiliza la del presupuesto si aplica) |
+| `_procesar_consulta`       | `consultar` (dispatch por `subconsulta`)           |
+| `_procesar_analisis_fecha` | `analizar_por_fecha`                               |
+| `_procesar_presupuesto`    | `configurar_presupuesto` (modo reemplazar/sumar, moneda, pendiente) |
+| `_procesar_ahorro`         | `configurar_ahorro`                                |
+| `_procesar_modificacion`   | `modificar`                                        |
+| `_procesar_eliminacion`    | `eliminar` (transacción o presupuesto)             |
+| `_procesar_general`        | `general` / fallback                               |
+| `_generar_respuesta_error` | Fallback ante errores                              |
+
+**Pendiente** (`transaccion_pendiente`): cuando falta información (elegir tipo gasto/ingreso, elegir moneda, moneda del presupuesto), el bot responde y guarda un `pendiente` que `handlers` convierte en **botones inline** para completar la acción.
 
 ### 7.2 Proveedores de IA
 
-| Proveedor | Config (.env)              | Modelo por defecto      |
-|----------|---------------------------|------------------------|
-| Mistral  | `AI_PROVIDER=mistral` + `MISTRAL_API_KEY` | `mistral-small-latest` |
-| Ollama   | `AI_PROVIDER=ollama` + `OLLAMA_BASE_URL`  | `llama3.2`             |
+| Proveedor | Config (.env)                  | Modelo por defecto      |
+|-----------|--------------------------------|------------------------|
+| Mistral   | `AI_PROVIDER=mistral` + `MISTRAL_API_KEY` | `mistral-small-latest` |
+| Ollama    | `AI_PROVIDER=ollama` + `OLLAMA_BASE_URL`  | `llama3.2`             |
 
-### 7.3 Funciones de Procesamiento (knowledge.py)
+### 7.3 Funciones de Procesamiento (`knowledge.py`)
 
 | Función                          | Qué hace                                                |
 |----------------------------------|--------------------------------------------------------|
-| `_procesar_transacciones(usuario, tipo)` | Lista transacciones, opcionalmente filtradas        |
-| `_procesar_gastos(usuario)`      | Solo gastos (wrapper de transacciones con tipo=gasto) |
-| `_procesar_ingresos(usuario)`    | Solo ingresos (wrapper de transacciones con tipo=ingreso) |
-| `_procesar_balance(usuario)`     | Totales: ingresos, gastos, neto                       |
-| `_procesar_presupuestos(usuario)`| Presupuestos activos con barra de progreso            |
-| `_procesar_categorias(usuario)`  | Lista categorías agrupadas por tipo                   |
-| `_procesar_gasto(mensaje, usuario)` | Registra un gasto y crea categoría si no existe   |
-| `_procesar_ingreso(mensaje, usuario)` | Registra un ingreso y crea categoría si no existe |
+| `_procesar_gasto(mensaje, usuario, moneda)` | Registra gasto; crea categoría; liga a presupuesto si se menciona (descuenta y muestra restante) |
+| `_procesar_ingreso(mensaje, usuario, moneda)` | Registra ingreso; crea categoría si no existe |
+| `_procesar_balance(usuario)`     | Balance agrupado por moneda (ingresos/gastos/neto)     |
+| `_procesar_transacciones(usuario, limite, tipo)` | Lista movimientos, opcionalmente filtrados |
+| `_procesar_gastos` / `_procesar_ingresos` | Wrappers de transacciones por tipo             |
+| `_procesar_presupuestos(usuario)`| Presupuestos con nombre, moneda, barra de progreso     |
+| `_procesar_presupuesto_especifico(usuario, etiqueta)` | Restante de un presupuesto (fuzzy match) |
+| `_procesar_mayor_gasto(usuario, mensaje)` | Mayor gasto + top 3 + total por moneda de un período |
+| `_procesar_gastos_por_presupuestos(usuario, mensaje)` | Gastos de un período desglosados por presupuesto + total |
+| `_procesar_gastos_por_fecha(usuario, mensaje)` | Totales por moneda de un período            |
+| `_procesar_categorias(usuario)`  | Categorías agrupadas por tipo                        |
+| `_procesar_metas_ahorro(usuario)`| Metas de ahorro con progreso                          |
+| `_procesar_resumen_mensual(usuario)` | Resumen del mes actual                            |
+| `_analizar_transacciones_por_fecha(usuario, mensaje)` | Análisis por fecha: resumen por moneda, categorías, mayor gasto, detalle |
+| `_parsear_fecha_natural(mensaje)`| Parsea hoy/ayer/esta semana/este mes/días/meses/últimos N días → (inicio, fin, etiqueta) |
+| `_procesar_modificar_transaccion` / `_procesar_eliminar_presupuesto` / `_procesar_eliminar_transaccion` | Edición/borrado por lenguaje natural |
+| `_parsear_multi_transaccion` / `_guardar_multi_transacciones` | Multi-transacciones con preview |
+| `_detectar_moneda_en_texto`, `_detectar_presupuesto_en_gasto`, `_buscar_presupuesto`, `_formatear_monto`, `_moneda_lookup_usuario`, `_crear_barra_progreso` | Helpers |
 
 ---
 
 ## 8. Comandos de Telegram
 
-| Comando   | Handler                  | Función                        |
-|----------|--------------------------|--------------------------------|
-| `/start` | `start()`                | Inicia sesión, muestra stats   |
-| `/user`  | `consultar_usuario()`    | Muestra info del usuario       |
-| `/help`  | `consultar_comandos()`   | Lista de comandos disponibles   |
+Menú registrado con `set_my_commands` (sugerencias al escribir `/`).
 
-Cualquier mensaje de texto que no sea comando se procesa como lenguaje natural.
+| Comando      | Handler                  | Función                                   |
+|--------------|--------------------------|-------------------------------------------|
+| `/start`     | `start()`                | Inicia sesión, muestra estadísticas       |
+| `/resumen`   | `consultar_resumen()`    | Resumen del mes actual                     |
+| `/categorias`| `consultar_categorias()` | Ver categorías financieras                 |
+| `/gastos`    | `consultar_gastos()`     | Ver últimos gastos                         |
+| `/ingresos`  | `consultar_ingresos()`   | Ver últimos ingresos                       |
+| `/metas`     | `consultar_metas()`      | Ver metas de ahorro                        |
+| `/help`      | `consultar_comandos()`   | Lista de comandos y ejemplos               |
+| `/user`      | `consultar_usuario()`    | Info del usuario                           |
+| `/delete`    | `eliminar_historial()`   | Borrar todo el historial                   |
+| `/anuncio`   | `anuncio()`              | Solo admin (`ADMIN_USER_ID`)               |
+
+Cualquier texto que no sea comando se procesa como lenguaje natural vía `handle_message`.
+
+**Teclado persistente:** 💰 Balance, 📋 Transacciones, 📊 Presupuestos, 💱 Monedas (`TECLADO_BUTTONS`).
+
+**Botones inline (callbacks):** elección de moneda (`elegir_moneda`, `elegir_moneda_presupuesto`), confirmación de tipo gasto/ingreso, presets de moneda, multi-transacción, cancelar pendientes. Todos **editan** el mensaje original (`_responder_editando`).
 
 ---
 
 ## 9. Configuración y Variables de Entorno
 
-Archivo `.env`:
+Archivo `.env` (ejemplo en `AGENTS.md`):
 
 ```env
 TELEGRAM_BOT_TOKEN=token_de_botfather
-AI_PROVIDER=mistral              # "mistral" | "ollama"
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
+ADMIN_USER_ID=123456789
+
+# Backend de base de datos
+DB_BACKEND=sqlite                    # "sqlite" | "gsheets"
+GOOGLE_SHEETS_CREDENTIALS=data/finanzas-sa.json   # (gsheets, archivo)
+GOOGLE_SHEETS_CREDENTIALS_JSON=...   # (gsheets, JSON string para Render)
+GOOGLE_SHEETS_SPREADSHEET_ID=...     # (gsheets, obligatorio)
+
+AI_PROVIDER=mistral                  # "mistral" | "ollama"
 MISTRAL_API_KEY=tu_api_key
 MISTRAL_MODEL=mistral-small-latest
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2
+
+# Webhook (producción en Render.com; si está vacío usa polling)
+WEBHOOK_URL=
+WEBHOOK_SECRET=
+ALLOWED_HOSTS=your-app.onrender.com
+PORT=8000
 ```
 
-### Validación (config.py)
-- `TELEGRAM_BOT_TOKEN` — obligatorio
-- `AI_PROVIDER` — debe ser "mistral" o "ollama"
-- `MISTRAL_API_KEY` — obligatorio si AI_PROVIDER=mistral
-- `OLLAMA_BASE_URL` — obligatorio si AI_PROVIDER=ollama
+### Validación (`config.validate_config()`)
+- `TELEGRAM_BOT_TOKEN` — obligatorio.
+- `DB_BACKEND` — debe ser `sqlite` o `gsheets`; si es `gsheets` exige credenciales (archivo o JSON) y `GOOGLE_SHEETS_SPREADSHEET_ID`.
+- `AI_PROVIDER` — `mistral` exige `MISTRAL_API_KEY`; `ollama` exige `OLLAMA_BASE_URL`.
 
 ---
 
-## 10. Dependencias
+## 10. Versionado y Notificaciones (`changelog.py`)
 
-Instalación directa con pip (no hay `requirements.txt`):
-
-```
-python-telegram-bot>=22.8
-python-dotenv
-mistralai
-```
+- `VERSION_ACTUAL` define la versión vigente (2.8).
+- `CHANGELOG` es un dict `{versión: {titulo, mejoras, emoji}}`.
+- En cada mensaje, `handlers.handle_message` compara la última versión vista (`notificaciones` → `obtener_ultima_version_vista`) y, si hay novedades, envía el resumen de las versiones pendientes y marca como notificadas (`registrar_notificacion`).
 
 ---
 
-## 11. Flujo de Inicio (main.py)
+## 11. Dependencias
+
+`requirements.txt`:
+
+```
+python-telegram-bot[webhooks]>=22.8
+python-dotenv>=1.2.2
+mistralai>=2.5.0
+gspread>=6.2.0
+pandas>=3.0.0
+gspread-dataframe>=4.0.0
+```
+
+Instalación: `python -m venv venv && venv\Scripts\activate && pip install -r requirements.txt`
+
+Scripts de setup: `python create_venv.py` (completo) o `python setup_environment.py` (rápido). Verificación: `python verify_system.py` y `python check_structure.py`.
+
+---
+
+## 12. Flujo de Inicio (`main.py`)
 
 ```
 main()
-  → asyncio.run(run_bot())
-      → config.validate_config()
-      → crear directorios data/ e images/
-      → database.crear_tablas()
-      → ApplicationBuilder().token().build()
-      → registrar handlers:
-          CommandHandler("start", start)
-          CommandHandler("user", consultar_usuario)
-          CommandHandler("help", consultar_comandos)
-          MessageHandler(TEXT, handle_message)  ← NLP
-          error_handler
-      → app.run_polling()
+  ├─ Si WEBHOOK_URL → app.run_webhook(listen=0.0.0.0, port=PORT, url_path, secret_token)
+  └─ Si no → asyncio.run(run_bot())  [modo polling local]
+        → config.validate_config()
+        → crear directorios data/ e images/
+        → database.crear_tablas()
+        → ApplicationBuilder().token().post_init(_post_init).build()
+        → _post_init: set_my_commands(COMANDOS_MENU) + set_chat_menu_button
+        → registrar handlers:
+            CommandHandler: start, user, help, delete, anuncio, categorias, gastos, ingresos, metas, resumen
+            CallbackQueryHandler(handle_callback_query)
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+            add_error_handler(error_handler)
+        → delete_webhook(drop_pending_updates=True)  (evita conflictos)
+        → app.start() + updater.start_polling()
+        → shutdown: flush_all() de gsheets si aplica
 ```
 
 ---
 
-## 12. Recursos y Limitaciones
+## 13. Recursos y Limitaciones
 
 ### Consumo
-- **RAM**: ~50-100 MB (bot + SQLite + cliente HTTP)
-- **CPU**: Mínimo (regex es instantáneo; IA depende del proveedor externo)
+- **RAM**: ~50-100 MB (bot + BD + cliente HTTP)
+- **CPU**: Mínimo (regex instantáneo; IA depende del proveedor externo)
 - **Disco**: `data/finanzas.db` crece con uso (~1 KB por transacción)
-- **Red**: Necesita conexión a Telegram API + opcional a Mistral/Ollama API
+- **Red**: Telegram API + (opcional) Mistral/Ollama + (opcional) Google Sheets
 
 ### Limitaciones conocidas
-- **Sin tests automatizados** — no hay framework de testing configurado
-- **Sin migraciones de DB** — cambiar schema requiere borrar la DB
-- **Sin paginación** — límite fijo de 50 transacciones por consulta
-- **Sin caché** — cada consulta a IA hace request HTTP
-- **Sin autenticación** — cualquier usuario de Telegram con el token puede usar el bot
-- **Español/Inglés** — el parsing de intents está orientado a español con mezcla de inglés
-- **Sin exportación** — no se puede exportar datos a CSV/JSON
+- **Multi-moneda sin conversión**: los totales se agrupan por moneda, no se convierten (CUP y USD se muestran por separado).
+- **Gasto en moneda distinta al presupuesto**: se registra con la moneda indicada, pero el presupuesto descuenta el monto sin conversión.
+- **Sin paginación real**: listas con límite fijo (`_procesar_transacciones` muestra 10; `obtener_transacciones` en la BD devuelve hasta 50).
+- **Caché de IA por mensaje** (no por usuario): la clasificación de intención es idempotente por texto.
+- **Sin autenticación**: cualquier usuario de Telegram que hable con el bot puede usarlo (datos aislados por `telegram_user_id`).
+- **Español neutro** (sin voseo): el fast-path y la IA cubren variantes de dialecto (argentino, mexicano, venezolano, etc.); el inglés tiene cobertura básica (saludos y comandos).
+- **Sin exportación CSV/JSON** de datos.
+- **Google Sheets**: dependencia de cuotas de API (reintentos incluidos); el backend gsheets pierde la cache si no hay `flush_all` limpio.
 
 ### Puertos
 - **Telegram API**: 443 (outbound)
 - **Mistral API**: 443 (outbound, si está configurado)
 - **Ollama**: 11434 (local, si está configurado)
-- **Bot**: ningún puerto abierto (usa polling, no webhook)
+- **Webhook (Render)**: `PORT` (8000 por defecto, inbound)
+- **Polling**: ningún puerto abierto
 
 ---
 
-## 13. Modo Offline vs Online
+## 14. Modo Offline vs Online
 
-| Modo    | Proveedor IA | Requiere Internet |
-|---------|-------------|-------------------|
-| Offline | Ollama local | Solo Telegram API |
-| Online  | Mistral API  | Telegram + Mistral |
+| Modo     | BD             | Proveedor IA  | Requiere Internet                 |
+|----------|----------------|---------------|-----------------------------------|
+| Local    | SQLite         | Mistral/Ollama| Telegram + (IA / Ollama)          |
+| Nube     | Google Sheets  | Mistral       | Telegram + Mistral + Google APIs  |
 
-En modo offline sin Ollama, el bot cae a respuestas de fallback genéricas pero sigue funcionando para comandos básicos.
+En modo sin IA disponible, el bot cae a `general`/fallback y sigue respondiendo comandos básicos y fast-path.
 
 ---
 
-## 14. Debugging y Logs
+## 15. Debugging y Logs
 
-- Logging a stderr con formato timestamp + nivel + mensaje
-- Nivel: `INFO` por defecto (configurable en `main.py:27-30`)
-- Archivos de log: no hay persistencia (solo consola)
-- Errores de AI se capturan con mensaje amigable al usuario
-- `verify_system.py` corre una batería de tests de integración
+- Logging a stderr con formato `timestamp - name - level - message`, nivel `INFO` por defecto (`main.py:32`).
+- Logs en consola (sin persistencia a archivo).
+- Errores de IA/BD se capturan con try/except y respuesta amigable al usuario (`_generar_respuesta_error`).
+- `verify_system.py` corre batería de verificación; `test_parsing_bugs.py` ejecuta 17 tests de regresión (módulos sin acentos en stdout en Windows cp1252).
+- Para depurar clasificación: `intent_parser.limpiar_cache()` y logs `debug` de `analizar_intencion`.
+
+---
+
+## 16. Tests y Verificación
+
+- `venv\Scripts\python.exe -m unittest test_parsing_bugs -v` — 17 tests (parsing de cantidades, monedas, balance por moneda, carga gsheets, decimales).
+- `python verify_system.py` — chequeo de dependencias y configuración.
+- `python check_structure.py` — valida estructura de archivos.
+- Suites temporales de regresión (presupuestos, callbacks, gasto ligado, consultas) se mantienen fuera del repo en `%TEMP%\opencode\`.
