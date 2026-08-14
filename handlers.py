@@ -46,7 +46,7 @@ def _formatear_notificacion(ultima_vista: Optional[str]) -> Optional[str]:
             lineas.append(f"  • {mejora}")
         lineas.append("")
 
-    lineas.append("Escribí /help para ver todos los comandos.")
+    lineas.append("Escribe /help para ver todos los comandos.")
 
     return "\n".join(lineas)
 

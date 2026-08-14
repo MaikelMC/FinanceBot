@@ -1147,7 +1147,7 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
     if accion == "desconocido":
         return (
             "🤔 No pude entender qué quieres modificar.\n\n"
-            "Podés hacer cosas como:\n"
+            "Puedes hacer cosas como:\n"
             "• 'Cambia el gasto a ingreso'\n"
             "• 'Modifica el monto a $100'\n"
             "• 'Cambia la descripción a almuerzo'\n"
@@ -1159,7 +1159,7 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
     transaccion = _buscar_transaccion(usuario, mod["referencia"])
 
     if not transaccion:
-        return "❌ No encontré la transacción que quieres modificar. ¿Podés especificar cuál?"
+        return "❌ No encontré la transacción que quieres modificar. ¿Puedes especificar cuál?"
 
     tid = transaccion["id"]
 
@@ -1536,7 +1536,7 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
     if es_saludo and len(msg.split()) <= 3:
         return (
             f"¡Hola {nombre}! 👋 ¿En qué te puedo ayudar?\n\n"
-            "Podés:\n"
+            "Puedes:\n"
             "• 💸 Registrar un gasto: `Gasté $50 en comida`\n"
             "• 💰 Registrar un ingreso: `Recibí $300 de salario`\n"
             "• 📊 Ver tu balance: `¿Cuánto tengo?`\n"
@@ -1582,8 +1582,8 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
     if tiene_accion and tiene_numero:
         # Intentó registrar algo pero no se entendió
         return (
-            f"💡 {nombre}, veo que mencionás un **monto** pero no pude procesar tu registro.\n\n"
-            "¿Podés intentar con este formato?\n"
+            f"💡 {nombre}, veo que mencionas un **monto** pero no pude procesar tu registro.\n\n"
+            "¿Puedes intentar con este formato?\n"
             "• `Gasté $50 en comida` —Registrar un gasto\n"
             "• `Recibí $300 de salario` — Registrar un ingreso\n"
             "• `Pagué $20 de transporte` — Registrar un pago\n"
@@ -1595,7 +1595,7 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
 
     if tiene_accion and not tiene_numero:
         return (
-            f"💡 {nombre}, mencionás una **acción financiera** pero no veo un monto.\n\n"
+            f"💡 {nombre}, mencionas una **acción financiera** pero no veo un monto.\n\n"
             "Para registrar necesito el monto:\n"
             "• `Gasté $50 en comida`\n"
             "• `Recibí $300 de salario`\n"
@@ -1605,7 +1605,7 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
     if tiene_numero and not tiene_accion:
         return (
             f"💡 {nombre}, veo un **monto** pero no sé qué hacer con él.\n\n"
-            "¿Querés registrarlo?\n"
+            "¿Quieres registrarlo?\n"
             "• `Gasté ${re.search(r'\\d+', msg).group()} en comida`\n"
             "• `Recibí ${re.search(r'\\d+', msg).group()} de salario`\n\n"
             "¿O es parte de una consulta?\n"
@@ -1615,7 +1615,7 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
     # --- RESPUESTA GENÉRICA CON EJEMPLOS ---
     return (
         f"🤔 {nombre}, no estoy seguro de qué quieres hacer con: \"{mensaje_esc}\"\n\n"
-        "¿Podés decirme algo como?\n\n"
+        "¿Puedes decirme algo como?\n\n"
         "💸 **Registrar:**\n"
         "• `Gasté $50 en comida`\n"
         "• `Recibí $300 de salario`\n"
@@ -1642,7 +1642,7 @@ def _procesar_eliminar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> str
     transaccion = _buscar_transaccion(usuario, referencia)
 
     if not transaccion:
-        return "❌ No encontré la transacción que quieres eliminar. ¿Podés especificar cuál?"
+        return "❌ No encontré la transacción que quieres eliminar. ¿Puedes especificar cuál?"
 
     tid = transaccion["id"]
     confirmado = database.eliminar_transaccion(usuario["id"], tid)
@@ -1849,7 +1849,7 @@ def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> 
         return (
             f"📅 **{etiqueta.capitalize()}:**\n\n"
             f"No tienes transacciones registradas para {etiqueta}.\n\n"
-            "¿Querés registrar algo? Por ejemplo:\n"
+            "¿Quieres registrar algo? Por ejemplo:\n"
             "• `Gasté $50 en comida`\n"
             "• `Recibí $300 de salario`"
         )

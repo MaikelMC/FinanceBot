@@ -179,7 +179,7 @@ class AIResponder:
                 )
         except Exception as e:
             logger.error("Error registrando transacción: %s", e)
-            return "❌ Ocurrió un error al registrar. Por favor, intentá de nuevo."
+            return "❌ Ocurrió un error al registrar. Por favor, intenta de nuevo."
 
     def _procesar_consulta(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa una consulta del usuario."""
@@ -224,7 +224,7 @@ class AIResponder:
             respuesta = _analizar_transacciones_por_fecha(usuario, mensaje)
             if respuesta:
                 return respuesta
-            return "📅 No encontré transacciones para ese período. ¿Querés registrar algo?"
+            return "📅 No encontré transacciones para ese período. ¿Quieres registrar algo?"
         except Exception as e:
             logger.error("Error analizando por fecha: %s", e)
             return "❌ Ocurrió un error al analizar tus transacciones."
@@ -240,7 +240,7 @@ class AIResponder:
                 from knowledge import _generar_respuesta_no_entendido
                 return _generar_respuesta_no_entendido(mensaje, usuario)
             except Exception:
-                return "❌ No pude entender el monto del presupuesto. Usá: `Mi presupuesto para comida es $500`"
+                return "❌ No pude entender el monto del presupuesto. Usa: `Mi presupuesto para comida es $500`"
 
         try:
             tipo_cat = "gastos"
@@ -270,7 +270,7 @@ class AIResponder:
                 from knowledge import _generar_respuesta_no_entendido
                 return _generar_respuesta_no_entendido(mensaje, usuario)
             except Exception:
-                return "❌ No pude entender el monto de la meta. Usá: `Quiero ahorrar $5000 para vacaciones`"
+                return "❌ No pude entender el monto de la meta. Usa: `Quiero ahorrar $5000 para vacaciones`"
 
         try:
             database.crear_meta_ahorro(usuario["id"], descripcion, cantidad)
@@ -321,7 +321,7 @@ class AIResponder:
             nombre_esc = escape_markdown(usuario.get("nombre", "amigo") or "amigo", version=1)
             return (
                 f"👋 ¡Hola {nombre_esc}!\n\n"
-                "No entendí completamente tu mensaje. ¿Podés intentar con algo como?\n"
+                "No entendí completamente tu mensaje. ¿Puedes intentar con algo como?\n"
                 "• `Gasté $50 en comida`\n"
                 "• `¿Cuánto tengo?`\n"
                 "• `Ayuda` para ver todos los comandos"
@@ -368,19 +368,19 @@ class AIResponder:
         if tipo_error == "IA":
             return (
                 f"😔 Disculpa {nombre}, el servicio de IA no está disponible ahora.\n\n"
-                "Mientras tanto, podés usar lenguaje natural directamente:\n\n"
+                "Mientras tanto, puedes usar lenguaje natural directamente:\n\n"
                 "• `Gasté $50 en comida` — Registrar gasto\n"
                 "• `Recibí $300 de salario` — Registrar ingreso\n"
                 "• `¿Cuánto tengo?` — Ver balance\n"
                 "• `Ayuda` — Ver comandos\n\n"
-                "Intentá de nuevo en unos segundos."
+                "Intenta de nuevo en unos segundos."
             )
         else:
             return (
                 f"⚠️ {nombre}, algo salió mal.\n\n"
-                "Intentá con estos comandos:\n"
+                "Intenta con estos comandos:\n"
                 "• `Gasté $50 en comida`\n"
                 "• `¿Cuánto tengo?`\n"
                 "• `Ayuda`\n\n"
-                "Si el problema persiste, escribí `/help`."
+                "Si el problema persiste, escribe `/help`."
             )

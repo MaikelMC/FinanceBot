@@ -52,7 +52,7 @@ def get_system_prompt() -> str:
     """Lee y retorna el prompt del sistema desde el archivo de texto."""
     if SYSTEM_PROMPT_PATH.exists():
         return SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-    return "Sos un asistente financiero personal experto. Ayudás a los usuarios a registrar gastos, ingresos, ahorrar, y gestionar presupuestos mientras mantené un control claro de su situación financiera."
+    return "Eres un asistente financiero personal experto. Ayudas a los usuarios a registrar gastos, ingresos, ahorrar, y gestionar presupuestos mientras mantienes un control claro de su situación financiera."
 
 
 def validate_config():

@@ -1,7 +1,7 @@
 """
 changelog.py - Control de versiones y mejoras del bot
-Cuando actualices el bot, agregá una nueva entrada en CHANGELOG
-y actualizá VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
+Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
+y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
 VERSION_ACTUAL = "2.1"

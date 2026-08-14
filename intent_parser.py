@@ -142,7 +142,7 @@ REGLAS:
 - Detecta cualquier variante de dialecto (argentino, mexicano, venezolano, chileno, colombiano, etc.).
 - Para "registrar": si no se puede determinar si es gasto o ingreso, dejar tipo como null.
 - La fecha debe ir en formato YYYY-MM-DD cuando sea explícita, o null si no se menciona.
-- La respuesta debe ser en español rioplatense informal, amigable, con emojis.
+- La respuesta debe ser en español neutro, amigable, con emojis y sin regionalismos.
 
 JSON DE SALIDA:
 {
@@ -164,11 +164,11 @@ JSON DE SALIDA:
 
 def _construir_prompt_usuario(mensaje: str) -> str:
     """Construye el prompt del usuario para la IA."""
-    return f"""Analizá el siguiente mensaje financiero y devolvé SOLO el JSON sin explicaciones adicionales.
+    return f"""Analiza el siguiente mensaje financiero y devuelve SOLO el JSON sin explicaciones adicionales.
 
 Mensaje: "{mensaje}"
 
-Recordá: si el usuario está confundido, pregunta cómo hacer algo, o pide ayuda, usá intencion "ayuda_uso" con es_consulta_ayuda: true."""
+Recuerda: si el usuario está confundido, pregunta cómo hacer algo, o pide ayuda, usa intencion "ayuda_uso" con es_consulta_ayuda: true."""
 
 
 # ============================================================
