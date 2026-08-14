@@ -567,8 +567,8 @@ class GoogleSheetsDB:
 
             resultado.append(row)
 
-        # Ordenar por fecha descendente
-        resultado.sort(key=lambda x: str(x.get("fecha", "")), reverse=True)
+        # Ordenar por fecha descendente y, en caso de empate, por id (más reciente primero)
+        resultado.sort(key=lambda x: (str(x.get("fecha", "")), int(x.get("id", 0) or 0)), reverse=True)
         return resultado[:limite]
 
     def obtener_transacciones_por_fecha(self, usuario_id: int, fecha_inicio: str, fecha_fin: str,
@@ -604,7 +604,7 @@ class GoogleSheetsDB:
 
             resultado.append(row)
 
-        resultado.sort(key=lambda x: str(x.get("fecha", "")), reverse=True)
+        resultado.sort(key=lambda x: (str(x.get("fecha", "")), int(x.get("id", 0) or 0)), reverse=True)
         return resultado
 
     def obtener_balance(self, usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:

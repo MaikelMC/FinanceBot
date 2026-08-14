@@ -284,7 +284,7 @@ def obtener_transacciones(usuario_id: int, limite: int = 50, tipo: Optional[str]
         query += " AND t.tipo = ?"
         params.append(tipo)
 
-    query += " ORDER BY t.fecha DESC LIMIT ?"
+    query += " ORDER BY t.fecha DESC, t.id DESC LIMIT ?"
     params.append(limite)
 
     cursor.execute(query, params)
@@ -316,7 +316,7 @@ def obtener_transacciones_por_fecha(usuario_id: int, fecha_inicio: str, fecha_fi
         query += " AND t.tipo = ?"
         params.append(tipo)
 
-    query += " ORDER BY t.fecha DESC"
+    query += " ORDER BY t.fecha DESC, t.id DESC"
 
     cursor.execute(query, params)
     rows = cursor.fetchall()
