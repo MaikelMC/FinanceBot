@@ -374,6 +374,11 @@ async def consultar_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "🤖 **Comandos disponibles:**\n\n"
             "• `/start` - Iniciar/Reiniciar el bot\n"
             "• `/user` - Ver información de usuario\n"
+            "• `/resumen` - Resumen del mes actual\n"
+            "• `/categorias` - Ver tus categorías financieras\n"
+            "• `/gastos` - Ver tus últimos gastos\n"
+            "• `/ingresos` - Ver tus últimos ingresos\n"
+            "• `/metas` - Ver tus metas de ahorro\n"
             "• `/help` - Ver esta ayuda\n"
             "• `/delete` - Borrar todo el historial de transacciones\n\n"
             "📝 **Ejemplos de lenguaje natural:**\n"
@@ -393,6 +398,77 @@ async def consultar_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         logger.error("Error en /help: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al mostrar la ayuda.")
+
+
+def _obtener_usuario_contexto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict:
+    """Garantiza el usuario en context.user_data y lo retorna."""
+    user = update.effective_user
+    if "usuario_id" not in context.user_data:
+        context.user_data["telegram_user_id"] = user.id
+        context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, user.first_name or "amigo")["id"]
+    usuario_id = context.user_data["usuario_id"]
+    usuario = database.obtener_usuario(user.id) or {"id": usuario_id, "nombre": user.first_name or "amigo"}
+    return usuario
+
+
+async def consultar_categorias(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja el comando /categorias."""
+    try:
+        usuario = _obtener_usuario_contexto(update, context)
+        texto = knowledge._procesar_categorias(usuario)
+        botones = _crear_teclado_permanente()
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
+    except Exception as e:
+        logger.error("Error en /categorias: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error al obtener tus categorías.")
+
+
+async def consultar_gastos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja el comando /gastos."""
+    try:
+        usuario = _obtener_usuario_contexto(update, context)
+        texto = knowledge._procesar_gastos(usuario)
+        botones = _crear_teclado_permanente()
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
+    except Exception as e:
+        logger.error("Error en /gastos: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error al obtener tus gastos.")
+
+
+async def consultar_ingresos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja el comando /ingresos."""
+    try:
+        usuario = _obtener_usuario_contexto(update, context)
+        texto = knowledge._procesar_ingresos(usuario)
+        botones = _crear_teclado_permanente()
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
+    except Exception as e:
+        logger.error("Error en /ingresos: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error al obtener tus ingresos.")
+
+
+async def consultar_metas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja el comando /metas."""
+    try:
+        usuario = _obtener_usuario_contexto(update, context)
+        texto = knowledge._procesar_metas_ahorro(usuario)
+        botones = _crear_teclado_permanente()
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
+    except Exception as e:
+        logger.error("Error en /metas: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error al obtener tus metas de ahorro.")
+
+
+async def consultar_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja el comando /resumen (resumen del mes actual)."""
+    try:
+        usuario = _obtener_usuario_contexto(update, context)
+        texto = knowledge._procesar_resumen_mensual(usuario)
+        botones = _crear_teclado_permanente()
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
+    except Exception as e:
+        logger.error("Error en /resumen: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error al generar tu resumen.")
 
 
 async def eliminar_historial(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -306,6 +306,83 @@ def _procesar_categorias(usuario: Dict[str, Any]) -> str:
         return "❌ Ocurrió un error al obtener tus categorías. Por favor, inténtalo de nuevo."
 
 
+def _procesar_metas_ahorro(usuario: Dict[str, Any]) -> str:
+    """Muestra las metas de ahorro del usuario con su progreso."""
+    try:
+        metas = database.obtener_metas_ahorro(usuario["id"])
+        if not metas:
+            return "🎯 No tienes metas de ahorro.\n\nUsa: `Quiero ahorrar $5000 para vacaciones`"
+
+        lineas = ["🎯 **TUS METAS DE AHORRO**", "━━━━━━━━━━━━━━━━━"]
+        for m in metas:
+            objetivo = m.get("objetivo", 0)
+            actual = m.get("cantidad_actual", 0) or 0
+            nombre = m.get("nombre", "Meta")
+            progreso = (actual / objetivo * 100) if objetivo > 0 else 0
+            barra = "█" * int(progreso / 10) + "░" * (10 - int(progreso / 10))
+            restante = objetivo - actual
+            lineas.append(f"📌 **{nombre}**")
+            lineas.append(f"   ${actual:.2f} / ${objetivo:.2f} ({progreso:.0f}%)")
+            lineas.append(f"   Restante: ${restante:.2f}")
+            lineas.append(f"   {barra}")
+            if m.get("fecha_meta"):
+                lineas.append(f"   Meta para: {str(m['fecha_meta'])[:10]}")
+        return "\n".join(lineas)
+    except Exception as e:
+        logger.error("Error al obtener metas de ahorro: %s", e)
+        return "❌ Ocurrió un error al obtener tus metas de ahorro."
+
+
+def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
+    """Muestra un resumen del mes actual: ingresos, gastos, neto por moneda y top categorías."""
+    try:
+        from datetime import date
+        hoy = date.today()
+        inicio = hoy.replace(day=1).isoformat()
+        fin = hoy.isoformat()
+
+        balance = database.obtener_balance(usuario["id"], fecha_inicio=inicio)
+        por_moneda = balance.get("por_moneda", {})
+
+        mes_num_a_nombre = {v: k for k, v in MESES_ES.items()}
+        nombre_mes = mes_num_a_nombre.get(hoy.month, str(hoy.month))
+        lineas = [f"📊 **RESUMEN DE {nombre_mes.upper()}**", "━━━━━━━━━━━━━━━━━"]
+
+        if por_moneda and not (len(por_moneda) == 1 and list(por_moneda.keys()) == ["Sin moneda"]):
+            for abrev, datos in por_moneda.items():
+                simbolo = datos.get("simbolo", "$")
+                neto = datos["ingresos"] - datos["gastos"]
+                lineas.append(f"**{simbolo} {datos.get('nombre', abrev)} ({abrev})**")
+                lineas.append(f"  📈 Ingresos: {simbolo}{datos['ingresos']:.2f}")
+                lineas.append(f"  📉 Gastos: {simbolo}{datos['gastos']:.2f}")
+                lineas.append(f"  💵 Neto: {simbolo}{neto:.2f}")
+        else:
+            lineas.append(f"  📈 Ingresos: ${balance['ingresos']:.2f}")
+            lineas.append(f"  📉 Gastos: ${balance['gastos']:.2f}")
+            lineas.append(f"  💵 Neto: ${balance['neto']:.2f}")
+
+        gastos_mes = database.obtener_transacciones_por_fecha(usuario["id"], inicio, fin, "gasto")
+        por_cat: Dict[str, float] = {}
+        for t in gastos_mes:
+            cat = t.get("categoria_nombre") or "Otros"
+            por_cat[cat] = por_cat.get(cat, 0.0) + float(t.get("cantidad", 0))
+
+        top = sorted(por_cat.items(), key=lambda kv: kv[1], reverse=True)[:5]
+        if top:
+            total = sum(v for _, v in top)
+            lineas.append("\n🔥 **Top categorías de gasto:**")
+            for cat, monto in top:
+                pct = (monto / total * 100) if total > 0 else 0
+                lineas.append(f"  • {cat}: ${monto:.2f} ({pct:.0f}%)")
+        else:
+            lineas.append("\n📝 Sin gastos registrados este mes.")
+
+        return "\n".join(lineas)
+    except Exception as e:
+        logger.error("Error en resumen mensual: %s", e)
+        return "❌ Ocurrió un error al generar tu resumen."
+
+
 # ============================================================
 # PARSING DE MÚLTIPLES TRANSACCIONES
 # ============================================================

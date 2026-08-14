@@ -269,7 +269,11 @@ class AIResponder:
                 cat_info = database.crear_categoria(usuario["id"], categoria, tipo_cat)
                 categoria_id = cat_info["id"]
 
-            database.crear_presupuesto(usuario["id"], categoria_id, cantidad)
+            from datetime import date
+            database.crear_presupuesto(
+                usuario["id"], categoria_id, cantidad,
+                periodo="mensual", fecha_inicio=date.today().isoformat(),
+            )
             return f"✅ **Presupuesto configurado:** ${cantidad:.2f} para '{categoria}'"
         except Exception as e:
             logger.error("Error configurando presupuesto: %s", e)

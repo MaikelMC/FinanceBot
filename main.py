@@ -21,6 +21,13 @@ import config
 import database
 from handlers import start, handle_message, error_handler
 from handlers import consultar_usuario, consultar_comandos, handle_callback_query, eliminar_historial, anuncio
+from handlers import (
+    consultar_categorias,
+    consultar_gastos,
+    consultar_ingresos,
+    consultar_metas,
+    consultar_resumen,
+)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -30,6 +37,11 @@ logger = logging.getLogger(__name__)
 
 COMANDOS_MENU = [
     BotCommand("start", "Iniciar o reiniciar el bot y ver tu balance"),
+    BotCommand("resumen", "Resumen del mes actual"),
+    BotCommand("categorias", "Ver tus categorías financieras"),
+    BotCommand("gastos", "Ver tus últimos gastos"),
+    BotCommand("ingresos", "Ver tus últimos ingresos"),
+    BotCommand("metas", "Ver tus metas de ahorro"),
     BotCommand("help", "Ver todos los comandos y ejemplos de uso"),
     BotCommand("user", "Ver tu información de usuario"),
     BotCommand("delete", "Borrar todo el historial de transacciones"),
@@ -62,6 +74,11 @@ def _build_app():
     app.add_handler(CommandHandler("help", consultar_comandos))
     app.add_handler(CommandHandler("delete", eliminar_historial))
     app.add_handler(CommandHandler("anuncio", anuncio))
+    app.add_handler(CommandHandler("categorias", consultar_categorias))
+    app.add_handler(CommandHandler("gastos", consultar_gastos))
+    app.add_handler(CommandHandler("ingresos", consultar_ingresos))
+    app.add_handler(CommandHandler("metas", consultar_metas))
+    app.add_handler(CommandHandler("resumen", consultar_resumen))
 
     # === BOTONES INLINE ===
     app.add_handler(CallbackQueryHandler(handle_callback_query))

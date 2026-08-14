@@ -429,7 +429,7 @@ def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: fl
     cursor.execute(
         """
         INSERT INTO presupuestos (usuario_id, categoria_id, cantidad_planejada, cantidad_gastada, periodo, fecha_inicio, fecha_fin)
-        VALUES (?, ?, ?, 0.0, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (usuario_id, categoria_id, cantidad_planejada, 0.0, periodo, fecha_inicio, fecha_fin)
     )
@@ -460,6 +460,37 @@ def obtener_metas_ahorro(usuario_id: int) -> List[Dict[str, Any]]:
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def crear_meta_ahorro(usuario_id: int, nombre: str, objetivo: float, cantidad_actual: float = 0.0,
+                      fecha_inicio: Optional[str] = None, fecha_meta: Optional[str] = None) -> Dict[str, Any]:
+    """Crea una nueva meta de ahorro para un usuario."""
+    from datetime import datetime, timedelta
+    if not fecha_inicio:
+        fecha_inicio = datetime.now().strftime("%Y-%m-%d")
+    if not fecha_meta:
+        fecha_meta = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO metas_ahorro (usuario_id, nombre, objetivo, cantidad_actual, fecha_inicio, fecha_meta)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (usuario_id, nombre, objetivo, cantidad_actual, fecha_inicio, fecha_meta)
+    )
+    meta_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {
+        "id": meta_id,
+        "usuario_id": usuario_id,
+        "nombre": nombre,
+        "objetivo": objetivo,
+        "cantidad_actual": cantidad_actual,
+        "fecha_inicio": fecha_inicio,
+        "fecha_meta": fecha_meta,
+    }
 
 
 def actualizar_meta_ahorro(meta_id: int, cantidad: float) -> bool:

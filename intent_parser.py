@@ -23,6 +23,16 @@ def _parse_float(texto: str) -> Optional[float]:
     from knowledge import _parsear_cantidad
     return _parsear_cantidad(texto)
 
+
+def _subconsulta_gasto_ingreso(texto: str) -> str:
+    """Distingue subconsulta: 'gastos', 'ingresos' o 'transacciones'."""
+    lower = texto.lower()
+    if "gastos" in lower:
+        return "gastos"
+    if "ingresos" in lower:
+        return "ingresos"
+    return "transacciones"
+
 _FAST_PATTERNS = [
     # --- REGISTRO: gasto explícito ---
     (re.compile(r'(?:gast[ée]?|compr[ée]?|pagu?[ée]?|cost[óo]|invert[ií])\s+\$?([\d,.]+)\s+(?:en\s+|para\s+)?(.+)', re.IGNORECASE),
@@ -31,6 +41,11 @@ _FAST_PATTERNS = [
     # --- REGISTRO: ingreso explícito ---
     (re.compile(r'(?:recib[ií]|ingres[ée]?|cobr[ée]?|gan[ée]?)\s+\$?([\d,.]+)\s+(?:de\s+|como\s+)?(.+)', re.IGNORECASE),
      lambda m: {"intencion": "registrar", "tipo": "ingreso", "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.98}),
+
+    # --- CONFIGURAR: ahorro/meta ---
+    # Va antes del formato corto para que "quiero ahorrar X para Y" no se interprete como registro
+    (re.compile(r'(?:quiero\s+)?ahorrar\s+\$?([\d,.]+)\s+(?:para\s+|de\s+)?(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "configurar_ahorro", "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "confianza": 0.96}),
 
     # --- REGISTRO: formato corto $X en/para/de Y ---
     (re.compile(r'\$?([\d,.]+)\s+(?:en\s+|para\s+|de\s+)(.+)', re.IGNORECASE),
@@ -50,7 +65,7 @@ _FAST_PATTERNS = [
 
     # --- CONSULTA: ver gastos/ingresos/transacciones ---
     (re.compile(r'(?:ver|mostrar|listar|dame)\s+(?:mis\s+)?(?:gastos|ingresos|transacciones|historial|movimientos)', re.IGNORECASE),
-     lambda m: {"intencion": "consultar", "subconsulta": "transacciones", "confianza": 0.97}),
+     lambda m: {"intencion": "consultar", "subconsulta": _subconsulta_gasto_ingreso(m.group(0)), "confianza": 0.97}),
 
     # --- AYUDA: comandos/ayuda explícita ---
     (re.compile(r'^(?:ayuda|help|comandos|qu[eé]\s+(?:puedo|hago|ten[ée]s|tenes|comandos)|c[oó]mo\s+(?:funciona|se\s+usa|le\s+hago)|para\s+qu[eé]\s+sirve|no\s+entiendo)', re.IGNORECASE),
@@ -99,10 +114,6 @@ _FAST_PATTERNS = [
     # --- CONFIGURAR: presupuesto ---
     (re.compile(r'(?:mi\s+)?presupuesto\s+(?:para|de)\s+(.+?)\s+(?:es|de)\s+\$?([\d,.]+)', re.IGNORECASE),
      lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(1).strip(), "cantidad": _parse_float(m.group(2)), "confianza": 0.98}),
-
-    # --- CONFIGURAR: ahorro/meta ---
-    (re.compile(r'(?:quiero\s+)?ahorrar\s+\$?([\d,.]+)\s+(?:para\s+|de\s+)?(.+)', re.IGNORECASE),
-     lambda m: {"intencion": "configurar_ahorro", "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "confianza": 0.96}),
 
     # --- SALUDO ---
     (re.compile(r'^(?:hola|buenas|buen[oa]s?\s+(?:d[ií]as|tardes|noches)|hey|hi|qu[eé]\s+(?:tal|onda))$', re.IGNORECASE),

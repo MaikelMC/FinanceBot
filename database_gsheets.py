@@ -743,6 +743,32 @@ class GoogleSheetsDB:
         resultado.sort(key=lambda x: str(x.get("fecha_meta", "")))
         return resultado
 
+    def crear_meta_ahorro(self, usuario_id: int, nombre: str, objetivo: float, cantidad_actual: float = 0.0,
+                          fecha_inicio: Optional[str] = None, fecha_meta: Optional[str] = None) -> Dict[str, Any]:
+        with LOCK:
+            from datetime import datetime, timedelta
+            metas = self._cache.get("metas_ahorro", [])
+            mid = self._next_id("metas_ahorro")
+            if not fecha_inicio:
+                fecha_inicio = self._today()
+            if not fecha_meta:
+                fecha_meta = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+            nueva = {
+                "id": mid,
+                "usuario_id": usuario_id,
+                "nombre": nombre,
+                "objetivo": objetivo,
+                "cantidad_actual": cantidad_actual,
+                "fecha_inicio": fecha_inicio,
+                "fecha_meta": fecha_meta,
+                "created_at": self._now(),
+            }
+            metas.append(nueva)
+            self._cache_dirty.add("metas_ahorro")
+            self._schedule_flush()
+            logger.info("Meta de ahorro creada: %s ($%.2f)", nombre, objetivo)
+            return dict(nueva)
+
     def actualizar_meta_ahorro(self, meta_id: int, cantidad: float) -> bool:
         with LOCK:
             metas = self._cache.get("metas_ahorro", [])
@@ -937,6 +963,11 @@ def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: fl
 
 def obtener_metas_ahorro(usuario_id: int) -> List[Dict[str, Any]]:
     return _get_db().obtener_metas_ahorro(usuario_id)
+
+
+def crear_meta_ahorro(usuario_id: int, nombre: str, objetivo: float, cantidad_actual: float = 0.0,
+                      fecha_inicio: Optional[str] = None, fecha_meta: Optional[str] = None) -> Dict[str, Any]:
+    return _get_db().crear_meta_ahorro(usuario_id, nombre, objetivo, cantidad_actual, fecha_inicio, fecha_meta)
 
 
 def actualizar_meta_ahorro(meta_id: int, cantidad: float) -> bool:

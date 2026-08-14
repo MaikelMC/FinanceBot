@@ -4,9 +4,20 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.1"
+VERSION_ACTUAL = "2.2"
 
 CHANGELOG = {
+    "2.2": {
+        "titulo": "📋 Nuevos comandos y correcciones",
+        "mejoras": [
+            "Nuevos comandos: /resumen, /categorias, /gastos, /ingresos y /metas",
+            "Menú de comandos de Telegram con descripciones (escribe / para verlos)",
+            "Corregido: crear presupuestos por lenguaje natural",
+            "Corregido: crear y ver metas de ahorro",
+            "Búsqueda por lenguaje natural distingue gastos e ingresos"
+        ],
+        "emoji": "✨"
+    },
     "2.1": {
         "titulo": "🚀 Nuevas funciones disponibles",
         "mejoras": [
