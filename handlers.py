@@ -8,6 +8,7 @@ from typing import Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
+from telegram.helpers import escape_markdown
 
 import database
 import knowledge
@@ -112,16 +113,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja el comando /start."""
     try:
         user = update.effective_user
-        nombre = user.first_name if user.first_name else "amigo"
+        nombre_mostrar = escape_markdown(user.first_name or "amigo", version=1)
 
         context.user_data["telegram_user_id"] = user.id
-        usuario = database.obtener_o_crear_usuario(user.id, nombre)
+        usuario = database.obtener_o_crear_usuario(user.id, user.first_name or "amigo")
         context.user_data["usuario_id"] = usuario["id"]
 
         estadisticas = database.contar_transacciones(usuario["id"])
 
         mensaje = (
-            f"¡Hola {nombre}! 👋 Soy **FinanzasBot**, tu asistente financiero personal.\n\n"
+            f"¡Hola {nombre_mostrar}! 👋 Soy **FinanzasBot**, tu asistente financiero personal.\n\n"
             f"📊 Tengo **{estadisticas.get('total', 0)} transacciones** registradas:\n"
             f"  💸 Gastos: {estadisticas.get('gastos', 0)}\n"
             f"  💰 Ingresos: {estadisticas.get('ingresos', 0)}\n\n"
@@ -288,7 +289,7 @@ async def consultar_usuario(update: Update, context: ContextTypes.DEFAULT_TYPE):
             balance_text = f"  Ingresos: ${balance['ingresos']:.2f}\n  Gastos: ${balance['gastos']:.2f}\n  Neto: ${balance['neto']:.2f}\n"
 
         mensaje = (
-            f"👤 **Usuario:** {user.first_name}\n"
+            f"👤 **Usuario:** {escape_markdown(user.first_name or 'Usuario', version=1)}\n"
             f"🆔 **ID:** `{user.id}`\n\n"
             f"💰 **Balance:**\n{balance_text}\n"
             f"📁 **Categorías:** {len(categorias)}\n"

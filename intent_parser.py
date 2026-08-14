@@ -1,5 +1,5 @@
 """
-intent_parser.py - Motor de an�lisis de intenci�n unificado.
+intent_parser.py - Motor de análisis de intención unificado.
 Usa IA como sistema primario y regex como fast-path cache para mensajes predecibles.
 """
 
@@ -12,7 +12,7 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# Cache simple: hash del mensaje -> resultado del an�lisis
+# Cache simple: hash del mensaje -> resultado del análisis
 _INTENT_CACHE: Dict[int, Dict[str, Any]] = {}
 
 # ============================================================
@@ -24,11 +24,11 @@ def _parse_float(texto: str) -> Optional[float]:
     return _parsear_cantidad(texto)
 
 _FAST_PATTERNS = [
-    # --- REGISTRO: gasto expl�cito ---
+    # --- REGISTRO: gasto explícito ---
     (re.compile(r'(?:gast[ée]?|compr[ée]?|pagu?[ée]?|cost[óo]|invert[ií])\s+\$?([\d,.]+)\s+(?:en\s+|para\s+)?(.+)', re.IGNORECASE),
      lambda m: {"intencion": "registrar", "tipo": "gasto", "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.98}),
 
-    # --- REGISTRO: ingreso expl�cito ---
+    # --- REGISTRO: ingreso explícito ---
     (re.compile(r'(?:recib[ií]|ingres[ée]?|cobr[ée]?|gan[ée]?)\s+\$?([\d,.]+)\s+(?:de\s+|como\s+)?(.+)', re.IGNORECASE),
      lambda m: {"intencion": "registrar", "tipo": "ingreso", "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.98}),
 
@@ -44,7 +44,7 @@ _FAST_PATTERNS = [
     (re.compile(r'(?:qu[eé]\s+(?:gast[eé]|hice|pas[óo])|(?:ver|mostrar)\s+(?:transacciones|gastos|ingresos|historial))\s+(?:hoy|ayer|anteayer|esta\s+semana|este\s+mes)', re.IGNORECASE),
      lambda m: {"intencion": "analizar_por_fecha", "confianza": 0.99}),
 
-    # --- CONSULTA: "qu� gast� hoy?" ---
+    # --- CONSULTA: "qué gastó hoy?" ---
     (re.compile(r'qu[eé]\s+(?:gast[eé]|compr[eé]|hice)\s+(?:hoy|ayer)', re.IGNORECASE),
      lambda m: {"intencion": "analizar_por_fecha", "confianza": 0.98}),
 
@@ -52,35 +52,35 @@ _FAST_PATTERNS = [
     (re.compile(r'(?:ver|mostrar|listar|dame)\s+(?:mis\s+)?(?:gastos|ingresos|transacciones|historial|movimientos)', re.IGNORECASE),
      lambda m: {"intencion": "consultar", "subconsulta": "transacciones", "confianza": 0.97}),
 
-    # --- AYUDA: comandos/ayuda expl�cita ---
+    # --- AYUDA: comandos/ayuda explícita ---
     (re.compile(r'^(?:ayuda|help|comandos|qu[eé]\s+(?:puedo|hago|ten[ée]s|tenes|comandos)|c[oó]mo\s+(?:funciona|se\s+usa|le\s+hago)|para\s+qu[eé]\s+sirve|no\s+entiendo)', re.IGNORECASE),
      lambda m: {"intencion": "ayuda_uso", "tipo_ayuda": "general", "confianza": 0.99}),
 
-    # --- AYUDA: c�mo registar ---
+    # --- AYUDA: cómo registar ---
     (re.compile(r'c[oó]mo\s+(?:registrar|registro|agregar|agrego|poner|pongo|anotar)\s+(?:un\s+)?(?:gasto|ingreso|transacci[óo]n)', re.IGNORECASE),
      lambda m: {"intencion": "ayuda_uso", "tipo_ayuda": "registrar", "confianza": 0.99}),
 
-    # --- AYUDA: c�mo ver balance/plata/dinero ---
+    # --- AYUDA: cómo ver balance/plata/dinero ---
     (re.compile(r'c[oó]mo\s+(?:ver|consultar|saber|veo)\s+(?:mi\s+)?(?:balance|saldo|plata|dinero)', re.IGNORECASE),
      lambda m: {"intencion": "ayuda_uso", "tipo_ayuda": "ver_balance", "confianza": 0.99}),
 
-    # --- AYUDA: c�mo ver transacciones ---
+    # --- AYUDA: cómo ver transacciones ---
     (re.compile(r'c[oó]mo\s+(?:ver|consultar|veo)\s+(?:mis\s+)?(?:transacciones|gastos|ingresos|historial|movimientos)', re.IGNORECASE),
      lambda m: {"intencion": "ayuda_uso", "tipo_ayuda": "ver_transacciones", "confianza": 0.99}),
 
-    # --- AYUDA: qu� puedo hacer / para qu� sirve ---
+    # --- AYUDA: qué puedo hacer / para qué sirve ---
     (re.compile(r'(?:qu[eé]\s+(?:puedo\s+hacer|hace\s+el\s+bot)|para\s+qu[eé]\s+(?:sirve|es))', re.IGNORECASE),
      lambda m: {"intencion": "ayuda_uso", "tipo_ayuda": "comandos", "confianza": 0.99}),
 
-    # --- AYUDA: c�mo configurar presupuesto ---
+    # --- AYUDA: cómo configurar presupuesto ---
     (re.compile(r'c[oó]mo\s+(?:configurar|poner|crear|hacer)\s+(?:un\s+)?presupuesto', re.IGNORECASE),
      lambda m: {"intencion": "ayuda_uso", "tipo_ayuda": "presupuesto", "confianza": 0.99}),
 
-    # --- AYUDA: c�mo ahorrar/meta ---
+    # --- AYUDA: cómo ahorrar/meta ---
     (re.compile(r'c[oó]mo\s+(?:ahorrar|poner|crear|configurar)\s+(?:una\s+)?(?:meta|objetivo|ahorro)', re.IGNORECASE),
      lambda m: {"intencion": "ayuda_uso", "tipo_ayuda": "ahorro", "confianza": 0.99}),
 
-    # --- AYUDA: c�mo modificar/eliminar ---
+    # --- AYUDA: cómo modificar/eliminar ---
     (re.compile(r'c[oó]mo\s+(?:modificar|cambiar|editar|eliminar|borrar)\s+(?:una\s+)?(?:transacci[óo]n|gasto|ingreso)', re.IGNORECASE),
      lambda m: {"intencion": "ayuda_uso", "tipo_ayuda": "modificar", "confianza": 0.99}),
 
@@ -108,7 +108,7 @@ _FAST_PATTERNS = [
     (re.compile(r'^(?:hola|buenas|buen[oa]s?\s+(?:d[ií]as|tardes|noches)|hey|hi|qu[eé]\s+(?:tal|onda))$', re.IGNORECASE),
      lambda m: {"intencion": "general", "confianza": 0.99}),
 
-    # --- CONSULTA: categor�as ---
+    # --- CONSULTA: categorías ---
     (re.compile(r'(?:qu[eé]\s+(?:categor[ií]as|tipos)|(?:ver|mostrar)\s+(?:mis\s+)?categor[ií]as)', re.IGNORECASE),
      lambda m: {"intencion": "consultar", "subconsulta": "categorias", "confianza": 0.97}),
 
@@ -119,7 +119,7 @@ _FAST_PATTERNS = [
 
 
 def _fast_path(mensaje: str) -> Optional[Dict[str, Any]]:
-    """Intenta resolver con regex r�pido. Retorna dict o None."""
+    """Intenta resolver con regex rápido. Retorna dict o None."""
     for pattern, builder in _FAST_PATTERNS:
         match = pattern.search(mensaje.strip())
         if match:
@@ -134,15 +134,15 @@ def _fast_path(mensaje: str) -> Optional[Dict[str, Any]]:
 # PROMPT PARA LA IA
 # ============================================================
 
-_SYSTEM_PROMPT = """Eres FinanzasBot, un asistente financiero experto. Tu �nica tarea es analizar mensajes de usuarios y devolver UN JSON V�LIDO sin texto adicional.
+_SYSTEM_PROMPT = """Eres FinanzasBot, un asistente financiero experto. Tu única tarea es analizar mensajes de usuarios y devolver UN JSON VÁLIDO sin texto adicional.
 
 REGLAS:
-- Debes responder EXCLUSIVAMENTE con JSON v�lido, nada m�s.
-- Si el usuario pregunta c�mo hacer algo, muestra dudas o pide orientaci�n, usa intencion "ayuda_uso".
+- Debes responder EXCLUSIVAMENTE con JSON válido, nada más.
+- Si el usuario pregunta cómo hacer algo, muestra dudas o pide orientación, usa intencion "ayuda_uso".
 - Detecta cualquier variante de dialecto (argentino, mexicano, venezolano, chileno, colombiano, etc.).
 - Para "registrar": si no se puede determinar si es gasto o ingreso, dejar tipo como null.
-- La fecha debe ir en formato YYYY-MM-DD cuando sea expl�cita, o null si no se menciona.
-- La respuesta debe ser en espa�ol rioplatense informal, amigable, con emojis.
+- La fecha debe ir en formato YYYY-MM-DD cuando sea explícita, o null si no se menciona.
+- La respuesta debe ser en español rioplatense informal, amigable, con emojis.
 
 JSON DE SALIDA:
 {
@@ -164,11 +164,11 @@ JSON DE SALIDA:
 
 def _construir_prompt_usuario(mensaje: str) -> str:
     """Construye el prompt del usuario para la IA."""
-    return f"""Analiz� el siguiente mensaje financiero y devolv� SOLO el JSON sin explicaciones adicionales.
+    return f"""Analizá el siguiente mensaje financiero y devolvé SOLO el JSON sin explicaciones adicionales.
 
 Mensaje: "{mensaje}"
 
-Record�: si el usuario est� confundido, pregunta c�mo hacer algo, o pide ayuda, us� intencion "ayuda_uso" con es_consulta_ayuda: true."""
+Recordá: si el usuario está confundido, pregunta cómo hacer algo, o pide ayuda, usá intencion "ayuda_uso" con es_consulta_ayuda: true."""
 
 
 # ============================================================
@@ -194,7 +194,7 @@ _RESULTADO_VACIO: Dict[str, Any] = {
 
 
 def _extraer_json(texto: str) -> Optional[Dict[str, Any]]:
-    """Extrae el primer JSON v�lido de un texto (robusto ante texto adicional)."""
+    """Extrae el primer JSON válido de un texto (robusto ante texto adicional)."""
     # Intentar parse directo
     texto = texto.strip()
     try:
@@ -210,7 +210,7 @@ def _extraer_json(texto: str) -> Optional[Dict[str, Any]]:
         except json.JSONDecodeError:
             pass
 
-    # Buscar { ... } con regex (�ltimo recurso)
+    # Buscar { ... } con regex (último recurso)
     match = re.search(r'\{[\s\S]*\}', texto)
     if match:
         try:
@@ -316,7 +316,10 @@ async def _call_ai(mensaje: str, usuario: Dict[str, Any]) -> Dict[str, Any]:
     # Intentar Mistral
     if config.AI_PROVIDER == "mistral" and config.MISTRAL_API_KEY:
         try:
-            from mistralai.client import Mistral
+            try:
+                from mistralai import Mistral
+            except ImportError:
+                from mistralai.client import Mistral
             client = Mistral(api_key=config.MISTRAL_API_KEY)
 
             import asyncio
@@ -373,17 +376,17 @@ async def _call_ai(mensaje: str, usuario: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as e:
             logger.error("Error llamando a Ollama: %s", e)
 
-    # Si todo falla, retornar vac�o
+    # Si todo falla, retornar vacío
     return dict(_RESULTADO_VACIO)
 
 
 # ============================================================
-# API P�BLICA
+# API PÚBLICA
 # ============================================================
 
 async def analizar_intencion(mensaje: str, usuario: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Analiza la intenci�n de un mensaje del usuario.
+    Analiza la intención de un mensaje del usuario.
 
     Pipeline:
     1. Fast-path regex (alta confianza, cero costo, ~80% de los mensajes)
@@ -395,7 +398,7 @@ async def analizar_intencion(mensaje: str, usuario: Dict[str, Any]) -> Dict[str,
         usuario: Dict con datos del usuario
 
     Returns:
-        Dict con la intenci�n analizada y par�metros extra�dos
+        Dict con la intención analizada y parámetros extraídos
     """
     mensaje = mensaje.strip()
     if not mensaje:
@@ -420,5 +423,5 @@ async def analizar_intencion(mensaje: str, usuario: Dict[str, Any]) -> Dict[str,
 
 
 def limpiar_cache():
-    """Limpia el cache de intenciones (�til para tests)."""
+    """Limpia el cache de intenciones (útil para tests)."""
     _INTENT_CACHE.clear()

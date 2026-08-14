@@ -1,6 +1,6 @@
 """
 ai_client.py - Cliente de IA para el bot de finanzas personales
-Usa intent_parser como pipeline unificado: fast-path regex + IA + ejecuci�n.
+Usa intent_parser como pipeline unificado: fast-path regex + IA + ejecución.
 """
 
 import logging
@@ -9,12 +9,13 @@ from typing import Dict, Any
 import database
 import intent_parser
 from config import AI_PROVIDER
+from telegram.helpers import escape_markdown
 
 logger = logging.getLogger(__name__)
 
 
 class AIResponder:
-    """Clase para procesar mensajes usando el pipeline de intenci�n unificado."""
+    """Clase para procesar mensajes usando el pipeline de intención unificado."""
 
     async def responder(self, mensaje: str, usuario: Dict[str, Any]) -> str:
         """
@@ -22,12 +23,12 @@ class AIResponder:
 
         Pipeline:
         1. intent_parser.analizar_intencion() -> JSON estructurado (fast-path + IA)
-        2. Ejecutar acci�n seg�n la intenci�n detectada
+        2. Ejecutar acción según la intención detectada
         3. Retornar respuesta al usuario
 
         Args:
             mensaje: El mensaje del usuario
-            usuario: Informaci�n del usuario
+            usuario: Información del usuario
 
         Returns:
             Respuesta en texto para el usuario
@@ -41,13 +42,13 @@ class AIResponder:
             return self._generar_respuesta_error(usuario, "sistema")
 
         intencion = resultado.get("intencion", "general")
-        logger.debug("Intenci�n detectada: %s", intencion)
+        logger.debug("Intención detectada: %s", intencion)
 
         # --- AYUDA / CONSULTA DEL USUARIO ---
         if intencion == "ayuda_uso":
             return self._procesar_ayuda(resultado, usuario, mensaje)
 
-        # --- REGISTRAR TRANSACCI�N ---
+        # --- REGISTRAR TRANSACCIÓN ---
         if intencion == "registrar":
             return await self._procesar_registro(resultado, usuario, mensaje)
 
@@ -79,7 +80,7 @@ class AIResponder:
         return self._procesar_general(resultado, usuario, mensaje)
 
     # ================================================================
-    # PROCESADORES POR INTENCI�N
+    # PROCESADORES POR INTENCIÓN
     # ================================================================
 
     def _procesar_ayuda(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
@@ -99,21 +100,21 @@ class AIResponder:
     def _tipo_ayuda_a_mensaje(self, tipo: str) -> str:
         """Convierte un tipo_ayuda a un mensaje que entienda _responder_ayuda_uso."""
         mapa = {
-            "registrar_gasto": "c�mo registro un gasto",
-            "registrar_ingreso": "c�mo registro un ingreso",
-            "registrar": "c�mo registro un gasto",
-            "ver_balance": "c�mo veo mi balance",
-            "ver_transacciones": "c�mo veo mis transacciones",
-            "presupuesto": "c�mo configuro un presupuesto",
-            "ahorro": "c�mo creo una meta de ahorro",
-            "modificar": "c�mo modifico una transacci�n",
-            "eliminar": "c�mo elimino una transacci�n",
-            "comandos": "qu� comandos tienes",
+            "registrar_gasto": "cómo registro un gasto",
+            "registrar_ingreso": "cómo registro un ingreso",
+            "registrar": "cómo registro un gasto",
+            "ver_balance": "cómo veo mi balance",
+            "ver_transacciones": "cómo veo mis transacciones",
+            "presupuesto": "cómo configuro un presupuesto",
+            "ahorro": "cómo creo una meta de ahorro",
+            "modificar": "cómo modifico una transacción",
+            "eliminar": "cómo elimino una transacción",
+            "comandos": "qué comandos tienes",
         }
-        return mapa.get(tipo, "c�mo funciona el bot")
+        return mapa.get(tipo, "cómo funciona el bot")
 
     async def _procesar_registro(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
-        """Procesa el registro de una transacci�n."""
+        """Procesa el registro de una transacción."""
         tipo = resultado.get("tipo")
         cantidad = resultado.get("cantidad")
         descripcion = resultado.get("descripcion") or ""
@@ -140,15 +141,15 @@ class AIResponder:
         if not cantidad or cantidad <= 0:
             return (
                 "❌ No pude entender el monto en tu mensaje.\n\n"
-                "Asegurate de incluir un n�mero, por ejemplo:\n"
-                "• `Gast� $50 en comida`\n"
-                "• `Recib� $300 de salario`"
+                "Asegurate de incluir un número, por ejemplo:\n"
+                "• `Gasté $50 en comida`\n"
+                "• `Recibí $300 de salario`"
             )
 
-        # Si tiene m�ltiples monedas y no especific�, pedir que elija
+        # Si tiene múltiples monedas y no especificó, pedir que elija
         if moneda_obj is None and len(monedas_usuario) > 1:
             lineas = [
-                "💱 **Tienes varias monedas configuradas y no especificaste cu�l usar.**",
+                "💱 **Tienes varias monedas configuradas y no especificaste cuál usar.**",
                 "",
                 "Por favor, reescribe tu mensaje indicando la moneda:",
                 "",
@@ -157,7 +158,7 @@ class AIResponder:
                 default = " ⭐" if m.get("es_default") else ""
                 lineas.append(f"  {m['simbolo']} {m['nombre']} ({m['abreviatura']}){default}")
             lineas.append("")
-            lineas.append("Ej: `Gast� $50 en comida USD` o `Gast� $50 en comida en pesos`")
+            lineas.append("Ej: `Gasté $50 en comida USD` o `Gasté $50 en comida en pesos`")
             return "\n".join(lineas)
 
         try:
@@ -170,15 +171,15 @@ class AIResponder:
             else:
                 # No se pudo determinar el tipo, preguntar
                 return (
-                    f"Detect� un monto de **${cantidad:.2f}**{' en ' + descripcion if descripcion else ''}, "
+                    f"Detecté un monto de **${cantidad:.2f}**{' en ' + descripcion if descripcion else ''}, "
                     f"pero no estoy seguro si es un **gasto** o un **ingreso**.\n\n"
-                    f"�Podr�s confirmarme?\n"
-                    f"• Si es un **gasto**: `Gast� ${cantidad:.2f} {descripcion}`\n"
-                    f"• Si es un **ingreso**: `Recib� ${cantidad:.2f} {descripcion}`"
+                    f"¿Podrías confirmarme?\n"
+                    f"• Si es un **gasto**: `Gasté ${cantidad:.2f} {descripcion}`\n"
+                    f"• Si es un **ingreso**: `Recibí ${cantidad:.2f} {descripcion}`"
                 )
         except Exception as e:
-            logger.error("Error registrando transacci�n: %s", e)
-            return "❌ Ocurri� un error al registrar. Por favor, intent� de nuevo."
+            logger.error("Error registrando transacción: %s", e)
+            return "❌ Ocurrió un error al registrar. Por favor, intentá de nuevo."
 
     def _procesar_consulta(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa una consulta del usuario."""
@@ -205,7 +206,7 @@ class AIResponder:
             elif subconsulta == "categorias":
                 return _procesar_categorias(usuario)
             else:
-                # Intentar an�lisis por fecha si hay contexto temporal
+                # Intentar análisis por fecha si hay contexto temporal
                 respuesta_fecha = _analizar_transacciones_por_fecha(usuario, mensaje)
                 if respuesta_fecha:
                     return respuesta_fecha
@@ -214,22 +215,22 @@ class AIResponder:
 
         except Exception as e:
             logger.error("Error en consulta: %s", e)
-            return "❌ Ocurri� un error al consultar tus datos."
+            return "❌ Ocurrió un error al consultar tus datos."
 
     def _procesar_analisis_fecha(self, usuario: Dict[str, Any], mensaje: str) -> str:
-        """Procesa un an�lisis de transacciones por fecha."""
+        """Procesa un análisis de transacciones por fecha."""
         try:
             from knowledge import _analizar_transacciones_por_fecha
             respuesta = _analizar_transacciones_por_fecha(usuario, mensaje)
             if respuesta:
                 return respuesta
-            return "📅 No encontr� transacciones para ese per�odo. �Quer�s registrar algo?"
+            return "📅 No encontré transacciones para ese período. ¿Querés registrar algo?"
         except Exception as e:
             logger.error("Error analizando por fecha: %s", e)
-            return "❌ Ocurri� un error al analizar tus transacciones."
+            return "❌ Ocurrió un error al analizar tus transacciones."
 
     def _procesar_presupuesto(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
-        """Procesa la configuraci�n de un presupuesto."""
+        """Procesa la configuración de un presupuesto."""
         cantidad = resultado.get("cantidad")
         categoria = resultado.get("categoria") or resultado.get("descripcion") or "general"
 
@@ -239,7 +240,7 @@ class AIResponder:
                 from knowledge import _generar_respuesta_no_entendido
                 return _generar_respuesta_no_entendido(mensaje, usuario)
             except Exception:
-                return "❌ No pude entender el monto del presupuesto. Us�: `Mi presupuesto para comida es $500`"
+                return "❌ No pude entender el monto del presupuesto. Usá: `Mi presupuesto para comida es $500`"
 
         try:
             tipo_cat = "gastos"
@@ -257,10 +258,10 @@ class AIResponder:
             return f"✅ **Presupuesto configurado:** ${cantidad:.2f} para '{categoria}'"
         except Exception as e:
             logger.error("Error configurando presupuesto: %s", e)
-            return "❌ Ocurri� un error al configurar el presupuesto."
+            return "❌ Ocurrió un error al configurar el presupuesto."
 
     def _procesar_ahorro(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
-        """Procesa la configuraci�n de una meta de ahorro."""
+        """Procesa la configuración de una meta de ahorro."""
         cantidad = resultado.get("cantidad")
         descripcion = resultado.get("descripcion") or "meta general"
 
@@ -269,17 +270,17 @@ class AIResponder:
                 from knowledge import _generar_respuesta_no_entendido
                 return _generar_respuesta_no_entendido(mensaje, usuario)
             except Exception:
-                return "❌ No pude entender el monto de la meta. Us�: `Quiero ahorrar $5000 para vacaciones`"
+                return "❌ No pude entender el monto de la meta. Usá: `Quiero ahorrar $5000 para vacaciones`"
 
         try:
             database.crear_meta_ahorro(usuario["id"], descripcion, cantidad)
             return f"✅ **Meta de ahorro creada:** ${cantidad:.2f} para '{descripcion}'"
         except Exception as e:
             logger.error("Error creando meta de ahorro: %s", e)
-            return "❌ Ocurri� un error al crear la meta de ahorro."
+            return "❌ Ocurrió un error al crear la meta de ahorro."
 
     def _procesar_modificacion(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
-        """Procesa una solicitud de modificaci�n."""
+        """Procesa una solicitud de modificación."""
         try:
             from knowledge import _procesar_modificar_transaccion
 
@@ -290,23 +291,23 @@ class AIResponder:
             mensaje_construido = self._construir_mensaje_mod(accion, referencia, valor, resultado)
             return _procesar_modificar_transaccion(mensaje_construido, usuario)
         except Exception as e:
-            logger.error("Error procesando modificaci�n: %s", e)
-            return "❌ No pude procesar la modificaci�n. �Podr�s ser m�s espec�fico?"
+            logger.error("Error procesando modificación: %s", e)
+            return "❌ No pude procesar la modificación. ¿Podrás ser más específico?"
 
     def _procesar_eliminacion(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
-        """Procesa una solicitud de eliminaci�n."""
+        """Procesa una solicitud de eliminación."""
         try:
             from knowledge import _procesar_eliminar_transaccion
             referencia = resultado.get("referencia", "")
-            mensaje_construido = f"eliminar transacci�n {referencia}" if referencia else mensaje
+            mensaje_construido = f"eliminar transacción {referencia}" if referencia else mensaje
             return _procesar_eliminar_transaccion(mensaje_construido, usuario)
         except Exception as e:
-            logger.error("Error procesando eliminaci�n: %s", e)
-            return "❌ No pude procesar la eliminaci�n."
+            logger.error("Error procesando eliminación: %s", e)
+            return "❌ No pude procesar la eliminación."
 
     def _procesar_general(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa un mensaje general (saludos, no entendido, etc.)."""
-        # Si la IA gener� una respuesta, usarla
+        # Si la IA generó una respuesta, usarla
         respuesta_ia = resultado.get("respuesta")
         if respuesta_ia:
             return respuesta_ia
@@ -317,11 +318,12 @@ class AIResponder:
             return _generar_respuesta_no_entendido(mensaje, usuario)
         except Exception as e:
             logger.error("Error en fallback: %s", e)
+            nombre_esc = escape_markdown(usuario.get("nombre", "amigo") or "amigo", version=1)
             return (
-                f"👋 �Hola {usuario.get('nombre', 'amigo')}!\n\n"
-                "No entend� completamente tu mensaje. �Pod�s intentar con algo como?\n"
-                "• `Gast� $50 en comida`\n"
-                "• `�Cu�nto tengo?`\n"
+                f"👋 ¡Hola {nombre_esc}!\n\n"
+                "No entendí completamente tu mensaje. ¿Podés intentar con algo como?\n"
+                "• `Gasté $50 en comida`\n"
+                "• `¿Cuánto tengo?`\n"
                 "• `Ayuda` para ver todos los comandos"
             )
 
@@ -344,14 +346,14 @@ class AIResponder:
                 partes.append("monto")
         elif accion == "cambiar_descripcion":
             if valor:
-                partes.append(f"descripci�n a {valor}")
+                partes.append(f"descripción a {valor}")
             else:
-                partes.append("descripci�n")
+                partes.append("descripción")
         elif accion == "cambiar_categoria":
             if valor:
-                partes.append(f"categor�a a {valor}")
+                partes.append(f"categoría a {valor}")
             else:
-                partes.append("categor�a")
+                partes.append("categoría")
         elif accion == "cambiar_fecha":
             if valor:
                 partes.append(f"fecha a {valor}")
@@ -362,23 +364,23 @@ class AIResponder:
 
     def _generar_respuesta_error(self, usuario: Dict[str, Any], tipo_error: str) -> str:
         """Genera una respuesta de error amigable."""
-        nombre = usuario.get("nombre", "amigo")
+        nombre = escape_markdown(usuario.get("nombre", "amigo") or "amigo", version=1)
         if tipo_error == "IA":
             return (
-                f"😔 Disculpa {nombre}, el servicio de IA no est� disponible ahora.\n\n"
-                "Mientras tanto, pod�s usar lenguaje natural directamente:\n\n"
-                "• `Gast� $50 en comida` — Registrar gasto\n"
-                "• `Recib� $300 de salario` — Registrar ingreso\n"
-                "• `�Cu�nto tengo?` — Ver balance\n"
+                f"😔 Disculpa {nombre}, el servicio de IA no está disponible ahora.\n\n"
+                "Mientras tanto, podés usar lenguaje natural directamente:\n\n"
+                "• `Gasté $50 en comida` — Registrar gasto\n"
+                "• `Recibí $300 de salario` — Registrar ingreso\n"
+                "• `¿Cuánto tengo?` — Ver balance\n"
                 "• `Ayuda` — Ver comandos\n\n"
-                "Intent� de nuevo en unos segundos."
+                "Intentá de nuevo en unos segundos."
             )
         else:
             return (
-                f"⚠️ {nombre}, algo sali� mal.\n\n"
-                "Intent� con estos comandos:\n"
-                "• `Gast� $50 en comida`\n"
-                "• `�Cu�nto tengo?`\n"
+                f"⚠️ {nombre}, algo salió mal.\n\n"
+                "Intentá con estos comandos:\n"
+                "• `Gasté $50 en comida`\n"
+                "• `¿Cuánto tengo?`\n"
                 "• `Ayuda`\n\n"
-                "Si el problema persiste, escrib� `/help`."
+                "Si el problema persiste, escribí `/help`."
             )

@@ -9,6 +9,7 @@ from collections import defaultdict
 from typing import Dict, Any, Optional, List
 
 import database
+from telegram.helpers import escape_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -895,16 +896,7 @@ def _detectar_modificacion(mensaje: str) -> Dict[str, Any]:
         resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
         return resultado
 
-    # --- CAMBIAR MONTO ---
-    if any(w in mensaje_lower for w in ["monto", "cantidad", "importe", "precio"]):
-        nuevo_monto = _extraer_nuevo_valor(mensaje_lower)
-        if nuevo_monto is not None:
-            resultado["accion"] = "cambiar_monto"
-            resultado["valor_nuevo"] = nuevo_monto
-            resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
-            return resultado
-
-    # Detectar patrón "de $X a $Y"
+    # Detectar patrón "de $X a $Y" (referencia = monto viejo)
     patron_de_a = re.search(r'de\s+\$?([\d.,]+)\s+a\s+\$?([\d.,]+)', mensaje_lower)
     if patron_de_a:
         val_viejo = _parsear_cantidad(patron_de_a.group(1))
@@ -914,6 +906,15 @@ def _detectar_modificacion(mensaje: str) -> Dict[str, Any]:
             resultado["valor_nuevo"] = val_nuevo
             resultado["referencia"] = f"${val_viejo}"
         return resultado
+
+    # --- CAMBIAR MONTO ---
+    if any(w in mensaje_lower for w in ["monto", "cantidad", "importe", "precio"]):
+        nuevo_monto = _extraer_nuevo_valor(mensaje_lower)
+        if nuevo_monto is not None:
+            resultado["accion"] = "cambiar_monto"
+            resultado["valor_nuevo"] = nuevo_monto
+            resultado["referencia"] = _extraer_referencia_transaccion(mensaje_lower)
+            return resultado
 
     # --- CAMBIAR DESCRIPCIÓN ---
     if any(w in mensaje_lower for w in ["descripción", "descripcion", "nombre", "texto", "detalle"]):
@@ -961,7 +962,7 @@ def _extraer_referencia_transaccion(mensaje_lower: str) -> Optional[str]:
 
     # "el gasto de $X"
     monto_val = _parsear_cantidad(mensaje_lower)
-    if monto_val and "de" in mensaje_lower or "por" in mensaje_lower:
+    if monto_val is not None and ("de" in mensaje_lower or "por" in mensaje_lower):
         return f"${monto_val}"
 
     # "el gasto/ingreso de ayer/hoy"
@@ -1173,7 +1174,121 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
                 f"🗑️ **Transacción eliminada:**\n"
                 f"{tipo_icono} ${transaccion['cantidad']:.2f} - {tipo_label}: {desc}"
             )
-    return "❌ No pude eliminar la transacción. Intenta de nuevo."
+        return "❌ No pude eliminar la transacción. Intenta de nuevo."
+
+    # --- CAMBIAR TIPO ---
+    if accion == "cambiar_tipo":
+        nuevo_tipo = mod["valor_nuevo"]
+        if nuevo_tipo == transaccion["tipo"]:
+            return f"ℹ️ La transacción ya es un **{nuevo_tipo}**. No hay cambios necesarios."
+
+        # Buscar o crear categoría del nuevo tipo
+        nuevo_tipo_cat = "ingresos" if nuevo_tipo == "ingreso" else "gastos"
+        categorias = database.obtener_categorias(usuario["id"], nuevo_tipo_cat)
+        nueva_categoria_id = categorias[0]["id"] if categorias else None
+
+        if not nueva_categoria_id:
+            cat_info = database.crear_categoria(usuario["id"], "otros", nuevo_tipo_cat)
+            nueva_categoria_id = cat_info["id"]
+
+        actualizada = database.actualizar_transaccion(
+            usuario["id"], tid,
+            tipo=nuevo_tipo,
+            categoria_id=nueva_categoria_id
+        )
+
+        if actualizada:
+            emoji_nuevo = "📈" if nuevo_tipo == "ingreso" else "📉"
+            label_nuevo = "Ingreso" if nuevo_tipo == "ingreso" else "Gasto"
+            label_viejo = "Gasto" if nuevo_tipo == "ingreso" else "Ingreso"
+            icono_viejo = "📉" if nuevo_tipo == "ingreso" else "📈"
+            desc = _limpiar_descripcion(transaccion.get("descripcion", "Sin descripción"))
+            return (
+                f"✅ **Tipo cambiado:**\n"
+                f"De: {icono_viejo} {label_viejo}: {desc}\n"
+                f"A: {emoji_nuevo} ${transaccion['cantidad']:.2f} - {label_nuevo}: {desc}"
+            )
+        return "❌ No pude cambiar el tipo. Intenta de nuevo."
+
+    # --- CAMBIAR MONTO ---
+    if accion == "cambiar_monto":
+        nuevo_monto = mod["valor_nuevo"]
+        if nuevo_monto is None or nuevo_monto <= 0:
+            return "❌ El monto nuevo no es válido. Especificá un número positivo."
+
+        actualizada = database.actualizar_transaccion(
+            usuario["id"], tid, cantidad=nuevo_monto
+        )
+        if actualizada:
+            return (
+                f"✅ **Monto actualizado:**\n"
+                f"De ${transaccion['cantidad']:.2f} → **${nuevo_monto:.2f}**"
+            )
+        return "❌ No pude actualizar el monto. Intenta de nuevo."
+
+    # --- CAMBIAR DESCRIPCIÓN ---
+    if accion == "cambiar_descripcion":
+        nueva_desc = mod["valor_nuevo"]
+        if not nueva_desc:
+            return "❌ No pude entender la nueva descripción. Especificá el texto."
+
+        actualizada = database.actualizar_transaccion(
+            usuario["id"], tid, descripcion=nueva_desc
+        )
+        if actualizada:
+            return (
+                f"✅ **Descripción actualizada:**\n"
+                f"De '{transaccion.get('descripcion', 'Sin descripción')}' → **'{nueva_desc}'**"
+            )
+        return "❌ No pude actualizar la descripción. Intenta de nuevo."
+
+    # --- CAMBIAR CATEGORÍA ---
+    if accion == "cambiar_categoria":
+        nueva_cat_nombre = mod["valor_nuevo"]
+        if not nueva_cat_nombre:
+            return "❌ No pude entender la nueva categoría."
+
+        tipo_cat = "ingresos" if transaccion["tipo"] == "ingreso" else "gastos"
+        categorias = database.obtener_categorias(usuario["id"], tipo_cat)
+
+        cat_encontrada = None
+        for c in categorias:
+            if c["nombre"].lower() == nueva_cat_nombre.lower():
+                cat_encontrada = c
+                break
+
+        if not cat_encontrada:
+            cat_info = database.crear_categoria(usuario["id"], nueva_cat_nombre, tipo_cat)
+            cat_encontrada = cat_info
+
+        actualizada = database.actualizar_transaccion(
+            usuario["id"], tid, categoria_id=cat_encontrada["id"]
+        )
+        if actualizada:
+            return (
+                f"✅ **Categoría cambiada:**\n"
+                f"De '{transaccion.get('categoria_nombre', 'Sin categoría')}' → **'{nueva_cat_nombre}'**"
+            )
+        return "❌ No pude cambiar la categoría. Intenta de nuevo."
+
+    # --- CAMBIAR FECHA ---
+    if accion == "cambiar_fecha":
+        nueva_fecha = mod["valor_nuevo"]
+        if not nueva_fecha:
+            return "❌ No pude entender la nueva fecha."
+
+        actualizada = database.actualizar_transaccion(
+            usuario["id"], tid, fecha=nueva_fecha
+        )
+        if actualizada:
+            fecha_ant = transaccion.get("fecha", "N/A")[:10]
+            return (
+                f"✅ **Fecha actualizada:**\n"
+                f"De {fecha_ant} → **{nueva_fecha}**"
+            )
+        return "❌ No pude actualizar la fecha. Intenta de nuevo."
+
+    return "❌ Ocurrió un error al procesar la modificación. Intenta de nuevo."
 
 
 # ============================================================
@@ -1400,7 +1515,8 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
     Analiza parcialmente la intención y guía al usuario con ejemplos específicos.
     """
     msg = mensaje.lower().strip()
-    nombre = usuario.get("nombre", "amigo")
+    nombre = escape_markdown(usuario.get("nombre", "amigo") or "amigo", version=1)
+    mensaje_esc = escape_markdown(mensaje, version=1)
 
     # Señal 1: Tiene número pero no se detectó transacción
     tiene_numero = bool(re.search(r'\d+', msg))
@@ -1498,7 +1614,7 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
 
     # --- RESPUESTA GENÉRICA CON EJEMPLOS ---
     return (
-        f"🤔 {nombre}, no estoy seguro de qué quieres hacer con: \"{mensaje}\"\n\n"
+        f"🤔 {nombre}, no estoy seguro de qué quieres hacer con: \"{mensaje_esc}\"\n\n"
         "¿Podés decirme algo como?\n\n"
         "💸 **Registrar:**\n"
         "• `Gasté $50 en comida`\n"
@@ -1516,119 +1632,6 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
         "• `Eliminar mi último gasto`\n\n"
         "¿Qué necesitas? 😊"
     )
-
-    # --- CAMBIAR TIPO ---
-    if accion == "cambiar_tipo":
-        nuevo_tipo = mod["valor_nuevo"]
-        if nuevo_tipo == transaccion["tipo"]:
-            return f"ℹ️ La transacción ya es un **{nuevo_tipo}**. No hay cambios necesarios."
-
-        # Buscar o crear categoría del nuevo tipo
-        nuevo_tipo_cat = "ingresos" if nuevo_tipo == "ingreso" else "gastos"
-        categorias = database.obtener_categorias(usuario["id"], nuevo_tipo_cat)
-        nueva_categoria_id = categorias[0]["id"] if categorias else None
-
-        if not nueva_categoria_id:
-            cat_info = database.crear_categoria(usuario["id"], "otros", nuevo_tipo_cat)
-            nueva_categoria_id = cat_info["id"]
-
-        actualizada = database.actualizar_transaccion(
-            usuario["id"], tid,
-            tipo=nuevo_tipo,
-            categoria_id=nueva_categoria_id
-        )
-
-        if actualizada:
-            emoji_nuevo = "📈" if nuevo_tipo == "ingreso" else "📉"
-            label_nuevo = "Ingreso" if nuevo_tipo == "ingreso" else "Gasto"
-            label_viejo = "Gasto" if nuevo_tipo == "ingreso" else "Ingreso"
-            desc = _limpiar_descripcion(transaccion.get("descripcion", "Sin descripción"))
-            return (
-                f"✅ **Tipo cambiado:**\n"
-                f"De: 📉 {label_viejo}: {desc}\n"
-                f"A: {emoji_nuevo} ${transaccion['cantidad']:.2f} - {label_nuevo}: {desc}"
-            )
-        return "❌ No pude cambiar el tipo. Intenta de nuevo."
-
-    # --- CAMBIAR MONTO ---
-    if accion == "cambiar_monto":
-        nuevo_monto = mod["valor_nuevo"]
-        if nuevo_monto is None or nuevo_monto <= 0:
-            return "❌ El monto nuevo no es válido. Especificá un número positivo."
-
-        actualizada = database.actualizar_transaccion(
-            usuario["id"], tid, cantidad=nuevo_monto
-        )
-        if actualizada:
-            return (
-                f"✅ **Monto actualizado:**\n"
-                f"De ${transaccion['cantidad']:.2f} → **${nuevo_monto:.2f}**"
-            )
-        return "❌ No pude actualizar el monto. Intenta de nuevo."
-
-    # --- CAMBIAR DESCRIPCIÓN ---
-    if accion == "cambiar_descripcion":
-        nueva_desc = mod["valor_nuevo"]
-        if not nueva_desc:
-            return "❌ No pude entender la nueva descripción. Especificá el texto."
-
-        actualizada = database.actualizar_transaccion(
-            usuario["id"], tid, descripcion=nueva_desc
-        )
-        if actualizada:
-            return (
-                f"✅ **Descripción actualizada:**\n"
-                f"De '{transaccion.get('descripcion', 'Sin descripción')}' → **'{nueva_desc}'**"
-            )
-        return "❌ No pude actualizar la descripción. Intenta de nuevo."
-
-    # --- CAMBIAR CATEGORÍA ---
-    if accion == "cambiar_categoria":
-        nueva_cat_nombre = mod["valor_nuevo"]
-        if not nueva_cat_nombre:
-            return "❌ No pude entender la nueva categoría."
-
-        tipo_cat = "ingresos" if transaccion["tipo"] == "ingreso" else "gastos"
-        categorias = database.obtener_categorias(usuario["id"], tipo_cat)
-
-        cat_encontrada = None
-        for c in categorias:
-            if c["nombre"].lower() == nueva_cat_nombre.lower():
-                cat_encontrada = c
-                break
-
-        if not cat_encontrada:
-            cat_info = database.crear_categoria(usuario["id"], nueva_cat_nombre, tipo_cat)
-            cat_encontrada = cat_info
-
-        actualizada = database.actualizar_transaccion(
-            usuario["id"], tid, categoria_id=cat_encontrada["id"]
-        )
-        if actualizada:
-            return (
-                f"✅ **Categoría cambiada:**\n"
-                f"De '{transaccion.get('categoria_nombre', 'Sin categoría')}' → **'{nueva_cat_nombre}'**"
-            )
-        return "❌ No pude cambiar la categoría. Intenta de nuevo."
-
-    # --- CAMBIAR FECHA ---
-    if accion == "cambiar_fecha":
-        nueva_fecha = mod["valor_nuevo"]
-        if not nueva_fecha:
-            return "❌ No pude entender la nueva fecha."
-
-        actualizada = database.actualizar_transaccion(
-            usuario["id"], tid, fecha=nueva_fecha
-        )
-        if actualizada:
-            fecha_ant = transaccion.get("fecha", "N/A")[:10]
-            return (
-                f"✅ **Fecha actualizada:**\n"
-                f"De {fecha_ant} → **{nueva_fecha}**"
-            )
-        return "❌ No pude actualizar la fecha. Intenta de nuevo."
-
-    return "❌ Ocurrió un error al procesar la modificación. Intenta de nuevo."
 
 
 def _procesar_eliminar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> str:
