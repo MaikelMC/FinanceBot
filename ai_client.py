@@ -212,6 +212,8 @@ class AIResponder:
                 _procesar_gastos, _procesar_ingresos,
                 _procesar_presupuestos, _procesar_categorias,
                 _analizar_transacciones_por_fecha,
+                _procesar_presupuesto_especifico, _procesar_mayor_gasto,
+                _procesar_gastos_por_presupuestos, _procesar_gastos_por_fecha,
             )
 
             if subconsulta == "balance":
@@ -226,6 +228,14 @@ class AIResponder:
                 return _procesar_presupuestos(usuario)
             elif subconsulta == "categorias":
                 return _procesar_categorias(usuario)
+            elif subconsulta == "presupuesto_especifico":
+                return _procesar_presupuesto_especifico(usuario, resultado.get("nombre"))
+            elif subconsulta == "mayor_gasto":
+                return _procesar_mayor_gasto(usuario, mensaje)
+            elif subconsulta == "gastos_por_presupuestos":
+                return _procesar_gastos_por_presupuestos(usuario, mensaje)
+            elif subconsulta == "gastos_por_fecha":
+                return _procesar_gastos_por_fecha(usuario, mensaje)
             else:
                 # Intentar análisis por fecha si hay contexto temporal
                 respuesta_fecha = _analizar_transacciones_por_fecha(usuario, mensaje)

@@ -314,7 +314,7 @@ def obtener_transacciones_por_fecha(usuario_id: int, fecha_inicio: str, fecha_fi
     cursor = conn.cursor()
 
     query = """
-        SELECT t.id, t.tipo, t.cantidad, t.descripcion, t.fecha,
+        SELECT t.id, t.tipo, t.cantidad, t.descripcion, t.fecha, t.categoria_id, t.moneda_id,
                c.nombre as categoria_nombre, c.tipo as categoria_tipo, c.descripcion as categoria_descripcion
         FROM transacciones t
         LEFT JOIN categorias c ON t.categoria_id = c.id

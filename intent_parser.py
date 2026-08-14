@@ -61,9 +61,30 @@ _FAST_PATTERNS = [
     (re.compile(r'\$?([\d,.]+)\s+(?:en\s+|para\s+|de\s+)(.+)', re.IGNORECASE),
      lambda m: {"intencion": "registrar", "tipo": None, "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.95}),
 
-    # --- CONSULTA: balance/saldo ---
-    (re.compile(r'(?:cu[áa]nto\s+(?:tengo|dinero|plata|saldo|gaste|gast[eé]|ingres[eé])|(?:cu[áa]l\s+es\s+(?:mi\s+)?(?:balance|saldo))|ver\s+(?:balance|saldo|resumen))', re.IGNORECASE),
-     lambda m: {"intencion": "consultar", "subconsulta": "balance", "confianza": 0.99}),
+    # --- CONSULTA: gastos por presupuestos (período) ---
+    # "cuánto gasté ayer de mis presupuestos", "cuánto gasté de mis presupuestos esta semana"
+    (re.compile(r'cu[áa]nto\s+(?:gast[ée]|gastaste|he\s+gastado)\s+(?:hoy|ayer|anteayer|esta\s+semana|este\s+mes)?\s*(?:de\s+|en\s+)?(?:mis\s+|los\s+)?presupuestos?\b', re.IGNORECASE),
+     lambda m: {"intencion": "consultar", "subconsulta": "gastos_por_presupuestos", "confianza": 0.98}),
+
+    # --- CONSULTA: cuánto gasté/ingresé + fecha (total del período) ---
+    (re.compile(r'cu[áa]nto\s+(?:gast[ée]|gastaste|he\s+gastado|ingres[ée]|recib[ií])\s+(?:en\s+total\s+)?(hoy|ayer|anteayer|esta\s+semana|este\s+mes)', re.IGNORECASE),
+     lambda m: {"intencion": "consultar", "subconsulta": "gastos_por_fecha", "confianza": 0.98}),
+
+    # --- CONSULTA: presupuesto específico (restante/progreso) ---
+    # "cuánto me queda de mi presupuesto para barbería", "cuánto puedo gastar todavía de comida",
+    # "me queda de transporte", "cómo voy con mi presupuesto de X", "progreso del presupuesto de X"
+    (re.compile(r'(?:me\s+queda|me\s+quedan|cu[áa]nto\s+me\s+queda|cu[áa]nto\s+puedo\s+gastar|restante|disponible)\s+(?:todav[ií]a\s+|a[uú]n\s+)?(?:de\s+|del\s+|para\s+|en\s+|con\s+)?(?:mi\s+|el\s+)?(?:presupuesto\s+(?:de\s+|para\s+|del\s+|en\s+)?)?(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "consultar", "subconsulta": "presupuesto_especifico", "nombre": m.group(1).strip(), "confianza": 0.97}),
+    (re.compile(r'(?:c[oó]mo\s+voy|qu[ée]\s+tal\s+va|progreso|c[oó]mo\s+va)\s+(?:con\s+|con\s+el\s+)?(?:mi\s+|el\s+)?presupuesto\s+(?:de\s+|para\s+)?(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "consultar", "subconsulta": "presupuesto_especifico", "nombre": m.group(1).strip(), "confianza": 0.97}),
+
+    # --- CONSULTA: mayor gasto (período) ---
+    (re.compile(r'(?:cu[áa]l|qu[ée])\s+(?:fue|es)\s+(?:el|mi)?\s*(?:mayor|m[áa]s\s+alto|m[áa]s\s+grande|top)?\s*gasto\b', re.IGNORECASE),
+     lambda m: {"intencion": "consultar", "subconsulta": "mayor_gasto", "confianza": 0.97}),
+    (re.compile(r'(?:mayor|m[áa]s\s+alto|m[áa]s\s+grande|top)\s+gasto\b', re.IGNORECASE),
+     lambda m: {"intencion": "consultar", "subconsulta": "mayor_gasto", "confianza": 0.97}),
+    (re.compile(r'gasto\s+(?:m[áa]s\s+alto|m[áa]s\s+grande|m[áa]s\s+caro|mayor\s+de\s+todos)', re.IGNORECASE),
+     lambda m: {"intencion": "consultar", "subconsulta": "mayor_gasto", "confianza": 0.97}),
 
     # --- CONSULTA: transacciones por fecha (hoy/ayer/este mes) ---
     (re.compile(r'(?:qu[eé]\s+(?:gast[eé]|hice|pas[óo])|(?:ver|mostrar)\s+(?:transacciones|gastos|ingresos|historial))\s+(?:hoy|ayer|anteayer|esta\s+semana|este\s+mes)', re.IGNORECASE),
@@ -72,6 +93,10 @@ _FAST_PATTERNS = [
     # --- CONSULTA: "qué gastó hoy?" ---
     (re.compile(r'qu[eé]\s+(?:gast[eé]|compr[eé]|hice)\s+(?:hoy|ayer)', re.IGNORECASE),
      lambda m: {"intencion": "analizar_por_fecha", "confianza": 0.98}),
+
+    # --- CONSULTA: balance/saldo ---
+    (re.compile(r'(?:cu[áa]nto\s+(?:tengo|dinero|plata|saldo)|(?:cu[áa]l\s+es\s+(?:mi\s+)?(?:balance|saldo))|ver\s+(?:balance|saldo|resumen))', re.IGNORECASE),
+     lambda m: {"intencion": "consultar", "subconsulta": "balance", "confianza": 0.99}),
 
     # --- CONSULTA: ver gastos/ingresos/transacciones ---
     (re.compile(r'(?:ver|mostrar|listar|dame)\s+(?:mis\s+)?(?:gastos|ingresos|transacciones|historial|movimientos)', re.IGNORECASE),
@@ -172,10 +197,21 @@ REGLAS:
 - Para "eliminar": si el usuario quiere borrar un PRESUPUESTO (ej: "elimina el presupuesto de comida"), usa eliminar_objeto: "presupuesto" y categoria: "comida". Para transacciones usa eliminar_objeto: "transaccion".
 - La respuesta debe ser en español neutro, amigable, con emojis y sin regionalismos.
 - Cuando el usuario haga una PREGUNTA general o pida un consejo financiero (no una operación de registrar/consultar/configurar), respóndele DIRECTAMENTE y con sustancia en el campo "respuesta" usando intencion "general" o "ayuda_uso". No devuelvas un menú genérico de comandos.
+- Para intencion "consultar", usa el campo "subconsulta" para indicar QUÉ quiere ver el usuario:
+  * "presupuesto_especifico": pregunta por el restante/disponible/progreso de UN presupuesto concreto (ej: "cuánto me queda de mi presupuesto para barbería", "cuánto puedo gastar todavía de comida", "cómo voy con mi presupuesto de transporte"). Pon la etiqueta textual que usa el usuario (puede ser coloquial) en "nombre" y el período en "fecha" si lo menciona.
+  * "mayor_gasto": pregunta cuál fue el gasto más grande/mayor/top de un período (ej: "cuál fue el gasto que más tuve ayer", "el gasto más grande de esta semana"). Pon el período en "fecha" (hoy|ayer|esta semana|este mes|...).
+  * "gastos_por_presupuestos": pregunta cuánto gastó en un período en relación a sus presupuestos (ej: "cuánto gasté ayer de mis presupuestos", "cuánto gasté esta semana de mis presupuestos"). Pon el período en "fecha".
+  * "gastos_por_fecha": pregunta cuánto gastó o recibió en total en un período (ej: "cuánto gasté en total esta semana", "cuánto ingresé ayer"). Pon el período en "fecha".
+  * "balance": pregunta por su saldo/balance/plata actual (ej: "cuánto tengo", "cuál es mi balance").
+  * "presupuesto": pregunta genérica por sus presupuestos ("ver mis presupuestos").
+  * "gastos"/"ingresos"/"transacciones": pedir ver la lista de movimientos.
+- Estas consultas de subconsulta NO son ayuda_uso: el usuario pregunta por SUS datos, no por cómo usar el bot. NUNCA inventes cifras en "respuesta" para estas consultas: el sistema calculará los valores reales; deja "respuesta" en null y solo clasifica.
+- El campo "fecha" para períodos usa solo palabras: "hoy", "ayer", "anteayer", "esta semana", "este mes" u otro período que mencione el usuario, o null si no menciona ninguno.
 
 JSON DE SALIDA:
 {
   "intencion": "registrar|consultar|configurar_presupuesto|configurar_ahorro|modificar|eliminar|analizar_por_fecha|ayuda_uso|general",
+  "subconsulta": "balance|transacciones|gastos|ingresos|presupuesto|presupuesto_especifico|gastos_por_presupuestos|mayor_gasto|gastos_por_fecha|categorias|null",
   "tipo": "gasto|ingreso|null",
   "cantidad": numero | null,
   "descripcion": "texto | null",
@@ -194,13 +230,45 @@ JSON DE SALIDA:
 }"""
 
 
-def _construir_prompt_usuario(mensaje: str) -> str:
+def _construir_prompt_usuario(mensaje: str, contexto: Optional[str] = None) -> str:
     """Construye el prompt del usuario para la IA."""
-    return f"""Analiza el siguiente mensaje financiero y devuelve SOLO el JSON sin explicaciones adicionales.
+    parte_contexto = ""
+    if contexto:
+        parte_contexto = (
+            "\n\nCONTEXTO DEL USUARIO (datos REALES: úsalos para elegir la etiqueta exacta de presupuesto"
+            " en 'nombre' cuando el usuario hable de sus presupuestos):\n"
+            + contexto
+        )
+    return f"""Analiza el siguiente mensaje financiero y devuelve SOLO el JSON sin explicaciones adicionales.{parte_contexto}
 
 Mensaje: "{mensaje}"
 
 Recuerda: si el usuario está confundido, pregunta cómo hacer algo, o pide ayuda, usa intencion "ayuda_uso" con es_consulta_ayuda: true."""
+
+
+def _construir_contexto_usuario(usuario: Dict[str, Any]) -> Optional[str]:
+    """Construye el contexto real del usuario (presupuestos y monedas) para la IA."""
+    try:
+        import database
+        uid = usuario.get("id")
+        if not uid:
+            return None
+        presupuestos = database.obtener_presupuestos(uid)
+        lineas = []
+        if presupuestos:
+            nombres = ", ".join(
+                (p.get("nombre") or p.get("categoria_nombre") or "sin nombre") for p in presupuestos
+            )
+            lineas.append("Presupuestos del usuario: " + nombres)
+        try:
+            monedas = database.obtener_monedas(uid)
+            if monedas:
+                lineas.append("Monedas: " + ", ".join(m.get("abreviatura", "") for m in monedas))
+        except Exception:
+            pass
+        return "\n".join(lineas) if lineas else None
+    except Exception:
+        return None
 
 
 # ============================================================
@@ -209,6 +277,7 @@ Recuerda: si el usuario está confundido, pregunta cómo hacer algo, o pide ayud
 
 _RESULTADO_VACIO: Dict[str, Any] = {
     "intencion": "general",
+    "subconsulta": None,
     "tipo": None,
     "cantidad": None,
     "descripcion": None,
@@ -263,7 +332,8 @@ _INTENCIONES_VALIDAS = {
 
 _TIPOS_VALIDOS = {"gasto", "ingreso", None}
 
-_CONSULTAS_VALIDAS = {"balance", "transacciones", "gastos", "ingresos", "presupuesto", "categorias", None}
+_CONSULTAS_VALIDAS = {"balance", "transacciones", "gastos", "ingresos", "presupuesto", "categorias",
+                      "presupuesto_especifico", "gastos_por_presupuestos", "mayor_gasto", "gastos_por_fecha", None}
 
 
 def _validar_resultado(datos: dict) -> dict:
@@ -360,6 +430,9 @@ async def _call_ai(mensaje: str, usuario: Dict[str, Any]) -> Dict[str, Any]:
     """Llama a la IA (Mistral u Ollama) y retorna el JSON analizado."""
     logger.info("Enviando a IA para %s: %s", usuario.get("nombre", "?"), mensaje[:60])
 
+    contexto = _construir_contexto_usuario(usuario)
+    user_content = _construir_prompt_usuario(mensaje, contexto)
+
     # Intentar Mistral
     if config.AI_PROVIDER == "mistral" and config.MISTRAL_API_KEY:
         try:
@@ -375,7 +448,7 @@ async def _call_ai(mensaje: str, usuario: Dict[str, Any]) -> Dict[str, Any]:
                 model=config.MISTRAL_MODEL,
                 messages=[
                     {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": _construir_prompt_usuario(mensaje)},
+                    {"role": "user", "content": user_content},
                 ],
                 temperature=0.1,
                 max_tokens=500,
@@ -401,7 +474,7 @@ async def _call_ai(mensaje: str, usuario: Dict[str, Any]) -> Dict[str, Any]:
                     "model": config.OLLAMA_MODEL,
                     "messages": [
                         {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": _construir_prompt_usuario(mensaje)},
+                        {"role": "user", "content": user_content},
                     ],
                     "stream": False,
                     "options": {"temperature": 0.1},

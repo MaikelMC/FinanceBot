@@ -4,9 +4,19 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.7"
+VERSION_ACTUAL = "2.8"
 
 CHANGELOG = {
+    "2.8": {
+        "titulo": "🗣️ Pregúntale a tu bot en tus palabras",
+        "mejoras": [
+            "Responde consultas con vocabulario libre: 'cuánto me queda de mi presupuesto para barbería', 'cuánto puedo gastar todavía de comida'",
+            "Descubrí cuánto gastaste de tus presupuestos en un período: 'cuánto gasté ayer de mis presupuestos'",
+            "Te muestra el mayor gasto de un día, semana o mes: 'cuál fue el gasto que más tuve ayer'",
+            "Los análisis por fecha muestran la moneda de cada transacción y tus totales por moneda"
+        ],
+        "emoji": "🗣️"
+    },
     "2.7": {
         "titulo": "📉 Gastos ligados a presupuestos",
         "mejoras": [

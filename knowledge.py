@@ -348,6 +348,271 @@ def _procesar_presupuestos(usuario: Dict[str, Any]) -> str:
         return "Ocurrio un error al obtener tus presupuestos."
 
 
+def _moneda_lookup_usuario(usuario: Dict[str, Any]) -> Dict[Any, Dict[str, Any]]:
+    """Mapa moneda_id -> moneda del usuario."""
+    try:
+        return {m["id"]: m for m in database.obtener_monedas(usuario["id"])}
+    except Exception:
+        return {}
+
+
+def _formatear_monto(moneda_lookup: Dict[Any, Dict[str, Any]], moneda_id: Optional[int], cantidad: float) -> str:
+    """Formatea un monto con símbolo y abreviatura de moneda si existe."""
+    m = moneda_lookup.get(moneda_id)
+    if m:
+        return f"{m['simbolo']}{cantidad:.2f} ({m['abreviatura']})"
+    return f"${cantidad:.2f}"
+
+
+def _buscar_presupuesto(usuario: Dict[str, Any], etiqueta: str) -> Optional[Dict[str, Any]]:
+    """Busca un presupuesto por nombre/categoría (exacto -> contiene -> fuzzy)."""
+    if not etiqueta:
+        return None
+    presupuestos = database.obtener_presupuestos(usuario["id"])
+    if not presupuestos:
+        return None
+    norm = _normalizar_texto(etiqueta)
+
+    # 1) Exacto por nombre o categoría
+    for p in presupuestos:
+        if _normalizar_texto(p.get("nombre") or "") == norm:
+            return p
+        if _normalizar_texto(p.get("categoria_nombre") or "") == norm:
+            return p
+
+    # 2) Contención (uno dentro del otro)
+    for p in presupuestos:
+        for cand in [p.get("nombre") or "", p.get("categoria_nombre") or ""]:
+            nc = _normalizar_texto(cand)
+            if nc and (norm in nc or nc in norm):
+                return p
+
+    # 3) Fuzzy (difflib)
+    from difflib import SequenceMatcher
+    mejor, mejor_ratio = None, 0.55
+    for p in presupuestos:
+        for cand in [p.get("nombre") or "", p.get("categoria_nombre") or ""]:
+            nc = _normalizar_texto(cand)
+            if not nc:
+                continue
+            ratio = SequenceMatcher(None, nc, norm).ratio()
+            if ratio > mejor_ratio:
+                mejor, mejor_ratio = p, ratio
+    return mejor
+
+
+def _procesar_presupuesto_especifico(usuario: Dict[str, Any], etiqueta: str) -> str:
+    """Muestra el restante/disponible de un presupuesto concreto."""
+    try:
+        etiqueta = (etiqueta or "").strip()
+        if not etiqueta:
+            return "¿De qué presupuesto quieres saber? Dime su nombre (ej: 'comida', 'barbería')."
+
+        p = _buscar_presupuesto(usuario, etiqueta)
+        if not p:
+            presupuestos = database.obtener_presupuestos(usuario["id"])
+            if not presupuestos:
+                return (
+                    f"❌ No tienes un presupuesto para '{etiqueta}' y todavía no tienes "
+                    "ninguno configurado.\n\n"
+                    f"Para crearlo: `Mi presupuesto para {etiqueta} es $500`"
+                )
+            nombres = ", ".join(
+                f"'{x.get('nombre') or x.get('categoria_nombre')}'" for x in presupuestos
+            )
+            return (
+                f"❌ No encontré un presupuesto para '{etiqueta}'.\n"
+                f"Tus presupuestos actuales: {nombres}.\n\n"
+                f"Para crearlo: `Mi presupuesto para {etiqueta} es $500`"
+            )
+
+        lookup = _moneda_lookup_usuario(usuario)
+        label = p.get("nombre") or p.get("categoria_nombre") or "General"
+        planeado = p["cantidad_planejada"]
+        gastado = p["cantidad_gastada"]
+        restante = max(planeado - gastado, 0)
+        pct = (gastado / planeado * 100) if planeado > 0 else 0
+
+        lineas = [f"📌 **Presupuesto '{label}'**"]
+        lineas.append(f"   Planeado: {_formatear_monto(lookup, p.get('moneda_id'), planeado)}")
+        lineas.append(f"   Gastado: {_formatear_monto(lookup, p.get('moneda_id'), gastado)} ({pct:.0f}%)")
+        lineas.append(f"   🔥 Te quedan: {_formatear_monto(lookup, p.get('moneda_id'), restante)}")
+        lineas.append(f"   {_crear_barra_progreso(pct)}")
+        if p.get("periodo"):
+            lineas.append(f"   Periodo: {p['periodo']}")
+        return "\n".join(lineas)
+    except Exception as e:
+        logger.error("Error en presupuesto específico: %s", e)
+        return "❌ Ocurrió un error al consultar tu presupuesto."
+
+
+def _procesar_mayor_gasto(usuario: Dict[str, Any], mensaje: str) -> str:
+    """Muestra el mayor gasto (y top 3) de un período."""
+    try:
+        from datetime import date as _date
+        etiqueta = "hoy"
+        resultado_fecha = _parsear_fecha_natural(mensaje)
+        if resultado_fecha:
+            fecha_inicio, fecha_fin, etiqueta = resultado_fecha
+        else:
+            f = _date.today().isoformat()
+            fecha_inicio = fecha_fin = f
+
+        gastos = database.obtener_transacciones_por_fecha(
+            usuario["id"], fecha_inicio, fecha_fin, tipo="gasto"
+        )
+        if not gastos:
+            return f"📅 No registraste gastos para {etiqueta}."
+
+        lookup = _moneda_lookup_usuario(usuario)
+        ordenados = sorted(gastos, key=lambda t: t["cantidad"], reverse=True)
+        mayor = ordenados[0]
+
+        lineas = [f"🔥 **Mayor gasto de {etiqueta}:**"]
+        lineas.append(
+            f"   💸 {_formatear_monto(lookup, mayor.get('moneda_id'), mayor['cantidad'])} - "
+            f"{mayor.get('descripcion') or 'Sin descripción'}"
+        )
+        if mayor.get("categoria_nombre"):
+            lineas.append(f"   📂 Categoría: {mayor['categoria_nombre']}")
+        if mayor.get("fecha"):
+            lineas.append(f"   📅 Fecha: {str(mayor['fecha'])[:10]}")
+
+        if len(ordenados) > 1:
+            lineas.append("")
+            lineas.append("📈 **Top 3 gastos:**")
+            for t in ordenados[:3]:
+                lineas.append(
+                    f"   • {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} - "
+                    f"{t.get('descripcion') or 'Sin descripción'} ({t.get('categoria_nombre') or 'otros'})"
+                )
+
+        totales: Dict[Any, float] = {}
+        for t in gastos:
+            mid = t.get("moneda_id")
+            totales[mid] = totales.get(mid, 0.0) + t["cantidad"]
+        lineas.append("")
+        lineas.append("📊 **Total gastado:**")
+        for mid, tot in sorted(totales.items(), key=lambda x: -x[1]):
+            lineas.append(f"   💸 {_formatear_monto(lookup, mid, tot)}")
+
+        return "\n".join(lineas)
+    except Exception as e:
+        logger.error("Error en mayor gasto: %s", e)
+        return "❌ Ocurrió un error al consultar tus gastos."
+
+
+def _procesar_gastos_por_presupuestos(usuario: Dict[str, Any], mensaje: str) -> str:
+    """Muestra cuánto gastó en un período desglosado por presupuesto + total."""
+    try:
+        from datetime import date as _date
+        etiqueta = "hoy"
+        resultado_fecha = _parsear_fecha_natural(mensaje)
+        if resultado_fecha:
+            fecha_inicio, fecha_fin, etiqueta = resultado_fecha
+        else:
+            f = _date.today().isoformat()
+            fecha_inicio = fecha_fin = f
+
+        gastos = database.obtener_transacciones_por_fecha(
+            usuario["id"], fecha_inicio, fecha_fin, tipo="gasto"
+        )
+        if not gastos:
+            return f"📅 No registraste gastos para {etiqueta}."
+
+        lookup = _moneda_lookup_usuario(usuario)
+        presupuestos = database.obtener_presupuestos(usuario["id"])
+
+        gasto_por_cat: Dict[Any, float] = {}
+        for t in gastos:
+            cid = t.get("categoria_id")
+            gasto_por_cat[cid] = gasto_por_cat.get(cid, 0.0) + t["cantidad"]
+
+        lineas = [f"📅 **Gastos de {etiqueta} en tus presupuestos:**", "━━━━━━━━━━━━━━━━━"]
+
+        for p in presupuestos:
+            gastado_periodo = gasto_por_cat.get(p["categoria_id"], 0.0)
+            if gastado_periodo <= 0:
+                continue
+            label = p.get("nombre") or p.get("categoria_nombre") or "General"
+            planeado = p["cantidad_planejada"]
+            gastado_total = p["cantidad_gastada"]
+            restante = max(planeado - gastado_total, 0)
+            pct = (gastado_total / planeado * 100) if planeado > 0 else 0
+            lineas.append("")
+            lineas.append(f"📌 **{label}**")
+            lineas.append(f"   Gastado en {etiqueta}: {_formatear_monto(lookup, p.get('moneda_id'), gastado_periodo)}")
+            lineas.append(f"   Restante: {_formatear_monto(lookup, p.get('moneda_id'), restante)} ({pct:.0f}% usado)")
+            lineas.append(f"   {_crear_barra_progreso(pct)}")
+
+        totales: Dict[Any, float] = {}
+        for t in gastos:
+            mid = t.get("moneda_id")
+            totales[mid] = totales.get(mid, 0.0) + t["cantidad"]
+        lineas.append("")
+        lineas.append("📊 **Total gastado:**")
+        for mid, tot in sorted(totales.items(), key=lambda x: -x[1]):
+            lineas.append(f"   💸 {_formatear_monto(lookup, mid, tot)}")
+
+        con_presupuesto = sum(gasto_por_cat.get(p["categoria_id"], 0.0) for p in presupuestos)
+        sin_presupuesto = sum(totales.values()) - con_presupuesto
+        if sin_presupuesto > 0.005:
+            lineas.append(f"   🚫 Fuera de presupuesto: {_formatear_monto(lookup, None, sin_presupuesto)}")
+
+        return "\n".join(lineas)
+    except Exception as e:
+        logger.error("Error en gastos por presupuestos: %s", e)
+        return "❌ Ocurrió un error al consultar tus gastos."
+
+
+def _procesar_gastos_por_fecha(usuario: Dict[str, Any], mensaje: str) -> str:
+    """Muestra el total gastado/recibido en un período, por moneda."""
+    try:
+        from datetime import date as _date
+        etiqueta = "hoy"
+        resultado_fecha = _parsear_fecha_natural(mensaje)
+        if resultado_fecha:
+            fecha_inicio, fecha_fin, etiqueta = resultado_fecha
+        else:
+            f = _date.today().isoformat()
+            fecha_inicio = fecha_fin = f
+
+        gastos = database.obtener_transacciones_por_fecha(
+            usuario["id"], fecha_inicio, fecha_fin, tipo="gasto"
+        )
+        ingresos = database.obtener_transacciones_por_fecha(
+            usuario["id"], fecha_inicio, fecha_fin, tipo="ingreso"
+        )
+        if not gastos and not ingresos:
+            return f"📅 No tienes movimientos para {etiqueta}."
+
+        lookup = _moneda_lookup_usuario(usuario)
+        lineas = [f"📅 **Movimientos de {etiqueta}:**"]
+
+        if gastos:
+            totales: Dict[Any, float] = {}
+            for t in gastos:
+                mid = t.get("moneda_id")
+                totales[mid] = totales.get(mid, 0.0) + t["cantidad"]
+            lineas.append("💸 **Total gastado:**")
+            for mid, tot in sorted(totales.items(), key=lambda x: -x[1]):
+                lineas.append(f"   • {_formatear_monto(lookup, mid, tot)}")
+
+        if ingresos:
+            totales_in: Dict[Any, float] = {}
+            for t in ingresos:
+                mid = t.get("moneda_id")
+                totales_in[mid] = totales_in.get(mid, 0.0) + t["cantidad"]
+            lineas.append("💰 **Total recibido:**")
+            for mid, tot in sorted(totales_in.items(), key=lambda x: -x[1]):
+                lineas.append(f"   • {_formatear_monto(lookup, mid, tot)}")
+
+        return "\n".join(lineas)
+    except Exception as e:
+        logger.error("Error en gastos por fecha: %s", e)
+        return "❌ Ocurrió un error al consultar tus movimientos."
+
+
 def _procesar_categorias(usuario: Dict[str, Any]) -> str:
     """Muestra las categorías del usuario."""
     try:
@@ -2047,6 +2312,19 @@ def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> 
     total_ingresos = sum(t["cantidad"] for t in ingresos)
     neto = total_ingresos - total_gastos
 
+    lookup = _moneda_lookup_usuario(usuario)
+    tiene_moneda = any(t.get("moneda_id") for t in transacciones)
+
+    def _totales_por_moneda(trans):
+        tot = {}
+        for t in trans:
+            mid = t.get("moneda_id")
+            tot[mid] = tot.get(mid, 0.0) + t["cantidad"]
+        return tot
+
+    tot_gastos_m = _totales_por_moneda(gastos)
+    tot_ingresos_m = _totales_por_moneda(ingresos)
+
     # Desglose por categoría
     por_categoria = {}
     for t in gastos:
@@ -2061,9 +2339,24 @@ def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> 
 
     # Resumen general
     lineas.append("")
-    lineas.append(f"💰 **Ingresos:** ${total_ingresos:.2f} ({len(ingresos)} transacciones)")
-    lineas.append(f"💸 **Gastos:** ${total_gastos:.2f} ({len(gastos)} transacciones)")
-    lineas.append(f"💵 **Neto:** ${neto:.2f}")
+    if tiene_moneda:
+        lineas.append(f"💰 **Ingresos ({len(ingresos)} transacciones):**")
+        if tot_ingresos_m:
+            for mid, tot in sorted(tot_ingresos_m.items(), key=lambda x: -x[1]):
+                lineas.append(f"   {_formatear_monto(lookup, mid, tot)}")
+        else:
+            lineas.append("   Sin ingresos")
+        lineas.append(f"💸 **Gastos ({len(gastos)} transacciones):**")
+        if tot_gastos_m:
+            for mid, tot in sorted(tot_gastos_m.items(), key=lambda x: -x[1]):
+                lineas.append(f"   {_formatear_monto(lookup, mid, tot)}")
+        else:
+            lineas.append("   Sin gastos")
+    else:
+        lineas.append(f"💰 **Ingresos:** ${total_ingresos:.2f} ({len(ingresos)} transacciones)")
+        lineas.append(f"💸 **Gastos:** ${total_gastos:.2f} ({len(gastos)} transacciones)")
+    if not tiene_moneda or (len(tot_gastos_m) <= 1 and len(tot_ingresos_m) <= 1):
+        lineas.append(f"💵 **Neto:** ${neto:.2f}")
     lineas.append(f"📊 **Total transacciones:** {len(transacciones)}")
 
     # Desglose de gastos por categoría
@@ -2075,6 +2368,15 @@ def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> 
             barra = _crear_barra_progreso(porcentaje)
             lineas.append(f"  • {cat}: ${datos['total']:.2f} ({datos['cantidad']}x) {barra} {porcentaje:.0f}%")
 
+    # Mayor gasto del período
+    if gastos:
+        mayor = max(gastos, key=lambda t: t["cantidad"])
+        lineas.append("")
+        lineas.append(
+            f"🔥 **Mayor gasto:** {_formatear_monto(lookup, mayor.get('moneda_id'), mayor['cantidad'])} - "
+            f"{mayor.get('descripcion') or 'Sin descripción'} ({mayor.get('categoria_nombre') or 'otros'})"
+        )
+
     # Detalle de gastos
     if gastos:
         lineas.append("")
@@ -2084,7 +2386,7 @@ def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> 
             desc = t.get("descripcion", "Sin descripción")
             cat = t.get("categoria_nombre", "")
             cat_str = f" ({cat})" if cat else ""
-            lineas.append(f"  📉 ${t['cantidad']:.2f} - {desc}{cat_str} [{fecha}]")
+            lineas.append(f"  📉 {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} - {desc}{cat_str} [{fecha}]")
 
     # Detalle de ingresos
     if ingresos:
@@ -2095,7 +2397,7 @@ def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> 
             desc = t.get("descripcion", "Sin descripción")
             cat = t.get("categoria_nombre", "")
             cat_str = f" ({cat})" if cat else ""
-            lineas.append(f"  📈 ${t['cantidad']:.2f} - {desc}{cat_str} [{fecha}]")
+            lineas.append(f"  📈 {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} - {desc}{cat_str} [{fecha}]")
 
     # Promedio diario si es rango de varios días
     try:
