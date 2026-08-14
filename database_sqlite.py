@@ -68,6 +68,7 @@ def crear_tablas():
             usuario_id INTEGER NOT NULL,
             categoria_id INTEGER,
             nombre TEXT,
+            moneda_id INTEGER,
             cantidad_planejada REAL NOT NULL,
             cantidad_gastada REAL DEFAULT 0.0,
             periodo TEXT NOT NULL CHECK(periodo IN ('mensual', 'anual')),
@@ -79,9 +80,13 @@ def crear_tablas():
         )
     """)
 
-    # Migración: agregar columna 'nombre' a presupuestos en BD existentes
+    # Migración: agregar columnas 'nombre' y 'moneda_id' a presupuestos en BD existentes
     try:
         cursor.execute("ALTER TABLE presupuestos ADD COLUMN nombre TEXT")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE presupuestos ADD COLUMN moneda_id INTEGER")
     except Exception:
         pass
 
@@ -415,7 +420,7 @@ def obtener_presupuestos(usuario_id: int) -> List[Dict[str, Any]]:
     cursor.execute(
         """
         SELECT p.id, p.cantidad_planejada, p.cantidad_gastada, p.periodo,
-               p.fecha_inicio, p.fecha_fin, p.nombre, c.nombre as categoria_nombre
+               p.fecha_inicio, p.fecha_fin, p.nombre, p.moneda_id, c.nombre as categoria_nombre
         FROM presupuestos p
         LEFT JOIN categorias c ON p.categoria_id = c.id
         WHERE p.usuario_id = ?
@@ -428,17 +433,17 @@ def obtener_presupuestos(usuario_id: int) -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: float, periodo: str, fecha_inicio: str, fecha_fin: Optional[str] = None, nombre: Optional[str] = None) -> Dict[str, Any]:
+def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: float, periodo: str, fecha_inicio: str, fecha_fin: Optional[str] = None, nombre: Optional[str] = None, moneda_id: Optional[int] = None) -> Dict[str, Any]:
     """Crea un nuevo presupuesto para un usuario."""
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute(
         """
-        INSERT INTO presupuestos (usuario_id, categoria_id, nombre, cantidad_planejada, cantidad_gastada, periodo, fecha_inicio, fecha_fin)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO presupuestos (usuario_id, categoria_id, nombre, moneda_id, cantidad_planejada, cantidad_gastada, periodo, fecha_inicio, fecha_fin)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (usuario_id, categoria_id, nombre, cantidad_planejada, 0.0, periodo, fecha_inicio, fecha_fin)
+        (usuario_id, categoria_id, nombre, moneda_id, cantidad_planejada, 0.0, periodo, fecha_inicio, fecha_fin)
     )
     presupuesto_id = cursor.lastrowid
     conn.commit()
@@ -449,6 +454,7 @@ def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: fl
         "usuario_id": usuario_id,
         "categoria_id": categoria_id,
         "nombre": nombre,
+        "moneda_id": moneda_id,
         "cantidad_planejada": cantidad_planejada,
         "cantidad_gastada": 0.0,
         "periodo": periodo,
@@ -457,7 +463,7 @@ def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: fl
     }
 
 
-def guardar_presupuesto(usuario_id: int, categoria_id: int, cantidad: float, modo: str = "reemplazar", nombre: Optional[str] = None) -> Dict[str, Any]:
+def guardar_presupuesto(usuario_id: int, categoria_id: int, cantidad: float, modo: str = "reemplazar", nombre: Optional[str] = None, moneda_id: Optional[int] = None) -> Dict[str, Any]:
     """Crea o actualiza un presupuesto por nombre o por categoría.
 
     Prioridad de coincidencia: primero por nombre (si se indica), luego por
@@ -499,6 +505,9 @@ def guardar_presupuesto(usuario_id: int, categoria_id: int, cantidad: float, mod
         if categoria_id is not None:
             sets.append("categoria_id = ?")
             params.append(categoria_id)
+        if moneda_id is not None:
+            sets.append("moneda_id = ?")
+            params.append(moneda_id)
         params.append(target["id"])
         cursor.execute(f"UPDATE presupuestos SET {', '.join(sets)} WHERE id = ?", params)
         conn.commit()
@@ -507,11 +516,12 @@ def guardar_presupuesto(usuario_id: int, categoria_id: int, cantidad: float, mod
             "id": target["id"],
             "nombre": (nombre.strip() if nombre and str(nombre).strip() else target["nombre"]),
             "cantidad_planejada": nueva,
+            "moneda_id": moneda_id,
         }
     conn.close()
 
     from datetime import date
-    return crear_presupuesto(usuario_id, categoria_id, cantidad, "mensual", date.today().isoformat(), nombre=nombre)
+    return crear_presupuesto(usuario_id, categoria_id, cantidad, "mensual", date.today().isoformat(), nombre=nombre, moneda_id=moneda_id)
 
 
 def eliminar_presupuesto(usuario_id: int, nombre: Optional[str] = None, categoria_id: Optional[int] = None) -> int:

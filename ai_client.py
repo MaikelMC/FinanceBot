@@ -65,7 +65,7 @@ class AIResponder:
 
         # --- CONFIGURAR PRESUPUESTO ---
         if intencion == "configurar_presupuesto":
-            return self._procesar_presupuesto(resultado, usuario, mensaje), None
+            return self._procesar_presupuesto(resultado, usuario, mensaje)
 
         # --- CONFIGURAR AHORRO ---
         if intencion == "configurar_ahorro":
@@ -250,7 +250,8 @@ class AIResponder:
             logger.error("Error analizando por fecha: %s", e)
             return "❌ Ocurrió un error al analizar tus transacciones."
 
-    def _procesar_presupuesto(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
+    def _procesar_presupuesto(self, resultado: dict, usuario: Dict[str, Any], mensaje: str,
+                              moneda: Optional[Dict[str, Any]] = None) -> Tuple[str, Optional[dict]]:
         """Procesa la configuración o actualización de un presupuesto."""
         cantidad = resultado.get("cantidad")
         categoria = (resultado.get("categoria") or resultado.get("descripcion") or "general").strip()
@@ -266,11 +267,57 @@ class AIResponder:
             # Intentar extraer con el sistema nativo
             try:
                 from knowledge import _generar_respuesta_no_entendido
-                return _generar_respuesta_no_entendido(mensaje, usuario)
+                return _generar_respuesta_no_entendido(mensaje, usuario), None
             except Exception:
-                return "❌ No pude entender el monto del presupuesto. Usa: `Mi presupuesto para comida es $500`"
+                return "❌ No pude entender el monto del presupuesto. Usa: `Mi presupuesto para comida es $500`", None
 
         modo = resultado.get("modo_presupuesto") or self._detectar_modo_presupuesto(mensaje)
+
+        # --- Moneda: detectar desde IA o texto; si hay varias y no especifica, pedir elegir ---
+        monedas_usuario = database.obtener_monedas(usuario["id"])
+        moneda_obj = moneda
+        if moneda_obj is None and monedas_usuario:
+            moneda_detectada = resultado.get("moneda")
+            if moneda_detectada:
+                for m in monedas_usuario:
+                    if m.get("abreviatura", "").lower() == moneda_detectada.lower():
+                        moneda_obj = m
+                        break
+        if moneda_obj is None and monedas_usuario:
+            from knowledge import _detectar_moneda_en_texto
+            moneda_obj = _detectar_moneda_en_texto(mensaje, monedas_usuario)
+            if moneda_obj is None and len(monedas_usuario) == 1:
+                moneda_obj = monedas_usuario[0]
+
+        if moneda_obj is None and len(monedas_usuario) > 1:
+            # Reutilizar la moneda del presupuesto existente (mismo nombre o categoría) si ya tiene una
+            for p in database.obtener_presupuestos(usuario["id"]):
+                p_nombre = (p.get("nombre") or "").strip().lower()
+                p_cat = (p.get("categoria_nombre") or "").strip().lower()
+                if p_nombre == nombre.lower() or (not p_nombre and p_cat == categoria.lower()):
+                    if p.get("moneda_id"):
+                        moneda_obj = next((m for m in monedas_usuario if m["id"] == p["moneda_id"]), None)
+                    break
+
+        if moneda_obj is None and len(monedas_usuario) > 1:
+            lineas = [
+                "💱 **Tienes varias monedas configuradas y no especificaste cuál usar para el presupuesto.**",
+                "",
+                "Elige la moneda:",
+                "",
+            ]
+            for m in monedas_usuario:
+                default = " ⭐" if m.get("es_default") else ""
+                lineas.append(f"  {m['simbolo']} {m['nombre']} ({m['abreviatura']}){default}")
+            pendiente = {
+                "accion": "elegir_moneda_presupuesto",
+                "mensaje": mensaje,
+                "cantidad": cantidad,
+                "categoria": categoria,
+                "nombre": nombre,
+                "modo": modo,
+            }
+            return "\n".join(lineas), pendiente
 
         try:
             tipo_cat = "gastos"
@@ -284,19 +331,22 @@ class AIResponder:
                 cat_info = database.crear_categoria(usuario["id"], categoria, tipo_cat)
                 categoria_id = cat_info["id"]
 
-            presupuesto = database.guardar_presupuesto(usuario["id"], categoria_id, cantidad, modo, nombre=nombre)
+            moneda_id = moneda_obj["id"] if moneda_obj else None
+            presupuesto = database.guardar_presupuesto(usuario["id"], categoria_id, cantidad, modo, nombre=nombre, moneda_id=moneda_id)
             total = presupuesto.get("cantidad_planejada", cantidad)
             label = presupuesto.get("nombre") or categoria
+            simbolo = moneda_obj.get("simbolo", "$") if moneda_obj else "$"
+            nombre_moneda = f" ({moneda_obj['nombre']})" if moneda_obj else ""
 
             if modo == "sumar":
                 return (
-                    f"✅ **Añadido ${cantidad:.2f} al presupuesto de '{label}'.**\n"
-                    f"📊 Total disponible: ${total:.2f}"
-                )
-            return f"✅ **Presupuesto configurado:** ${total:.2f} para '{label}'"
+                    f"✅ **Añadido {simbolo}{cantidad:.2f}{nombre_moneda} al presupuesto de '{label}'.**\n"
+                    f"📊 Total disponible: {simbolo}{total:.2f}"
+                ), None
+            return f"✅ **Presupuesto configurado:** {simbolo}{total:.2f}{nombre_moneda} para '{label}'", None
         except Exception as e:
             logger.error("Error configurando presupuesto: %s", e)
-            return "❌ Ocurrió un error al configurar el presupuesto."
+            return "❌ Ocurrió un error al configurar el presupuesto.", None
 
     @staticmethod
     def _extraer_nombre_presupuesto(mensaje: str) -> Optional[str]:

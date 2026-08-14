@@ -242,9 +242,15 @@ def _procesar_presupuestos(usuario: Dict[str, Any]) -> str:
         if not presupuestos:
             return "📋 No tienes presupuestos configurados. Usa: 'Mi presupuesto para X es $Y este mes'"
 
+        monedas_usuario = database.obtener_monedas(usuario["id"])
+        moneda_lookup = {m["id"]: m for m in monedas_usuario}
+
         lineas = ["📋 **TUS PRESUPUESTOS**", "━━━━━━━━━━━━━━━━━"]
         for p in presupuestos:
             cat = p.get("nombre") or p.get("categoria_nombre", "General")
+            moneda = moneda_lookup.get(p.get("moneda_id"))
+            simbolo = moneda.get("simbolo", "$") if moneda else "$"
+            abrev = f" ({moneda['abreviatura']})" if moneda else ""
             planeado = p["cantidad_planejada"]
             gastado = p["cantidad_gastada"]
             restante = planeado - gastado
@@ -252,9 +258,9 @@ def _procesar_presupuestos(usuario: Dict[str, Any]) -> str:
             barra = "█" * int(progreso / 10) + "░" * (10 - int(progreso / 10))
 
             lineas.append(f"📌 **{cat}**")
-            lineas.append(f"   Presupuesto: ${planeado:.2f}")
-            lineas.append(f"   Gastado: ${gastado:.2f} ({progreso:.0f}%)")
-            lineas.append(f"   Restante: ${restante:.2f}")
+            lineas.append(f"   Presupuesto: {simbolo}{planeado:.2f}{abrev}")
+            lineas.append(f"   Gastado: {simbolo}{gastado:.2f}{abrev} ({progreso:.0f}%)")
+            lineas.append(f"   Restante: {simbolo}{restante:.2f}{abrev}")
             lineas.append(f"   {barra}")
             if p["periodo"]:
                 lineas.append(f"   Periodo: {p['periodo']}")

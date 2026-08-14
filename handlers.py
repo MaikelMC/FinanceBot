@@ -148,7 +148,7 @@ def _crear_botones_pendiente(pendiente: dict, usuario_id: int) -> Optional[Inlin
             ],
             [InlineKeyboardButton("❌ Cancelar", callback_data="pendiente_cancel")],
         ])
-    if accion == "elegir_moneda":
+    if accion in ("elegir_moneda", "elegir_moneda_presupuesto"):
         filas = []
         for m in database.obtener_monedas(usuario_id):
             filas.append([
@@ -177,6 +177,20 @@ def _completar_pendiente(pendiente: dict, tipo: str, usuario: dict,
     if tipo == "ingreso":
         return knowledge._procesar_ingreso(mensaje, usuario, moneda=moneda_obj)
     return knowledge._procesar_gasto(mensaje, usuario, moneda=moneda_obj)
+
+
+def _completar_pendiente_presupuesto(pendiente: dict, moneda: dict, usuario: dict) -> str:
+    """Completa la configuración de un presupuesto pendiente con la moneda elegida."""
+    resultado = {
+        "cantidad": pendiente.get("cantidad"),
+        "categoria": pendiente.get("categoria"),
+        "nombre": pendiente.get("nombre"),
+        "modo_presupuesto": pendiente.get("modo"),
+    }
+    respuesta, pend = ai_client.AIResponder()._procesar_presupuesto(
+        resultado, usuario, pendiente.get("mensaje", ""), moneda=moneda
+    )
+    return respuesta
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -599,17 +613,22 @@ async def _manejar_boton_teclado(update: Update, context: ContextTypes.DEFAULT_T
         if not presupuestos:
             texto = "📊 No tienes presupuestos configurados.\n\nUsa: `Mi presupuesto para comida es $500 este mes`"
         else:
+            monedas_usuario = database.obtener_monedas(usuario_id)
+            moneda_lookup = {m["id"]: m for m in monedas_usuario}
             lineas = ["📊 **Tus presupuestos:**\n"]
             for p in presupuestos:
                 cat = p.get("nombre") or p.get("categoria_nombre", "General")
+                moneda = moneda_lookup.get(p.get("moneda_id"))
+                simbolo = moneda.get("simbolo", "$") if moneda else "$"
+                abrev = f" ({moneda['abreviatura']})" if moneda else ""
                 planeado = p["cantidad_planejada"]
                 gastado = p["cantidad_gastada"]
                 restante = planeado - gastado
                 progreso = (gastado / planeado * 100) if planeado > 0 else 0
                 barra = "█" * int(progreso / 10) + "░" * (10 - int(progreso / 10))
                 lineas.append(f"📌 **{cat}**")
-                lineas.append(f"   ${gastado:.2f} / ${planeado:.2f} ({progreso:.0f}%)")
-                lineas.append(f"   Restante: ${restante:.2f}")
+                lineas.append(f"   {simbolo}{gastado:.2f}{abrev} / {simbolo}{planeado:.2f}{abrev} ({progreso:.0f}%)")
+                lineas.append(f"   Restante: {simbolo}{restante:.2f}{abrev}")
                 lineas.append(f"   {barra}")
             texto = "\n".join(lineas)
         await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
@@ -1018,20 +1037,23 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         elif query.data.startswith("moneda_confirmar_"):
             moneda_id = int(query.data.replace("moneda_confirmar_", ""))
             pendiente = context.user_data.get("transaccion_pendiente")
-            if not pendiente or pendiente.get("accion") != "elegir_moneda":
-                await _responder_editando(query, "No hay ninguna transacción pendiente.")
+            if not pendiente or pendiente.get("accion") not in ("elegir_moneda", "elegir_moneda_presupuesto"):
+                await _responder_editando(query, "No hay ninguna acción pendiente.")
                 return
             monedas = database.obtener_monedas(usuario_id)
             moneda = next((m for m in monedas if m["id"] == moneda_id), None)
             if not moneda:
                 await _responder_editando(query, "❌ Esa moneda ya no existe.")
                 return
-            tipo = pendiente.get("tipo")
             try:
-                texto = _completar_pendiente(pendiente, tipo or "gasto", usuario, moneda=moneda)
+                if pendiente.get("accion") == "elegir_moneda_presupuesto":
+                    texto = _completar_pendiente_presupuesto(pendiente, moneda, usuario)
+                else:
+                    tipo = pendiente.get("tipo")
+                    texto = _completar_pendiente(pendiente, tipo or "gasto", usuario, moneda=moneda)
             except Exception as e:
-                logger.error("Error completando transacción pendiente: %s", e)
-                texto = "❌ Ocurrió un error al registrar. Por favor, intenta de nuevo."
+                logger.error("Error completando acción pendiente: %s", e)
+                texto = "❌ Ocurrió un error. Por favor, intenta de nuevo."
             context.user_data.pop("transaccion_pendiente", None)
             await _responder_editando(query, texto)
 

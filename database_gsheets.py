@@ -42,7 +42,7 @@ SHEET_COLUMNS = {
     "usuarios": ["id", "telegram_user_id", "nombre", "created_at", "updated_at"],
     "categorias": ["id", "usuario_id", "nombre", "tipo", "descripcion", "icono_color", "created_at"],
     "transacciones": ["id", "usuario_id", "categoria_id", "tipo", "cantidad", "descripcion", "moneda_id", "fecha", "created_at"],
-    "presupuestos": ["id", "usuario_id", "categoria_id", "nombre", "cantidad_planejada", "cantidad_gastada", "periodo", "fecha_inicio", "fecha_fin", "created_at"],
+    "presupuestos": ["id", "usuario_id", "categoria_id", "nombre", "moneda_id", "cantidad_planejada", "cantidad_gastada", "periodo", "fecha_inicio", "fecha_fin", "created_at"],
     "metas_ahorro": ["id", "usuario_id", "nombre", "objetivo", "cantidad_actual", "fecha_inicio", "fecha_meta", "created_at"],
     "notificaciones": ["id", "usuario_id", "version", "enviada_en"],
     "monedas": ["id", "usuario_id", "nombre", "simbolo", "abreviatura", "es_default", "created_at"],
@@ -692,7 +692,7 @@ class GoogleSheetsDB:
     # PRESUPUESTOS
     # ----------------------------------------------------------
 
-    def crear_presupuesto(self, usuario_id: int, categoria_id: int, cantidad_planejada: float, periodo: str, fecha_inicio: str, fecha_fin: Optional[str] = None, nombre: Optional[str] = None) -> Dict[str, Any]:
+    def crear_presupuesto(self, usuario_id: int, categoria_id: int, cantidad_planejada: float, periodo: str, fecha_inicio: str, fecha_fin: Optional[str] = None, nombre: Optional[str] = None, moneda_id: Optional[int] = None) -> Dict[str, Any]:
         with LOCK:
             pres = self._cache.get("presupuestos", [])
             pid = self._next_id("presupuestos")
@@ -701,6 +701,7 @@ class GoogleSheetsDB:
                 "usuario_id": usuario_id,
                 "categoria_id": categoria_id,
                 "nombre": nombre or "",
+                "moneda_id": moneda_id,
                 "cantidad_planejada": cantidad_planejada,
                 "cantidad_gastada": 0.0,
                 "periodo": periodo,
@@ -714,7 +715,7 @@ class GoogleSheetsDB:
             logger.info("Presupuesto creado: $%.2f para categoría %d", cantidad_planejada, categoria_id)
             return dict(nuevo)
 
-    def guardar_presupuesto(self, usuario_id: int, categoria_id: int, cantidad: float, modo: str = "reemplazar", nombre: Optional[str] = None) -> Dict[str, Any]:
+    def guardar_presupuesto(self, usuario_id: int, categoria_id: int, cantidad: float, modo: str = "reemplazar", nombre: Optional[str] = None, moneda_id: Optional[int] = None) -> Dict[str, Any]:
         """Crea o actualiza un presupuesto por nombre o por categoría.
 
         Prioridad de coincidencia: primero por nombre (si se indica), luego por
@@ -738,12 +739,14 @@ class GoogleSheetsDB:
                 target["cantidad_planejada"] = (actual + cantidad) if modo == "sumar" else cantidad
                 if nombre and str(nombre).strip():
                     target["nombre"] = nombre.strip()
+                if moneda_id is not None:
+                    target["moneda_id"] = moneda_id
                 self._cache_dirty.add("presupuestos")
                 self._schedule_flush()
                 logger.info("Presupuesto %s: %.2f para categoría %d", modo, target["cantidad_planejada"], categoria_id)
                 return dict(target)
         # Sin presupuesto previo: crear uno nuevo (crear_presupuesto toma LOCK por su cuenta)
-        return self.crear_presupuesto(usuario_id, categoria_id, cantidad, "mensual", self._today(), nombre=nombre)
+        return self.crear_presupuesto(usuario_id, categoria_id, cantidad, "mensual", self._today(), nombre=nombre, moneda_id=moneda_id)
 
     def eliminar_presupuesto(self, usuario_id: int, nombre: Optional[str] = None, categoria_id: Optional[int] = None) -> int:
         """Elimina un presupuesto por nombre o por categoría. Retorna cuántos se borraron."""
@@ -1013,12 +1016,12 @@ def obtener_presupuestos(usuario_id: int) -> List[Dict[str, Any]]:
     return _get_db().obtener_presupuestos(usuario_id)
 
 
-def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: float, periodo: str, fecha_inicio: str, fecha_fin: Optional[str] = None) -> Dict[str, Any]:
-    return _get_db().crear_presupuesto(usuario_id, categoria_id, cantidad_planejada, periodo, fecha_inicio, fecha_fin)
+def crear_presupuesto(usuario_id: int, categoria_id: int, cantidad_planejada: float, periodo: str, fecha_inicio: str, fecha_fin: Optional[str] = None, nombre: Optional[str] = None, moneda_id: Optional[int] = None) -> Dict[str, Any]:
+    return _get_db().crear_presupuesto(usuario_id, categoria_id, cantidad_planejada, periodo, fecha_inicio, fecha_fin, nombre, moneda_id)
 
 
-def guardar_presupuesto(usuario_id: int, categoria_id: int, cantidad: float, modo: str = "reemplazar", nombre: Optional[str] = None) -> Dict[str, Any]:
-    return _get_db().guardar_presupuesto(usuario_id, categoria_id, cantidad, modo, nombre)
+def guardar_presupuesto(usuario_id: int, categoria_id: int, cantidad: float, modo: str = "reemplazar", nombre: Optional[str] = None, moneda_id: Optional[int] = None) -> Dict[str, Any]:
+    return _get_db().guardar_presupuesto(usuario_id, categoria_id, cantidad, modo, nombre, moneda_id)
 
 
 def eliminar_presupuesto(usuario_id: int, nombre: Optional[str] = None, categoria_id: Optional[int] = None) -> int:

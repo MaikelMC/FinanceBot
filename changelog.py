@@ -4,9 +4,18 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.5"
+VERSION_ACTUAL = "2.6"
 
 CHANGELOG = {
+    "2.6": {
+        "titulo": "💱 Presupuestos con moneda",
+        "mejoras": [
+            "Los presupuestos ahora usan la moneda que digas (CUP, USD, USDT, etc.)",
+            "Si tenés varias monedas y no aclarás cuál usar, el bot te pide elegir con botones (igual que las transacciones)",
+            "El menú y la consulta de presupuestos muestran el símbolo de la moneda de cada uno"
+        ],
+        "emoji": "💱"
+    },
     "2.5": {
         "titulo": "🧠 Respuestas reales y presupuestos por nombre",
         "mejoras": [
