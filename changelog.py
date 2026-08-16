@@ -4,9 +4,19 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.8"
+VERSION_ACTUAL = "2.9"
 
 CHANGELOG = {
+    "2.9": {
+        "titulo": "🔔 Notificaciones: alertas y resumen diario",
+        "mejoras": [
+            "Alertas en tiempo real cuando un presupuesto llega al 80%, se agota (100%) o se excede (125%)",
+            "Resumen diario programado a la hora que elijas y en tu zona horaria",
+            "Configurá todo desde el nuevo comando /notificaciones: resumen, hora, zona horaria y alertas",
+            "Si el bot estaba dormido a la hora del resumen, te lo envía apenas vuelvas a escribir"
+        ],
+        "emoji": "🔔"
+    },
     "2.8": {
         "titulo": "🗣️ Pregúntale a tu bot en tus palabras",
         "mejoras": [

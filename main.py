@@ -21,6 +21,7 @@ import config
 import database
 from handlers import start, handle_message, error_handler
 from handlers import consultar_usuario, consultar_comandos, handle_callback_query, eliminar_historial, anuncio
+from handlers import configurar_notificaciones
 from handlers import (
     consultar_categorias,
     consultar_gastos,
@@ -28,6 +29,7 @@ from handlers import (
     consultar_metas,
     consultar_resumen,
 )
+import notificaciones
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -42,6 +44,7 @@ COMANDOS_MENU = [
     BotCommand("gastos", "Ver tus últimos gastos"),
     BotCommand("ingresos", "Ver tus últimos ingresos"),
     BotCommand("metas", "Ver tus metas de ahorro"),
+    BotCommand("notificaciones", "Alertas de presupuesto y resumen diario"),
     BotCommand("help", "Ver todos los comandos y ejemplos de uso"),
     BotCommand("user", "Ver tu información de usuario"),
     BotCommand("delete", "Borrar todo el historial de transacciones"),
@@ -79,6 +82,19 @@ def _build_app():
     app.add_handler(CommandHandler("ingresos", consultar_ingresos))
     app.add_handler(CommandHandler("metas", consultar_metas))
     app.add_handler(CommandHandler("resumen", consultar_resumen))
+    app.add_handler(CommandHandler("notificaciones", configurar_notificaciones))
+
+    # === JOB DE RESÚMENES DIARIOS (sweep cada 60s) ===
+    if app.job_queue is not None:
+        app.job_queue.run_repeating(
+            notificaciones.tarea_resumen_diario,
+            interval=60,
+            first=10,
+            name="resumen_diario",
+        )
+        logger.info("Job de resumen diario programado (intervalo 60s).")
+    else:
+        logger.warning("JobQueue no disponible (falta apscheduler). El resumen diario solo llegará por catch-up.")
 
     # === BOTONES INLINE ===
     app.add_handler(CallbackQueryHandler(handle_callback_query))

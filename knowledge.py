@@ -146,6 +146,7 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                 categoria_info = database.crear_categoria(usuario["id"], categoria, "gastos")
                 categoria_id = categoria_info["id"]
 
+        gastado_antes = presupuesto.get("cantidad_gastada", 0) if presupuesto else 0
         database.agregar_transaccion(usuario["id"], categoria_id, "gasto", cantidad,
                                    mensaje, moneda_id=moneda_id)
 
@@ -171,12 +172,24 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                             break
                 s_b = moneda_b.get("simbolo", "$") if moneda_b else "$"
                 n_b = f" ({moneda_b['abreviatura']})" if moneda_b else ""
-                return (
+                texto = (
                     f"✅ Gasto registrado: {simbolo}{cantidad:.2f}{nombre_moneda} del presupuesto de '{label}'\n"
                     f"📊 Presupuesto '{label}': {s_b}{planeado:.2f}{n_b} planeado, "
                     f"{s_b}{gastado:.2f}{n_b} usado ({pct:.0f}%). "
                     f"Te quedan {s_b}{restante:.2f}{n_b}."
                 )
+                try:
+                    from notificaciones import verificar_alertas_presupuesto
+                    prefs = database.obtener_preferencias(usuario["id"])
+                    alerta = verificar_alertas_presupuesto(
+                        prefs, planeado, gastado_antes, gastado, label,
+                        s_b, moneda_b.get("abreviatura", "") if moneda_b else "",
+                    )
+                    if alerta:
+                        texto += "\n\n" + alerta
+                except Exception as e:
+                    logger.error("Error generando alerta de presupuesto: %s", e)
+                return texto
             return (
                 f"✅ Gasto registrado: {simbolo}{cantidad:.2f}{nombre_moneda} "
                 f"del presupuesto de '{presupuesto.get('nombre') or categoria}'"

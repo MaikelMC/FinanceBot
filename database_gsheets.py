@@ -46,6 +46,7 @@ SHEET_COLUMNS = {
     "metas_ahorro": ["id", "usuario_id", "nombre", "objetivo", "cantidad_actual", "fecha_inicio", "fecha_meta", "created_at"],
     "notificaciones": ["id", "usuario_id", "version", "enviada_en"],
     "monedas": ["id", "usuario_id", "nombre", "simbolo", "abreviatura", "es_default", "created_at"],
+    "preferencias_notificaciones": ["id", "usuario_id", "alerta_80", "alerta_100", "alerta_125", "resumen_diario", "hora_resumen", "zona_horaria", "ultimo_resumen", "created_at"],
 }
 
 # Columnas de fecha: pueden venir como seriales de fecha de Excel (días desde
@@ -950,6 +951,82 @@ class GoogleSheetsDB:
         return [{"id": u["id"], "telegram_user_id": u["telegram_user_id"], "nombre": u["nombre"]} for u in usuarios]
 
     # ----------------------------------------------------------
+    # PREFERENCIAS DE NOTIFICACIONES
+    # ----------------------------------------------------------
+
+    def _coerce_preferencias(self, p: Dict[str, Any]) -> Dict[str, Any]:
+        """Normaliza los flags booleanos y ultimo_resumen de una fila."""
+        for key in ("alerta_80", "alerta_100", "alerta_125", "resumen_diario"):
+            val = p.get(key, 0)
+            try:
+                p[key] = bool(int(val))
+            except (TypeError, ValueError):
+                p[key] = bool(val)
+        ultimo = p.get("ultimo_resumen")
+        p["ultimo_resumen"] = ultimo if ultimo not in ("", None) else None
+        return p
+
+    def obtener_preferencias(self, usuario_id: int) -> Dict[str, Any]:
+        """Obtiene las preferencias de notificaciones de un usuario.
+
+        Si el usuario aún no tiene fila, la crea con los valores por defecto.
+        """
+        prefs = self._cache.get("preferencias_notificaciones", [])
+        for p in prefs:
+            if int(p.get("usuario_id", 0)) == usuario_id:
+                return self._coerce_preferencias(dict(p))
+
+        import config
+        defaults = {
+            "alerta_80": 1, "alerta_100": 1, "alerta_125": 1,
+            "resumen_diario": 0,
+            "hora_resumen": config.HORA_RESUMEN_DEFAULT,
+            "zona_horaria": config.DEFAULT_TIMEZONE,
+            "ultimo_resumen": "",
+        }
+        self.guardar_preferencias(usuario_id, **defaults)
+        return self._coerce_preferencias({"usuario_id": usuario_id, **defaults})
+
+    def guardar_preferencias(self, usuario_id: int, **kwargs) -> Dict[str, Any]:
+        """Actualiza preferencias de notificaciones de un usuario (upsert)."""
+        with LOCK:
+            prefs = self._cache.get("preferencias_notificaciones", [])
+            existente = None
+            for p in prefs:
+                if int(p.get("usuario_id", 0)) == usuario_id:
+                    existente = p
+                    break
+            if existente is None:
+                import config
+                pid = self._next_id("preferencias_notificaciones")
+                existente = {
+                    "id": pid,
+                    "usuario_id": usuario_id,
+                    "alerta_80": 1, "alerta_100": 1, "alerta_125": 1,
+                    "resumen_diario": 0,
+                    "hora_resumen": config.HORA_RESUMEN_DEFAULT,
+                    "zona_horaria": config.DEFAULT_TIMEZONE,
+                    "ultimo_resumen": "",
+                    "created_at": self._now(),
+                }
+                prefs.append(existente)
+
+            campos_permitidos = {
+                "alerta_80", "alerta_100", "alerta_125", "resumen_diario",
+                "hora_resumen", "zona_horaria", "ultimo_resumen",
+            }
+            for k, v in kwargs.items():
+                if k in campos_permitidos and v is not None:
+                    if k in ("alerta_80", "alerta_100", "alerta_125", "resumen_diario"):
+                        existente[k] = 1 if v else 0
+                    else:
+                        existente[k] = v
+
+            self._cache_dirty.add("preferencias_notificaciones")
+            self._schedule_flush()
+            return self._coerce_preferencias(dict(existente))
+
+    # ----------------------------------------------------------
     # TABLAS (init compat)
     # ----------------------------------------------------------
 
@@ -1163,6 +1240,14 @@ def contar_usuarios() -> int:
 
 def obtener_todos_los_usuarios() -> List[Dict[str, Any]]:
     return _get_db().obtener_todos_los_usuarios()
+
+
+def obtener_preferencias(usuario_id: int) -> Dict[str, Any]:
+    return _get_db().obtener_preferencias(usuario_id)
+
+
+def guardar_preferencias(usuario_id: int, **kwargs) -> Dict[str, Any]:
+    return _get_db().guardar_preferencias(usuario_id, **kwargs)
 
 
 def crear_moneda(usuario_id: int, nombre: str, simbolo: str, abreviatura: str, es_default: bool = False) -> Dict[str, Any]:

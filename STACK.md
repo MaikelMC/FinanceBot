@@ -4,7 +4,7 @@
 
 Bot de Telegram para finanzas personales con procesamiento de lenguaje natural en español/inglés. Permite registrar gastos e ingresos, gestionar presupuestos (con nombre propio y moneda), metas de ahorro y múltiples monedas mediante mensajes conversacionales. Usa un pipeline híbrido: **fast-path regex** (cero costo, ~80% de mensajes) + **IA** (Mistral/Ollama) para comprensión avanzada, con caché de resultados. Persistencia en **SQLite (local)** o **Google Sheets (nube)** vía backend intercambiable.
 
-Versión actual: `changelog.VERSION_ACTUAL` (2.8). El bot notifica a los usuarios las novedades de cada versión al arrancar.
+Versión actual: `changelog.VERSION_ACTUAL` (2.9). El bot notifica a los usuarios las novedades de cada versión al arrancar.
 
 ---
 
@@ -91,6 +91,7 @@ personal-finance-bot/
 ├── ai_client.py             ← AIResponder: orquesta el pipeline y ejecuta la intención detectada.
 ├── handlers.py              ← Handlers de Telegram: comandos, callbacks, teclados, flujos de moneda.
 ├── knowledge.py             ← Procesamiento: gastos, ingresos, balance, presupuestos, metas, fechas, ayuda.
+├── notificaciones.py        ← Alertas de presupuesto (80/100/125%), resumen diario, sweep y catch-up.
 ├── changelog.py             ← VERSION_ACTUAL + historial de versiones (notificaciones al usuario).
 ├── verify_system.py         ← Verificación de integridad del sistema.
 ├── check_structure.py       ← Verifica estructura de archivos.
@@ -106,6 +107,9 @@ personal-finance-bot/
 ├── data/
 │   ├── finanzas.db          ← Base de datos SQLite (se crea sola).
 │   └── images/              ← Imágenes del bot.
+├── .github/
+│   └── workflows/
+│       └── notifications-wake.yml ← Wake diario del bot (Render free tier) para el resumen.
 ├── credentials.json         ← Credenciales de service account de Google (no subir a GitHub).
 ├── .env                     ← Token de Telegram + API keys (en .gitignore).
 ├── .gitignore
@@ -122,7 +126,7 @@ personal-finance-bot/
 
 ### 5.1 Backend SQLite (`database_sqlite.py`)
 
-Archivo: `data/finanzas.db`. `crear_tablas()` crea las 7 tablas y aplica migraciones idempotentes (`ALTER TABLE ... ADD COLUMN` con try/except) para columnas nuevas en BD existentes.
+Archivo: `data/finanzas.db`. `crear_tablas()` crea las 8 tablas y aplica migraciones idempotentes (`ALTER TABLE ... ADD COLUMN` con try/except) para columnas nuevas en BD existentes.
 
 **usuarios**
 | Columna           | Tipo      | Descripción                    |
@@ -202,6 +206,18 @@ Archivo: `data/finanzas.db`. `crear_tablas()` crea las 7 tablas y aplica migraci
 | abreviatura | TEXT      | Código (CUP, USD, USDT, ...)         |
 | es_default  | INTEGER   | 0/1, moneda por defecto              |
 | created_at  | TIMESTAMP |                                      |
+
+**preferencias_notificaciones** (1 fila por usuario)
+| Columna       | Tipo      | Descripción                                    |
+|---------------|-----------|------------------------------------------------|
+| usuario_id    | INTEGER   | PK = FK → usuarios.id (UNIQUE)                 |
+| alerta_80     | INTEGER   | 0/1, alerta al llegar al 80% del presupuesto   |
+| alerta_100    | INTEGER   | 0/1, alerta al agotar el presupuesto (100%)    |
+| alerta_125    | INTEGER   | 0/1, alerta al exceder el presupuesto (125%)   |
+| resumen_diario| INTEGER   | 0/1, resumen diario activado                   |
+| hora_resumen  | TEXT      | Hora local del resumen (HH:MM, default 20:00)  |
+| zona_horaria  | TEXT      | Zona IANA (default America/Havana)             |
+| ultimo_resumen| TEXT      | Fecha ISO (YYYY-MM-DD) del último resumen enviado |
 
 ### 5.2 Backend Google Sheets (`database_gsheets.py`)
 
@@ -303,6 +319,22 @@ La IA **solo clasifica**; los números y respuestas los calcula el bot con datos
 | `_parsear_multi_transaccion` / `_guardar_multi_transacciones` | Multi-transacciones con preview |
 | `_detectar_moneda_en_texto`, `_detectar_presupuesto_en_gasto`, `_buscar_presupuesto`, `_formatear_monto`, `_moneda_lookup_usuario`, `_crear_barra_progreso` | Helpers |
 
+### 7.4 Sistema de Notificaciones (`notificaciones.py`)
+
+| Función | Qué hace |
+|---------|----------|
+| `verificar_alertas_presupuesto(prefs, planeado, antes, despues, nombre, simbolo, abreviatura)` | Devuelve texto de alerta si el gasto **cruza** el umbral 80/100/125% (nunca repite en gastos posteriores) o `None` |
+| `formatear_resumen_diario(usuario)` | Resumen del día: movimientos de hoy + balance por moneda |
+| `_hora_programada_hoy(hora, zona)` | datetime de hoy a la hora local del usuario (zona IANA) |
+| `_resumen_due(usuario, prefs)` | ¿Corresponde enviar ahora? (resumen activo + ya pasó la hora de hoy + `ultimo_resumen` ≠ hoy) |
+| `_enviar_resumen(context, usuario, motivo)` | Envía el resumen y marca `ultimo_resumen` (idempotente) |
+| `enviar_resumen_pendiente(update, context)` | **Catch-up**: llamado desde `handle_message`; envía el resumen atrasado apenas el usuario escribe |
+| `tarea_resumen_diario(context)` | **Sweep**: job `run_repeating(60 s)` en `main.py`; recorre usuarios con resumen activo y envía los que tocan |
+
+**Flujo de alertas:** `knowledge._procesar_gasto` captura `gastado_antes` antes de `agregar_transaccion`, llama `verificar_alertas_presupuesto` (import lazy para evitar ciclos) y anexa el aviso al texto de confirmación. Las alertas se activan/desactivan desde `/notificaciones`.
+
+**Persistencia:** cada usuario tiene 1 fila en `preferencias_notificaciones` (ambos backends, mismas firmas). Si no existe, `obtener_preferencias` devuelve los valores por defecto (alertas activas, resumen off).
+
 ---
 
 ## 8. Comandos de Telegram
@@ -317,6 +349,7 @@ Menú registrado con `set_my_commands` (sugerencias al escribir `/`).
 | `/gastos`    | `consultar_gastos()`     | Ver últimos gastos                         |
 | `/ingresos`  | `consultar_ingresos()`   | Ver últimos ingresos                       |
 | `/metas`     | `consultar_metas()`      | Ver metas de ahorro                        |
+| `/notificaciones` | `configurar_notificaciones()` | Alertas de presupuesto y resumen diario |
 | `/help`      | `consultar_comandos()`   | Lista de comandos y ejemplos               |
 | `/user`      | `consultar_usuario()`    | Info del usuario                           |
 | `/delete`    | `eliminar_historial()`   | Borrar todo el historial                   |
@@ -355,7 +388,19 @@ WEBHOOK_URL=
 WEBHOOK_SECRET=
 ALLOWED_HOSTS=your-app.onrender.com
 PORT=8000
+
+# Notificaciones (resumen diario)
+NOTIF_WAKE_UTC=00:15              # Hora (UTC) en que GitHub Actions despierta el bot
+DEFAULT_TIMEZONE=America/Havana   # Zona por defecto para el resumen diario
+HORA_RESUMEN_DEFAULT=20:00        # Hora por defecto del resumen diario
 ```
+
+### Wake del bot (Render free tier)
+Render duerme el servicio tras ~15 min sin tráfico. Para que el resumen diario llegue a tiempo:
+1. Crear un **Secret** de GitHub Actions: `BOT_WEBHOOK_URL` = `https://TU-APP.onrender.com/TU-WEBHOOK-PATH`.
+2. El workflow `.github/workflows/notifications-wake.yml` hace `curl` a esa URL a la hora de `NOTIF_WAKE_UTC` (cron en UTC). Un GET devuelve 405 (el webhook solo acepta POST) pero **despierta** a Render igualmente.
+3. Dentro de esa ventana, el job interno (`tarea_resumen_diario`, sweep cada 60 s) envía los resúmenes de todos los usuarios.
+4. Si aun así el bot estaba dormido a la hora del resumen, el **catch-up** lo envía apenas el usuario vuelva a escribir.
 
 ### Validación (`config.validate_config()`)
 - `TELEGRAM_BOT_TOKEN` — obligatorio.
@@ -377,13 +422,15 @@ PORT=8000
 `requirements.txt`:
 
 ```
-python-telegram-bot[webhooks]>=22.8
+python-telegram-bot[webhooks,job-queue]>=22.8
 python-dotenv>=1.2.2
 mistralai>=2.5.0
 gspread>=6.2.0
 pandas>=3.0.0
 gspread-dataframe>=4.0.0
 ```
+
+`[job-queue]` instala **APScheduler** (requerido para el sweep del resumen diario).
 
 Instalación: `python -m venv venv && venv\Scripts\activate && pip install -r requirements.txt`
 
@@ -403,10 +450,11 @@ main()
         → ApplicationBuilder().token().post_init(_post_init).build()
         → _post_init: set_my_commands(COMANDOS_MENU) + set_chat_menu_button
         → registrar handlers:
-            CommandHandler: start, user, help, delete, anuncio, categorias, gastos, ingresos, metas, resumen
+            CommandHandler: start, user, help, delete, anuncio, categorias, gastos, ingresos, metas, resumen, notificaciones
             CallbackQueryHandler(handle_callback_query)
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
             add_error_handler(error_handler)
+        → job_queue.run_repeating(notificaciones.tarea_resumen_diario, 60 s)  (si app.job_queue)
         → delete_webhook(drop_pending_updates=True)  (evita conflictos)
         → app.start() + updater.start_polling()
         → shutdown: flush_all() de gsheets si aplica
@@ -467,4 +515,4 @@ En modo sin IA disponible, el bot cae a `general`/fallback y sigue respondiendo 
 - `venv\Scripts\python.exe -m unittest test_parsing_bugs -v` — 17 tests (parsing de cantidades, monedas, balance por moneda, carga gsheets, decimales).
 - `python verify_system.py` — chequeo de dependencias y configuración.
 - `python check_structure.py` — valida estructura de archivos.
-- Suites temporales de regresión (presupuestos, callbacks, gasto ligado, consultas) se mantienen fuera del repo en `%TEMP%\opencode\`.
+- Suites temporales de regresión (presupuestos, callbacks, gasto ligado, consultas, **notificaciones**) se mantienen fuera del repo en `%TEMP%\opencode\`.

@@ -47,6 +47,12 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
 WEBHOOK_PORT = int(os.getenv("PORT", 8000))
 
+# Notificaciones
+DEFAULT_TIMEZONE = os.getenv("DEFAULT_TIMEZONE", "America/Havana")
+HORA_RESUMEN_DEFAULT = os.getenv("HORA_RESUMEN_DEFAULT", "20:00")
+# Hora UTC (HH:MM) en que GitHub Actions despierta el bot para enviar resúmenes diarios
+NOTIF_WAKE_UTC = os.getenv("NOTIF_WAKE_UTC", "00:15")
+
 
 def get_system_prompt() -> str:
     """Lee y retorna el prompt del sistema desde el archivo de texto."""

@@ -4,6 +4,7 @@ Maneja comandos y mensajes en lenguaje natural para gestión financiera.
 """
 
 import logging
+import re
 from typing import Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
@@ -11,10 +12,12 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
 
+import config
 import database
 import knowledge
 import ai_client
 import changelog
+import notificaciones
 from config import IMAGES_DIR, ADMIN_USER_ID
 
 logger = logging.getLogger(__name__)
@@ -33,6 +36,18 @@ MONEDAS_PRESET = {
     "usdt": {"nombre": "USDT", "simbolo": "₮", "abreviatura": "USDT"},
     "cup": {"nombre": "Peso cubano", "simbolo": "$", "abreviatura": "CUP"},
 }
+
+# Zonas horarias y horas rápidas para el menú de notificaciones
+ZONAS_HORARIAS = [
+    ("America/Havana", "🇨🇺 Cuba"),
+    ("America/Mexico_City", "🇲🇽 México"),
+    ("America/Bogota", "🇨🇴 Colombia"),
+    ("America/Caracas", "🇻🇪 Venezuela"),
+    ("America/Argentina/Buenos_Aires", "🇦🇷 Argentina"),
+    ("Europe/Madrid", "🇪🇸 España"),
+    ("UTC", "🌐 UTC"),
+]
+HORAS_PRESET = ["06:00", "07:00", "08:00", "12:00", "18:00", "19:00", "20:00", "21:00", "22:00"]
 
 
 def _formatear_notificacion(ultima_vista: Optional[str]) -> Optional[str]:
@@ -253,6 +268,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error("Error verificando notificación: %s", e)
     # --- Fin notificación ---
 
+    # --- Catch-up de resumen diario pendiente (Render free tier) ---
+    if not context.user_data.get("configurando_notif_campo"):
+        try:
+            await notificaciones.enviar_resumen_pendiente(context, msg.chat_id, usuario)
+        except Exception as e:
+            logger.error("Error en catch-up de resumen diario: %s", e)
+    # --- Fin catch-up ---
+
     # Verificar si el usuario está editando una transacción multi
     if "editando_multi_idx" in context.user_data:
         idx = context.user_data.pop("editando_multi_idx")
@@ -286,6 +309,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- Flujo conversacional: agregar moneda ---
     if context.user_data.get("agregando_moneda_paso"):
         await _manejar_flujo_moneda(update, context, mensaje, usuario)
+        return
+
+    # --- Configuración de notificaciones: capturar hora / zona horaria ---
+    campo = context.user_data.get("configurando_notif_campo")
+    if campo:
+        context.user_data.pop("configurando_notif_campo", None)
+        botones = _crear_teclado_permanente()
+        if mensaje.lower() in ("cancelar", "❌ cancelar"):
+            await msg.reply_text("❌ Configuración cancelada.", reply_markup=botones)
+            return
+        if campo == "hora":
+            if not re.match(r"^\d{1,2}:\d{2}$", mensaje.strip()):
+                await msg.reply_text(
+                    "❌ Formato inválido. Usa `HH:MM`, ej: `21:00`.\n\n"
+                    "Escribe `cancelar` para salir.",
+                    parse_mode="Markdown", reply_markup=botones,
+                )
+                return
+            hora = mensaje.strip()
+            database.guardar_preferencias(usuario_id, hora_resumen=hora)
+            texto, kb = _crear_menu_notificaciones(database.obtener_preferencias(usuario_id))
+            await msg.reply_text(
+                f"✅ Hora del resumen: **{hora}**.\n\n{texto}",
+                parse_mode="Markdown", reply_markup=kb,
+            )
+        elif campo == "zona":
+            from zoneinfo import ZoneInfo
+            try:
+                ZoneInfo(mensaje.strip())
+            except Exception:
+                await msg.reply_text(
+                    "❌ Zona horaria inválida. Usa formato IANA, ej: `America/Havana`.\n\n"
+                    "Escribe `cancelar` para salir.",
+                    parse_mode="Markdown", reply_markup=botones,
+                )
+                return
+            zona = mensaje.strip()
+            database.guardar_preferencias(usuario_id, zona_horaria=zona)
+            texto, kb = _crear_menu_notificaciones(database.obtener_preferencias(usuario_id))
+            await msg.reply_text(
+                f"✅ Zona horaria: **{zona}**.\n\n{texto}",
+                parse_mode="Markdown", reply_markup=kb,
+            )
         return
 
     # --- Manejo de botones del teclado persistente ---
@@ -394,6 +460,7 @@ async def consultar_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "• `/gastos` - Ver tus últimos gastos\n"
             "• `/ingresos` - Ver tus últimos ingresos\n"
             "• `/metas` - Ver tus metas de ahorro\n"
+            "• `/notificaciones` - Alertas de presupuesto y resumen diario\n"
             "• `/help` - Ver esta ayuda\n"
             "• `/delete` - Borrar todo el historial de transacciones\n\n"
             "📝 **Ejemplos de lenguaje natural:**\n"
@@ -505,6 +572,89 @@ async def eliminar_historial(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         logger.error("Error en /delete: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al procesar la solicitud.")
+
+
+# ============================================================
+# NOTIFICACIONES (/notificaciones)
+# ============================================================
+
+def _crear_menu_notificaciones(prefs: dict):
+    """Compone el texto y los botones del menú de notificaciones."""
+    resumen = prefs.get("resumen_diario", False)
+    hora = prefs.get("hora_resumen") or config.HORA_RESUMEN_DEFAULT
+    zona = prefs.get("zona_horaria") or config.DEFAULT_TIMEZONE
+    a80 = prefs.get("alerta_80", True)
+    a100 = prefs.get("alerta_100", True)
+    a125 = prefs.get("alerta_125", True)
+
+    texto = (
+        "🔔 *Configuración de notificaciones*\n"
+        "━━━━━━━━━━━━━━━━━\n"
+        f"{'✅' if resumen else '❌'} Resumen diario: **{'Activado' if resumen else 'Desactivado'}**\n"
+        f"🕐 Hora del resumen: **{hora}**\n"
+        f"🌍 Zona horaria: **{zona}**\n"
+        "━━━━━━━━━━━━━━━━━\n"
+        f"⚙️ *Alertas de presupuesto:*\n"
+        f"{'✅' if a80 else '⬜'} 80% · {'✅' if a100 else '⬜'} 100% · {'✅' if a125 else '⬜'} 125%\n\n"
+        "_El resumen diario llega a la hora elegida en tu zona horaria. "
+        "Las alertas avisan cuando un presupuesto cruza el umbral._"
+    )
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "🛑 Desactivar resumen diario" if resumen else "✅ Activar resumen diario",
+                callback_data="notif_resumen",
+            ),
+        ],
+        [
+            InlineKeyboardButton(f"🕐 Hora: {hora}", callback_data="notif_hora_menu"),
+            InlineKeyboardButton("🌍 Zona horaria", callback_data="notif_tz_menu"),
+        ],
+        [
+            InlineKeyboardButton(f"{'✅' if a80 else '⬜'} 80%", callback_data="notif_alerta_80"),
+            InlineKeyboardButton(f"{'✅' if a100 else '⬜'} 100%", callback_data="notif_alerta_100"),
+            InlineKeyboardButton(f"{'✅' if a125 else '⬜'} 125%", callback_data="notif_alerta_125"),
+        ],
+        [InlineKeyboardButton("❌ Cerrar", callback_data="notif_close")],
+    ])
+    return texto, kb
+
+
+def _crear_botones_horas() -> InlineKeyboardMarkup:
+    """Botones con horas rápidas para el resumen diario."""
+    filas = []
+    for i in range(0, len(HORAS_PRESET), 3):
+        filas.append([
+            InlineKeyboardButton(h, callback_data=f"notif_hora_{h}") for h in HORAS_PRESET[i:i + 3]
+        ])
+    filas.append([InlineKeyboardButton("✍️ Otra hora", callback_data="notif_hora_custom")])
+    filas.append([InlineKeyboardButton("🔙 Volver", callback_data="notif_menu")])
+    return InlineKeyboardMarkup(filas)
+
+
+def _crear_botones_zonas() -> InlineKeyboardMarkup:
+    """Botones con zonas horarias comunes."""
+    filas = []
+    for clave, label in ZONAS_HORARIAS:
+        filas.append([InlineKeyboardButton(label, callback_data=f"notif_tz_{clave}")])
+    filas.append([InlineKeyboardButton("✍️ Otra zona", callback_data="notif_tz_custom")])
+    filas.append([InlineKeyboardButton("🔙 Volver", callback_data="notif_menu")])
+    return InlineKeyboardMarkup(filas)
+
+
+async def configurar_notificaciones(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja el comando /notificaciones."""
+    try:
+        usuario = _obtener_usuario_contexto(update, context)
+        prefs = database.obtener_preferencias(usuario["id"])
+        texto, kb = _crear_menu_notificaciones(prefs)
+        botones = _crear_teclado_permanente()
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=kb)
+    except Exception as e:
+        logger.error("Error en /notificaciones: %s", e)
+        await update.message.reply_text(
+            "⚠️ Ocurrió un error al mostrar la configuración de notificaciones."
+        )
 
 
 # ============================================================
@@ -1072,6 +1222,82 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         elif query.data == "delete_cancel":
             await _responder_editando(query, "❌ Operación cancelada.")
+
+        # === CALLBACKS DE NOTIFICACIONES ===
+        elif query.data == "notif_resumen":
+            prefs = database.obtener_preferencias(usuario_id)
+            database.guardar_preferencias(usuario_id, resumen_diario=not prefs.get("resumen_diario", False))
+            texto, kb = _crear_menu_notificaciones(database.obtener_preferencias(usuario_id))
+            await _responder_editando(query, texto, kb)
+
+        elif query.data == "notif_menu":
+            texto, kb = _crear_menu_notificaciones(database.obtener_preferencias(usuario_id))
+            await _responder_editando(query, texto, kb)
+
+        elif query.data == "notif_close":
+            await _responder_editando(query, "🔔 Configuración de notificaciones cerrada.")
+
+        elif query.data == "notif_hora_menu":
+            await _responder_editando(
+                query,
+                "🕐 *Elige la hora del resumen diario:*",
+                _crear_botones_horas(),
+            )
+
+        elif query.data.startswith("notif_hora_"):
+            clave = query.data.replace("notif_hora_", "")
+            if clave == "custom":
+                context.user_data["configurando_notif_campo"] = "hora"
+                await _responder_editando(
+                    query,
+                    "✍️ *Escribe la hora del resumen* en formato `HH:MM`\n"
+                    "Ejemplo: `06:30`, `21:00`\n\n"
+                    "Escribe `cancelar` para salir.",
+                )
+                return
+            if not re.match(r"^\d{1,2}:\d{2}$", clave):
+                await _responder_editando(query, "❌ Hora inválida.")
+                return
+            database.guardar_preferencias(usuario_id, hora_resumen=clave)
+            texto, kb = _crear_menu_notificaciones(database.obtener_preferencias(usuario_id))
+            await _responder_editando(query, f"✅ Hora del resumen: **{clave}**.\n\n{texto}", kb)
+
+        elif query.data == "notif_tz_menu":
+            await _responder_editando(
+                query,
+                "🌍 *Elige tu zona horaria:*\n\n"
+                "_La usamos para calcular tu hora local del resumen._",
+                _crear_botones_zonas(),
+            )
+
+        elif query.data.startswith("notif_tz_"):
+            clave = query.data.replace("notif_tz_", "")
+            if clave == "custom":
+                context.user_data["configurando_notif_campo"] = "zona"
+                await _responder_editando(
+                    query,
+                    "✍️ *Escribe tu zona horaria* (formato IANA).\n"
+                    "Ejemplos: `America/Havana`, `Europe/Madrid`, `UTC`\n\n"
+                    "Escribe `cancelar` para salir.",
+                )
+                return
+            try:
+                from zoneinfo import ZoneInfo
+                ZoneInfo(clave)
+            except Exception:
+                await _responder_editando(query, "❌ Zona horaria inválida.")
+                return
+            database.guardar_preferencias(usuario_id, zona_horaria=clave)
+            texto, kb = _crear_menu_notificaciones(database.obtener_preferencias(usuario_id))
+            await _responder_editando(query, f"✅ Zona horaria: **{clave}**.\n\n{texto}", kb)
+
+        elif query.data.startswith("notif_alerta_"):
+            umbral = query.data.replace("notif_alerta_", "")
+            clave = f"alerta_{umbral}"
+            prefs = database.obtener_preferencias(usuario_id)
+            database.guardar_preferencias(usuario_id, **{clave: not prefs.get(clave, True)})
+            texto, kb = _crear_menu_notificaciones(database.obtener_preferencias(usuario_id))
+            await _responder_editando(query, texto, kb)
 
         # === CALLBACKS DE ANUNCIO ===
         elif query.data == "anuncio_enviar":

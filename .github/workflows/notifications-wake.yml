@@ -1,0 +1,34 @@
+name: Wake bot para resumen diario
+
+# Despierta el bot en Render free tier a la hora del resumen diario.
+# Un solo GET a la webhook URL evita que Render duerma el servicio y permite
+# que el job interno (sweep 60s) envíe los resúmenes programados.
+#
+# COMO CONFIGURAR:
+#   1. En GitHub → repo → Settings → Secrets and variables → Actions →
+#      New repository secret:
+#        BOT_WEBHOOK_URL = https://TU-APP.onrender.com/TU-WEBHOOK-PATH
+#   2. Ajusta la hora en el cron (UTC) para cubrir las horas locales de tus
+#      usuarios. Ejemplo: 00:15 UTC ≈ 20:15 en Cuba (verano).
+#      Referencia cron: minuto hora dia-mes mes dia-semana.
+#   3. El GET puede devolver 405 (el webhook solo acepta POST); eso NO impide
+#      que Render despierte el servicio.
+
+on:
+  schedule:
+    - cron: "15 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Despertar el bot
+        env:
+          URL: ${{ secrets.BOT_WEBHOOK_URL }}
+        run: |
+          if [ -z "$URL" ]; then
+            echo "Secret BOT_WEBHOOK_URL no configurado"
+            exit 1
+          fi
+          curl -sS -o /dev/null -w "HTTP %{http_code}\n" "$URL" || true

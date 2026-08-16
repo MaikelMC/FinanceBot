@@ -127,6 +127,22 @@ def crear_tablas():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS preferencias_notificaciones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL UNIQUE,
+            alerta_80 INTEGER DEFAULT 1,
+            alerta_100 INTEGER DEFAULT 1,
+            alerta_125 INTEGER DEFAULT 1,
+            resumen_diario INTEGER DEFAULT 0,
+            hora_resumen TEXT DEFAULT '20:00',
+            zona_horaria TEXT DEFAULT 'America/Havana',
+            ultimo_resumen TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
+        )
+    """)
+
     conn.commit()
 
     # Migración: agregar moneda_id si no existe
@@ -846,3 +862,103 @@ def establecer_moneda_default(usuario_id: int, moneda_id: int) -> bool:
     conn.commit()
     conn.close()
     return actualizada
+
+
+# ----------------------------------------------------------
+# PREFERENCIAS DE NOTIFICACIONES
+# ----------------------------------------------------------
+
+def _preferencias_default() -> Dict[str, Any]:
+    """Retorna las preferencias por defecto para un usuario."""
+    import config
+    return {
+        "alerta_80": 1,
+        "alerta_100": 1,
+        "alerta_125": 1,
+        "resumen_diario": 0,
+        "hora_resumen": config.HORA_RESUMEN_DEFAULT,
+        "zona_horaria": config.DEFAULT_TIMEZONE,
+        "ultimo_resumen": None,
+    }
+
+
+def obtener_preferencias(usuario_id: int) -> Dict[str, Any]:
+    """Obtiene las preferencias de notificaciones de un usuario.
+
+    Si el usuario aún no tiene fila, la crea con los valores por defecto.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM preferencias_notificaciones WHERE usuario_id = ?",
+        (usuario_id,)
+    )
+    row = cursor.fetchone()
+    if not row:
+        defaults = _preferencias_default()
+        cursor.execute(
+            """
+            INSERT INTO preferencias_notificaciones
+                (usuario_id, alerta_80, alerta_100, alerta_125, resumen_diario,
+                 hora_resumen, zona_horaria, ultimo_resumen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (usuario_id, defaults["alerta_80"], defaults["alerta_100"], defaults["alerta_125"],
+             defaults["resumen_diario"], defaults["hora_resumen"], defaults["zona_horaria"],
+             defaults["ultimo_resumen"])
+        )
+        conn.commit()
+        conn.close()
+        prefs = {"usuario_id": usuario_id, **defaults}
+        prefs["alerta_80"] = bool(prefs["alerta_80"])
+        prefs["alerta_100"] = bool(prefs["alerta_100"])
+        prefs["alerta_125"] = bool(prefs["alerta_125"])
+        prefs["resumen_diario"] = bool(prefs["resumen_diario"])
+        return prefs
+
+    prefs = dict(row)
+    prefs["alerta_80"] = bool(prefs.get("alerta_80", 0))
+    prefs["alerta_100"] = bool(prefs.get("alerta_100", 0))
+    prefs["alerta_125"] = bool(prefs.get("alerta_125", 0))
+    prefs["resumen_diario"] = bool(prefs.get("resumen_diario", 0))
+    conn.close()
+    return prefs
+
+
+def guardar_preferencias(usuario_id: int, **kwargs) -> Dict[str, Any]:
+    """Actualiza preferencias de notificaciones de un usuario (upsert).
+
+    Campos soportados: alerta_80, alerta_100, alerta_125, resumen_diario,
+    hora_resumen, zona_horaria, ultimo_resumen.
+    Retorna las preferencias actualizadas.
+    """
+    campos_permitidos = {
+        "alerta_80", "alerta_100", "alerta_125", "resumen_diario",
+        "hora_resumen", "zona_horaria", "ultimo_resumen",
+    }
+    campos = {k: v for k, v in kwargs.items() if k in campos_permitidos and v is not None}
+    campos_ints = {"alerta_80", "alerta_100", "alerta_125", "resumen_diario"}
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT id FROM preferencias_notificaciones WHERE usuario_id = ?", (usuario_id,))
+    existe = cursor.fetchone()
+
+    if not existe:
+        obtener_preferencias(usuario_id)
+
+    if campos:
+        sets = []
+        params: list = []
+        for k, v in campos.items():
+            sets.append(f"{k} = ?")
+            params.append(int(v) if k in campos_ints else v)
+        params.append(usuario_id)
+        cursor.execute(
+            f"UPDATE preferencias_notificaciones SET {', '.join(sets)} WHERE usuario_id = ?",
+            params
+        )
+        conn.commit()
+    conn.close()
+    return obtener_preferencias(usuario_id)
