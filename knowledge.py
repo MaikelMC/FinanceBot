@@ -701,49 +701,149 @@ def _procesar_metas_ahorro(usuario: Dict[str, Any]) -> str:
         return "❌ Ocurrió un error al obtener tus metas de ahorro."
 
 
+def _emoji_categoria(nombre: Optional[str]) -> str:
+    """Emoji sugerido según el nombre de la categoría."""
+    n = (nombre or "").lower()
+    mapa = [
+        ("comida", "🍔"), ("restaur", "🍽️"), ("cafe", "☕"), ("super", "🛒"), ("mercado", "🛒"),
+        ("transporte", "🚕"), ("taxi", "🚕"), ("combust", "⛽"), ("gasolina", "⛽"), ("buses", "🚌"),
+        ("salud", "💊"), ("medic", "💊"), ("farmac", "💊"),
+        ("educ", "🎓"), ("escuela", "🎒"), ("curso", "📚"),
+        ("ropa", "👕"), ("vest", "👗"), ("zapat", "👟"),
+        ("hogar", "🏠"), ("casa", "🏠"), ("alquiler", "🏠"), ("luz", "💡"), ("agua", "🚰"), ("internet", "📶"),
+        ("telefono", "📱"), ("celular", "📱"),
+        ("entreten", "🎬"), ("cine", "🎬"), ("juego", "🎮"), ("suscrip", "📺"),
+        ("deporte", "⚽"), ("gym", "🏋️"),
+        ("salario", "💼"), ("sueldo", "💼"), ("trabajo", "💼"), ("nómina", "💼"),
+        ("negocio", "🏪"), ("venta", "🏪"), ("freelance", "💻"), ("trading", "📈"),
+        ("inversion", "📈"), ("ahorro", "🐷"), ("meta", "🎯"),
+        ("impuesto", "🧾"), ("servicio", "🔧"), ("pago", "💳"),
+        ("fiesta", "🎉"), ("regalo", "🎁"), ("donacion", "🤝"),
+    ]
+    for clave, emoji in mapa:
+        if clave in n:
+            return emoji
+    return "📦"
+
+
 def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
-    """Muestra un resumen del mes actual: ingresos, gastos, neto por moneda y top categorías."""
+    """Muestra un resumen del mes actual: movimientos, top categorías, mayor gasto,
+    promedio diario y balance actual."""
     try:
         from datetime import date
         hoy = date.today()
         inicio = hoy.replace(day=1).isoformat()
         fin = hoy.isoformat()
 
-        balance = database.obtener_balance(usuario["id"], fecha_inicio=inicio)
-        por_moneda = balance.get("por_moneda", {})
+        moneda_lookup = _moneda_lookup_usuario(usuario)
+        balance_mes = database.obtener_balance(usuario["id"], fecha_inicio=inicio)
+        por_moneda = balance_mes.get("por_moneda", {})
 
-        mes_num_a_nombre = {v: k for k, v in MESES_ES.items()}
-        nombre_mes = mes_num_a_nombre.get(hoy.month, str(hoy.month))
-        lineas = [f"📊 **RESUMEN DE {nombre_mes.upper()}**", "━━━━━━━━━━━━━━━━━"]
+        nombre_mes = {v: k for k, v in MESES_ES.items()}.get(hoy.month, str(hoy.month))
+        lineas = [f"📊 *RESUMEN DE {nombre_mes.upper()}*", "━━━━━━━━━━━━━━━━━"]
 
-        if por_moneda and not (len(por_moneda) == 1 and list(por_moneda.keys()) == ["Sin moneda"]):
-            for abrev, datos in por_moneda.items():
-                simbolo = datos.get("simbolo", "$")
-                neto = datos["ingresos"] - datos["gastos"]
-                lineas.append(f"**{simbolo} {datos.get('nombre', abrev)} ({abrev})**")
-                lineas.append(f"  📈 Ingresos: {simbolo}{datos['ingresos']:.2f}")
-                lineas.append(f"  📉 Gastos: {simbolo}{datos['gastos']:.2f}")
-                lineas.append(f"  💵 Neto: {simbolo}{neto:.2f}")
-        else:
-            lineas.append(f"  📈 Ingresos: ${balance['ingresos']:.2f}")
-            lineas.append(f"  📉 Gastos: ${balance['gastos']:.2f}")
-            lineas.append(f"  💵 Neto: ${balance['neto']:.2f}")
+        # --- Monedas activas del mes (o fallback "Sin moneda") ---
+        monedas_activas = [(abrev, d) for abrev, d in por_moneda.items()]
+        if not monedas_activas or (len(monedas_activas) == 1 and monedas_activas[0][0] == "Sin moneda"):
+            if not balance_mes.get("ingresos") and not balance_mes.get("gastos"):
+                lineas.append("\n😴 Sin movimientos este mes.")
+                return "\n".join(lineas)
+            monedas_activas = [(
+                "Sin moneda",
+                {"simbolo": "$", "ingresos": balance_mes.get("ingresos", 0),
+                 "gastos": balance_mes.get("gastos", 0), "nombre": "Sin moneda"},
+            )]
+        simbolo_por_cur = {abrev: d["simbolo"] for abrev, d in monedas_activas}
 
+        def _etiqueta(abrev: str) -> str:
+            return f" ({abrev})" if abrev != "Sin moneda" else ""
+
+        def _linea_concepto(concepto: str, getter, con_signo: bool = False) -> str:
+            partes = []
+            for abrev, d in monedas_activas:
+                val = getter(d)
+                signo = ("+" if val >= 0 else "-") if con_signo else ""
+                partes.append(f"{signo}{d['simbolo']}{val:.2f}{_etiqueta(abrev)}")
+            return f"{concepto} {' · '.join(partes)}"
+
+        # --- Movimientos del mes (compacto por moneda) ---
+        lineas.append("\n💵 *MOVIMIENTOS DEL MES*")
+        lineas.append(_linea_concepto("💰 Ingresos:", lambda d: d["ingresos"]))
+        lineas.append(_linea_concepto("💸 Gastos:", lambda d: d["gastos"]))
+        lineas.append(_linea_concepto("💵 Neto:", lambda d: d["ingresos"] - d["gastos"], con_signo=True))
+
+        # --- Gastos del mes agrupados por moneda y categoría ---
         gastos_mes = database.obtener_transacciones_por_fecha(usuario["id"], inicio, fin, "gasto")
-        por_cat: Dict[str, float] = {}
+        por_cat_cur: Dict[str, Dict[str, float]] = {}
         for t in gastos_mes:
             cat = t.get("categoria_nombre") or "Otros"
-            por_cat[cat] = por_cat.get(cat, 0.0) + float(t.get("cantidad", 0))
+            mid = t.get("moneda_id")
+            m = moneda_lookup.get(mid)
+            abrev = m["abreviatura"] if m else "Sin moneda"
+            por_cat_cur.setdefault(abrev, {}).setdefault(cat, 0.0)
+            por_cat_cur[abrev][cat] += float(t.get("cantidad", 0))
 
-        top = sorted(por_cat.items(), key=lambda kv: kv[1], reverse=True)[:5]
-        if top:
-            total = sum(v for _, v in top)
-            lineas.append("\n🔥 **Top categorías de gasto:**")
-            for cat, monto in top:
-                pct = (monto / total * 100) if total > 0 else 0
-                lineas.append(f"  • {cat}: ${monto:.2f} ({pct:.0f}%)")
+        if por_cat_cur:
+            lineas.append("\n🔥 *MAYORES GASTOS*")
+            for abrev, cats in por_cat_cur.items():
+                total_cur = sum(cats.values())
+                if total_cur <= 0:
+                    continue
+                simbolo = simbolo_por_cur.get(abrev, "$")
+                if len(por_cat_cur) > 1:
+                    lineas.append(f"💱 {abrev}: total {simbolo}{total_cur:.2f}")
+                top = sorted(cats.items(), key=lambda kv: kv[1], reverse=True)[:5]
+                for cat, monto in top:
+                    pct = monto / total_cur * 100
+                    barra = _crear_barra_progreso(pct)
+                    lineas.append(f"{_emoji_categoria(cat)} {cat}: {simbolo}{monto:.2f} · {pct:.0f}%")
+                    lineas.append(f"   `{barra}` {pct:.0f}%")
+
+            # --- Mayor gasto individual del mes ---
+            mayor = max(gastos_mes, key=lambda t: float(t.get("cantidad", 0)))
+            monto_m = float(mayor.get("cantidad", 0))
+            mid_m = mayor.get("moneda_id")
+            mm = moneda_lookup.get(mid_m)
+            simbolo_m = mm["simbolo"] if mm else "$"
+            abrev_m = f" ({mm['abreviatura']})" if mm else ""
+            cat_m = mayor.get("categoria_nombre") or "Otros"
+            fecha_m = (mayor.get("fecha") or "")[:10]
+            lineas.append(
+                f"\n📌 *Mayor gasto:* {_emoji_categoria(cat_m)} {cat_m} — "
+                f"{simbolo_m}{monto_m:.2f}{abrev_m}"
+                + (f" (el {fecha_m})" if fecha_m else "")
+            )
+
+            # --- Promedio diario de gasto ---
+            dias = hoy.day
+            if dias > 0:
+                promedios = [
+                    f"{d['simbolo']}{d['gastos'] / dias:.2f}{_etiqueta(abrev)}/día"
+                    for abrev, d in monedas_activas if d["gastos"] > 0
+                ]
+                if promedios:
+                    lineas.append("\n📈 *Promedio diario de gasto*")
+                    lineas.append(f"   {' · '.join(promedios)} ({dias} día{'s' if dias != 1 else ''} del mes)")
         else:
             lineas.append("\n📝 Sin gastos registrados este mes.")
+
+        # --- Balance actual (todo el historial) ---
+        balance_act = database.obtener_balance(usuario["id"])
+        pa = balance_act.get("por_moneda", {})
+        lineas.append("\n💵 *BALANCE ACTUAL*")
+        if pa and not (len(pa) == 1 and "Sin moneda" in pa):
+            partes = []
+            for abrev, d in pa.items():
+                neto = d["ingresos"] - d["gastos"]
+                signo = "+" if neto >= 0 else "-"
+                partes.append(f"{signo}{d['simbolo']}{abs(neto):.2f} ({abrev})")
+            lineas.append(f"   {' · '.join(partes)}")
+        elif pa:
+            neto = balance_act.get("neto", 0)
+            signo = "+" if neto >= 0 else "-"
+            lineas.append(f"   {signo}${abs(neto):.2f}")
+        else:
+            lineas.append("   $0.00")
 
         return "\n".join(lineas)
     except Exception as e:
