@@ -3,7 +3,7 @@ notificaciones.py - Notificaciones del bot de finanzas personales
 
 Incluye:
 - Alertas de presupuesto en tiempo real (80% / 100% / 125%)
-- Resumen diario programado (sweep con zona horaria por usuario)
+- Resumen diario programado (hora fija 21:30 hora de Cuba)
 - Catch-up de resúmenes perdidos (Render free tier)
 """
 
@@ -26,14 +26,14 @@ UMBRALES_ALERTA: List[tuple] = [
 
 
 def _parse_hora(hora: str) -> tuple:
-    """Parsea 'HH:MM' (o 'HH:MM:SS') a (hora, minuto). Default 20:00."""
+    """Parsea 'HH:MM' (o 'HH:MM:SS') a (hora, minuto). Default 21:30."""
     try:
         partes = str(hora).split(":")
         hh = int(partes[0])
         mm = int(partes[1]) if len(partes) > 1 else 0
         return (hh, mm)
     except (ValueError, IndexError):
-        return (20, 0)
+        return (21, 30)
 
 
 def _hora_programada_hoy(zona: str, hora: str) -> datetime:
@@ -151,11 +151,15 @@ def formatear_resumen_diario(usuario: Dict[str, Any]) -> str:
 
 
 def _resumen_due(usuario: Dict[str, Any], prefs: Dict[str, Any]) -> bool:
-    """True si el resumen diario del usuario está pendiente de envío hoy."""
+    """True si el resumen diario del usuario está pendiente de envío hoy.
+
+    Por ahora la hora y la zona están fijas para todos (21:30 hora de Cuba)
+    configuradas en config.HORA_RESUMEN_DEFAULT / config.DEFAULT_TIMEZONE.
+    """
     if not prefs.get("resumen_diario"):
         return False
-    hora = prefs.get("hora_resumen") or config.HORA_RESUMEN_DEFAULT
-    zona = prefs.get("zona_horaria") or config.DEFAULT_TIMEZONE
+    hora = config.HORA_RESUMEN_DEFAULT
+    zona = config.DEFAULT_TIMEZONE
     try:
         programado = _hora_programada_hoy(zona, hora)
     except Exception:
@@ -185,7 +189,7 @@ async def _enviar_resumen(context, usuario: Dict[str, Any], motivo: str, chat_id
         logger.error("Error enviando resumen diario a %d (%s): %s", uid, motivo, e)
         return
 
-    zona = prefs.get("zona_horaria") or config.DEFAULT_TIMEZONE
+    zona = config.DEFAULT_TIMEZONE
     try:
         hoy_str = datetime.now(ZoneInfo(zona)).date().isoformat()
     except Exception:

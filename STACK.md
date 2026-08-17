@@ -333,7 +333,7 @@ La IA **solo clasifica**; los números y respuestas los calcula el bot con datos
 
 **Flujo de alertas:** `knowledge._procesar_gasto` captura `gastado_antes` antes de `agregar_transaccion`, llama `verificar_alertas_presupuesto` (import lazy para evitar ciclos) y anexa el aviso al texto de confirmación. Las alertas se activan/desactivan desde `/notificaciones`.
 
-**Persistencia:** cada usuario tiene 1 fila en `preferencias_notificaciones` (ambos backends, mismas firmas). Si no existe, `obtener_preferencias` devuelve los valores por defecto (alertas activas, resumen off).
+**Persistencia:** cada usuario tiene 1 fila en `preferencias_notificaciones` (ambos backends, mismas firmas). Si no existe, `obtener_preferencias` devuelve los valores por defecto (alertas activas, resumen off). Por ahora la **hora (21:30) y la zona (America/Havana) del resumen son fijas** desde config; el menú `/notificaciones` solo permite activar/desactivar el resumen y cada alerta. Los campos `hora_resumen`/`zona_horaria` se conservan en BD para habilitar la personalización en el futuro.
 
 ---
 
@@ -349,7 +349,7 @@ Menú registrado con `set_my_commands` (sugerencias al escribir `/`).
 | `/gastos`    | `consultar_gastos()`     | Ver últimos gastos                         |
 | `/ingresos`  | `consultar_ingresos()`   | Ver últimos ingresos                       |
 | `/metas`     | `consultar_metas()`      | Ver metas de ahorro                        |
-| `/notificaciones` | `configurar_notificaciones()` | Alertas de presupuesto y resumen diario |
+| `/notificaciones` | `configurar_notificaciones()` | Alertas de presupuesto y resumen diario (21:30 hora de Cuba) |
 | `/help`      | `consultar_comandos()`   | Lista de comandos y ejemplos               |
 | `/user`      | `consultar_usuario()`    | Info del usuario                           |
 | `/delete`    | `eliminar_historial()`   | Borrar todo el historial                   |
@@ -390,16 +390,19 @@ ALLOWED_HOSTS=your-app.onrender.com
 PORT=8000
 
 # Notificaciones (resumen diario)
-NOTIF_WAKE_UTC=00:15              # Hora (UTC) en que GitHub Actions despierta el bot
-DEFAULT_TIMEZONE=America/Havana   # Zona por defecto para el resumen diario
-HORA_RESUMEN_DEFAULT=20:00        # Hora por defecto del resumen diario
+NOTIF_WAKE_UTC=01:30              # 1er wake (UTC): 21:30 hora de Cuba en verano
+DEFAULT_TIMEZONE=America/Havana   # Zona del resumen diario (fija por ahora)
+HORA_RESUMEN_DEFAULT=21:30        # Hora del resumen diario (fija para todos)
 ```
 
 ### Wake del bot (Render free tier)
-Render duerme el servicio tras ~15 min sin tráfico. Para que el resumen diario llegue a tiempo:
-1. Crear un **Secret** de GitHub Actions: `BOT_WEBHOOK_URL` = `https://TU-APP.onrender.com/TU-WEBHOOK-PATH`.
-2. El workflow `.github/workflows/notifications-wake.yml` hace `curl` a esa URL a la hora de `NOTIF_WAKE_UTC` (cron en UTC). Un GET devuelve 405 (el webhook solo acepta POST) pero **despierta** a Render igualmente.
-3. Dentro de esa ventana, el job interno (`tarea_resumen_diario`, sweep cada 60 s) envía los resúmenes de todos los usuarios.
+Render duerme el servicio tras ~15 min sin tráfico. El resumen diario se envía a las **21:30 hora de Cuba** (fijo para todos):
+1. Crear un **Secret** de GitHub Actions: `BOT_WEBHOOK_URL` = `https://TU-APP.onrender.com/webhook`.
+2. El workflow `.github/workflows/notifications-wake.yml` hace `curl` a esa URL en **dos momentos** para cubrir ambas estaciones de Cuba:
+   - **01:30 UTC** = 21:30 Cuba (horario de verano, UTC-4)
+   - **02:30 UTC** = 21:30 Cuba (horario de invierno, UTC-5)
+   El GET devuelve 405 (el webhook solo acepta POST) pero **despierta** a Render igualmente.
+3. Dentro de la ventana (sweep cada 60 s), el job interno envía los resúmenes pendientes.
 4. Si aun así el bot estaba dormido a la hora del resumen, el **catch-up** lo envía apenas el usuario vuelva a escribir.
 
 ### Validación (`config.validate_config()`)

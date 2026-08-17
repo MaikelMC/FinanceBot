@@ -11,8 +11,8 @@ CHANGELOG = {
         "titulo": "🔔 Notificaciones: alertas y resumen diario",
         "mejoras": [
             "Alertas en tiempo real cuando un presupuesto llega al 80%, se agota (100%) o se excede (125%)",
-            "Resumen diario programado a la hora que elijas y en tu zona horaria",
-            "Configurá todo desde el nuevo comando /notificaciones: resumen, hora, zona horaria y alertas",
+            "Resumen diario automático todos los días a las 21:30 (hora de Cuba)",
+            "Activa o desactiva el resumen y cada alerta desde el comando /notificaciones",
             "Si el bot estaba dormido a la hora del resumen, te lo envía apenas vuelvas a escribir"
         ],
         "emoji": "🔔"

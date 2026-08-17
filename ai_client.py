@@ -117,6 +117,7 @@ class AIResponder:
             "ahorro": "cómo creo una meta de ahorro",
             "modificar": "cómo modifico una transacción",
             "eliminar": "cómo elimino una transacción",
+            "notificaciones": "cómo funcionan las notificaciones y el resumen diario",
             "comandos": "qué comandos tienes",
         }
         return mapa.get(tipo, "cómo funciona el bot")

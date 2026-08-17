@@ -104,8 +104,7 @@ Olvídate de formularios: escribe natural y listo.
 ## 🔔 Avisos que te cuidan el bolsillo
 
 - **Alertas de presupuesto en tiempo real:** cuando un presupuesto llega al **80%**, se **agota (100%)** o lo **superas (125%)**, el bot te avisa justo en el momento del gasto. Nada de sorpresas a fin de mes.
-- **Resumen diario opcional:** cada día, a la hora que elijas, el bot te envía lo que pasó con tu dinero: movimientos de hoy y tu balance por moneda.
-- **A tu hora y zona:** configuras tu **hora** (ej. 20:00) y tu **zona horaria** (Cuba, Madrid, UTC...).
+- **Resumen diario automático:** cada día a las **21:30 (hora de Cuba)**, el bot te envía lo que pasó con tu dinero: movimientos de hoy y tu balance por moneda.
 - **Control total:** activa o desactiva cada aviso (80%, 100%, 125% y el resumen diario) desde el comando `/notificaciones`.
 - **Sin excusas para perderte el resumen:** si el bot estaba dormido a la hora señalada, te envía el resumen apenas vuelvas a escribir.
 

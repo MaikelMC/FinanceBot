@@ -1849,7 +1849,23 @@ def _responder_ayuda_uso(mensaje: str) -> str:
             "Las categorías se crean automáticamente al registrar transacciones.",
         ])
 
-    # 6. Presupuesto
+    # 6. Notificaciones / resumen diario
+    if any(w in m for w in ["notificacion", "notificaciones", "resumen diario", "alerta",
+                            "alerta de presupuesto", "recordatorio", "hora del resumen", "aviso"]):
+        return "\n".join([
+            "🔔 **Notificaciones:**",
+            "",
+            "• **Resumen diario:** todos los días a las **21:30 (hora de Cuba)** recibes "
+            "un resumen con tus movimientos de hoy y tu balance.",
+            "• **Alertas de presupuesto:** te avisamos al instante cuando un presupuesto "
+            "llega al **80%**, se **agota (100%)** o lo **superas (125%)**.",
+            "• **Actívalo o desactívalo todo desde:** `/notificaciones`",
+            "",
+            "Las alertas de presupuesto se envían automáticamente en cada gasto; "
+            "el resumen diario solo si lo tienes activado.",
+        ])
+
+    # 7. Presupuesto
     if any(w in m for w in ["presupuesto", "budget", "planea", "planifica",
                             "límite", "limite", "tope"]):
         return "\n".join([
@@ -1862,7 +1878,7 @@ def _responder_ayuda_uso(mensaje: str) -> str:
             "El bot te avisará cuando estés cerca del límite.",
         ])
 
-    # 7. Ahorro / metas
+    # 8. Ahorro / metas
     if any(w in m for w in ["ahorrar", "ahorro", "meta", "objetivo",
                             "vacaciones", "viaje", "emergencia"]):
         return "\n".join([
@@ -1875,7 +1891,7 @@ def _responder_ayuda_uso(mensaje: str) -> str:
             "El bot te mostrará cuánto has ahorrado hacia tu meta.",
         ])
 
-    # 8. Modificar transacción
+    # 9. Modificar transacción
     if any(w in m for w in ["modificar", "cambiar", "editar", "corregir",
                             "actualizar", "cambio"]):
         return "\n".join([
@@ -1889,7 +1905,7 @@ def _responder_ayuda_uso(mensaje: str) -> str:
             "Puedes modificar monto, descripción, categoría o fecha.",
         ])
 
-    # 9. Eliminar transacción
+    # 10. Eliminar transacción
     if any(w in m for w in ["eliminar", "borrar", "quitar", "suprimir",
                             "delet", "remover"]):
         return "\n".join([
@@ -1903,7 +1919,7 @@ def _responder_ayuda_uso(mensaje: str) -> str:
             "⚠️ Cuidado: eliminar todo el historial es irreversible.",
         ])
 
-    # 10. Comandos generales del bot
+    # 11. Comandos generales del bot
     if any(w in m for w in ["comando", "comandos", "qué puedo", "que puedo",
                             "funciones", "opciones", "menú", "menu",
                             "qué hace", "que hace", "para qué sirve",
@@ -1933,10 +1949,11 @@ def _responder_ayuda_uso(mensaje: str) -> str:
             "• `/start` — Iniciar el bot",
             "• `/help` — Ver ayuda completa",
             "• `/user` — Tu información",
+            "• `/notificaciones` — Alertas y resumen diario (21:30 hora de Cuba)",
             "• `/delete` — Borrar historial",
         ])
 
-    # 11. Respuesta genérica para preguntas de uso no categorizadas
+    # 12. Respuesta genérica para preguntas de uso no categorizadas
     return "\n".join([
         "🤖 **Cómo puedo ayudarte:**",
         "",

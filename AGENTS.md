@@ -46,9 +46,9 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.2
 
 # Notificaciones (resumen diario)
-NOTIF_WAKE_UTC=00:15              # Hora UTC en que GitHub Actions despierta el bot
-DEFAULT_TIMEZONE=America/Havana   # Zona por defecto del resumen diario
-HORA_RESUMEN_DEFAULT=20:00        # Hora por defecto del resumen diario
+NOTIF_WAKE_UTC=01:30              # 1er wake (UTC): 21:30 Cuba en verano; el 2do es 02:30
+DEFAULT_TIMEZONE=America/Havana   # Zona fija del resumen diario
+HORA_RESUMEN_DEFAULT=21:30        # Hora fija del resumen diario (para todos)
 ```
 
 ## Development Commands
@@ -99,11 +99,12 @@ python -c "import config, database, knowledge; config.validate_config(); databas
 - Aggregates ingresos/gastos/neto
 
 **Notifications (v2.9):**
-- `/notificaciones` → `configurar_notificaciones()` renders menu; callbacks `notif_*` toggle resumen/alerts, set hour/tz
+- `/notificaciones` → `configurar_notificaciones()` renders menu; callbacks `notif_*` toggle resumen/alerts
+- Hora y zona del resumen **fijas** para todos: 21:30 America/Havana (config.HORA_RESUMEN_DEFAULT / DEFAULT_TIMEZONE)
 - Alertas en `knowledge._procesar_gasto`: captura `gastado_antes`, llama `notificaciones.verificar_alertas_presupuesto` (import lazy), anexa al texto
 - Resumen diario: `main.py` programa `run_repeating(tarea_resumen_diario, 60s)`; `enviar_resumen_pendiente` (catch-up) se llama en `handle_message`
-- Prefs en `preferencias_notificaciones` (ambos backends): `alerta_80/100/125`, `resumen_diario`, `hora_resumen`, `zona_horaria`, `ultimo_resumen`
-- Wake en Render free tier: `.github/workflows/notifications-wake.yml` + Secret `BOT_WEBHOOK_URL`
+- Prefs en `preferencias_notificaciones` (ambos backends): `alerta_80/100/125`, `resumen_diario`, `ultimo_resumen` (hora/zona se guardan pero no se usan por ahora)
+- Wake en Render free tier: `.github/workflows/notifications-wake.yml` (01:30 y 02:30 UTC) + Secret `BOT_WEBHOOK_URL`
 
 ## Important Gotchas
 

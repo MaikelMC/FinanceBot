@@ -49,9 +49,12 @@ WEBHOOK_PORT = int(os.getenv("PORT", 8000))
 
 # Notificaciones
 DEFAULT_TIMEZONE = os.getenv("DEFAULT_TIMEZONE", "America/Havana")
-HORA_RESUMEN_DEFAULT = os.getenv("HORA_RESUMEN_DEFAULT", "20:00")
-# Hora UTC (HH:MM) en que GitHub Actions despierta el bot para enviar resúmenes diarios
-NOTIF_WAKE_UTC = os.getenv("NOTIF_WAKE_UTC", "00:15")
+HORA_RESUMEN_DEFAULT = os.getenv("HORA_RESUMEN_DEFAULT", "21:30")
+
+# Hora (UTC) en que GitHub Actions despierta el bot. Por ahora hay 2 wakes
+# (01:30 y 02:30 UTC) para cubrir el resumen de las 21:30 hora de Cuba en
+# horario de verano (UTC-4) e invierno (UTC-5).
+NOTIF_WAKE_UTC = os.getenv("NOTIF_WAKE_UTC", "01:30")
 
 
 def get_system_prompt() -> str:
