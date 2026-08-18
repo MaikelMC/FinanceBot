@@ -4,9 +4,18 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.13"
+VERSION_ACTUAL = "2.13.1"
 
 CHANGELOG = {
+    "2.13.1": {
+        "titulo": "🏷️ Nombres de presupuesto más inteligentes",
+        "mejoras": [
+            "El nombre del presupuesto ya no queda en pronombres como \"ello\" o \"eso\": si tras el monto solo hay una referencia, el bot usa el tema real de tu mensaje",
+            "Ejemplo: \"quiero comprarme un cable nuevo para cargar mi teléfono, presupuesto de 1000 cup para ello\" crea el presupuesto \"cable de carga\", no \"ello\"",
+            "Los nombres que sean referencias se corrigen solos (fallback + IA) sin cambiar el monto ni la moneda"
+        ],
+        "emoji": "🏷️"
+    },
     "2.13": {
         "titulo": "📅 Balance por mes (se resetea cada mes)",
         "mejoras": [

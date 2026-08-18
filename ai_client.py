@@ -16,6 +16,72 @@ from telegram.helpers import escape_markdown
 logger = logging.getLogger(__name__)
 
 
+# --- Normalización del nombre del presupuesto -------------------------------
+# Evita que pronombres/referencias ("ello", "eso", "comprarlo"...) se registren
+# como nombre. Si tras el monto solo hay una referencia al tema mencionado antes,
+# se usa la heurística _extraer_tema_presupuesto.
+
+_NOMBRES_PROHIBIDOS = {
+    "ello", "eso", "esto", "este", "esta", "estos", "estas", "esos", "esas",
+    "aquel", "aquella", "aquello", "aquellos", "aquellas", "él", "ella",
+    "ellos", "ellas", "lo", "los", "las", "le", "les", "me", "nos", "se",
+    "os", "lo mismo", "eso mismo", "ello mismo", "esto mismo", "comprarlo",
+    "comprarla", "comprarlos", "comprarlas", "comprar", "hacerlo", "hacerla",
+    "hacerlos", "hacerlas", "conseguirlo", "conseguirla", "conseguirlos",
+    "tenerlo", "tenerla", "usarlo", "usarla", "adquirirlo", "adquirirla",
+    "lo que quiero", "lo que necesito",
+}
+
+_NOMBRES_PROHIBIDOS_PREFIJOS = (
+    "para ", "comprar ", "comprarme ", "comprarlo ", "comprarla ",
+    "destinar ", "destinaré ", "gastar ", "gastarlo ", "hacer ", "hacerlo ",
+    "voy a ", "quiero ", "necesito ", "conseguir ", "adquirir ", "tener ",
+    "poner ", "reservar ", "asignar ",
+)
+
+# Proposito -> sustantivo ("cable para cargar" -> "cable de carga")
+_PROPOSITO_NOUNS = {
+    "cargar": "carga",
+    "pagar": "pago",
+    "viajar": "viaje",
+    "estudiar": "estudios",
+    "reparar": "reparación",
+    "arreglar": "arreglo",
+    "alquilar": "alquiler",
+    "cocinar": "cocina",
+    "limpiar": "limpieza",
+    "ahorrar": "ahorro",
+    "invertir": "inversión",
+    "mejorar": "mejora",
+    "actualizar": "actualización",
+    "renovar": "renovación",
+    "comprar": "compra",
+    "celebrar": "celebración",
+    "entrenar": "entrenamiento",
+}
+
+# Verbos/frases introductorias que se descartan al buscar el tema de un presupuesto
+_VERBOS_INICIO_TOPICO = (
+    "quiero", "quisiera", "quería", "me gustaría", "necesito", "necesitaria",
+    "necesitaría", "voy a", "vamos a", "vamos", "tengo que", "tengo",
+    "pensaba", "pienso", "estoy pensando en", "pensando en", "quiero comprarme",
+    "comprarme", "comprar", "adquirir", "conseguir", "obtener", "destinar",
+    "destinaré", "asignar", "reservar", "apartar", "poner", "dejar", "ahorrar",
+    "estoy ahorrando", "estoy ahorrando para", "pensé", "estoy pensando",
+    "necesito comprar", "quiero comprar", "arreglar", "reparar",
+)
+
+_PALABRAS_STOP_TOPICO = {
+    "para", "que", "con", "sin", "por", "a", "de", "en", "como", "mi", "mis",
+    "tu", "tus", "sus", "su", "un", "una", "unos", "unas", "el", "la", "los",
+    "las", "y", "o", "pero", "esto", "eso", "ello", "este", "esta", "todo",
+    "toda", "todos", "todas", "nuevo", "nueva", "nuevos", "nuevas", "compra",
+    "comprar", "comprarme", "quiero", "también", "tambien", "ademas", "además",
+    "lo", "al", "del", "si", "no", "tengo", "poder", "pueda", "puedo", "ser",
+    "estar", "está", "es", "les", "lo",
+}
+
+
 class AIResponder:
     """Clase para procesar mensajes usando el pipeline de intención unificado."""
 
@@ -311,6 +377,17 @@ class AIResponder:
             or "general"
         ).strip()
 
+        # Guarda: si el nombre es un pronombre/referencia ("ello", "eso", ...),
+        # re-derivar con la etiqueta tras el monto o el tema mencionado antes.
+        if not self._nombre_presupuesto_valido(nombre):
+            nombre = (
+                self._extraer_nombre_presupuesto(mensaje)
+                or self._extraer_tema_presupuesto(mensaje)
+                or resultado.get("descripcion")
+                or resultado.get("categoria")
+                or "general"
+            ).strip()
+
         if not cantidad or cantidad <= 0:
             # Intentar extraer con el sistema nativo
             try:
@@ -481,8 +558,9 @@ class AIResponder:
     def _extraer_nombre_presupuesto(mensaje: str) -> Optional[str]:
         """Extrae el nombre del presupuesto desde el texto del usuario.
 
-        Busca la etiqueta que el usuario escribió describiendo el presupuesto,
-        justo después del monto (ej: "tengo un presupuesto de 1000 cup para barbería").
+        Busca la etiqueta real tras el monto (ej: "...de 1000 cup para barbería").
+        Si lo capturado es una referencia/pronón ("ello", "eso", "comprarlo"),
+        devuelve None para que el flujo use la heurística de tema.
         """
         m = re.search(
             r'presupuesto\s+(?:de\s+)?\$?[\d][\d.,]*\s*(?:\S{1,14}\s+)?\b(?:para|en|de)\s+(.+)',
@@ -491,8 +569,91 @@ class AIResponder:
         if m:
             nombre = m.group(1).strip().strip(' .,;:')
             nombre = re.sub(r'^(?:el|la|un|una|este|esta|los|las)\s+', '', nombre, flags=re.IGNORECASE)
-            return nombre or None
+            nombre = re.sub(r'\s+', ' ', nombre).strip()
+            if AIResponder._nombre_presupuesto_valido(nombre):
+                return nombre
         return None
+
+    @staticmethod
+    def _nombre_presupuesto_valido(nombre: Optional[str]) -> bool:
+        """True si el nombre es una etiqueta concreta (no pronombre/referencia)."""
+        if not nombre:
+            return False
+        n = nombre.strip()
+        if len(n) < 3:
+            return False
+        nl = n.lower()
+        if nl in _NOMBRES_PROHIBIDOS:
+            return False
+        return not any(nl.startswith(pre) for pre in _NOMBRES_PROHIBIDOS_PREFIJOS)
+
+    @staticmethod
+    def _extraer_tema_presupuesto(mensaje: str) -> Optional[str]:
+        """Extrae el TEMA real del presupuesto cuando tras el monto solo hay una
+        referencia ("para ello", "para eso") que apunta al tema mencionado antes.
+
+        Ej: "quiero comprarme un cable nuevo para cargar mi teléfono, destinaré un
+        presupuesto de 1000 cup para ello" -> "cable de carga".
+        """
+        if not mensaje:
+            return None
+        texto = mensaje.lower()
+
+        # 1. Recortar en la cláusula del presupuesto (el tema está antes)
+        pos = None
+        for kw in ("presupuesto", "destinaré", "destinar", "reservar", "asignar",
+                   "apartar", "estoy ahorrando", "pensado en", "pensé"):
+            i = texto.find(kw)
+            if i != -1 and (pos is None or i < pos):
+                pos = i
+        if pos is not None:
+            texto = texto[:pos]
+        texto = texto.split(",")[0].strip()
+
+        # 2. Quitar verbos/frases introductorias (repetidamente)
+        cambiado = True
+        while cambiado:
+            cambiado = False
+            for v in _VERBOS_INICIO_TOPICO:
+                if texto.startswith(v + " ") or texto == v:
+                    texto = texto[len(v):].strip()
+                    cambiado = True
+                    break
+
+        # 3. Quitar artículos, posesivos y adjetivos de relleno
+        texto = re.sub(r'\b(?:un|una|unos|unas|el|la|los|las|mi|mis|tu|tus|su|sus|'
+                       r'nuestro|nuestra|nuestros|nuestras)\s+', ' ', texto)
+        texto = re.sub(r'\b(?:nuevo|nueva|nuevos|nuevas|barato|barata|caro|cara|'
+                       r'pequeño|pequeña|grande|bueno|buena|buen|mejor)\s+', ' ', texto)
+
+        # 4. Sustantivo cabeza (primer token significativo)
+        tokens = re.findall(r'[a-záéíóúñü]{2,}', texto)
+        head = next((t for t in tokens if t not in _PALABRAS_STOP_TOPICO), None)
+        if not head:
+            return None
+
+        # 5. Propósito tras "para": derivar una etiqueta compuesta
+        m = re.search(r'\bpara\b', texto)
+        if m:
+            resto = re.findall(r'[a-záéíóúñü]+', texto[m.end():])
+            while resto and resto[0] in ("el", "la", "los", "las", "mi", "mis",
+                                         "tu", "tus", "su", "sus", "un", "una",
+                                         "unos", "unas"):
+                resto.pop(0)
+            if resto:
+                p = resto[0]
+                if p == head:
+                    return _PROPOSITO_NOUNS.get(p, head)
+                if p in _PROPOSITO_NOUNS:
+                    return f"{head} de {_PROPOSITO_NOUNS[p]}"
+                if re.match(r'^[a-záéíóúñü]{3,}(?:ar|er|ir)$', p):
+                    for t in resto[1:]:
+                        if t not in _PALABRAS_STOP_TOPICO and len(t) >= 4:
+                            return f"{head} de {t}" if t != head else head
+                    return head
+                if p not in _PALABRAS_STOP_TOPICO and len(p) >= 4 and p != head:
+                    return f"{head} de {p}"
+        return head
 
     @staticmethod
     def _detectar_modo_presupuesto(mensaje: str) -> str:
