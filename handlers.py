@@ -41,25 +41,18 @@ MONEDAS_PRESET = {
 
 
 def _formatear_notificacion(ultima_vista: Optional[str]) -> Optional[str]:
-    """Construye el mensaje de notificación con las versiones no vistas por el usuario."""
-    versiones_a_mostrar = []
-    for ver, data in changelog.CHANGELOG.items():
-        if ultima_vista is None or str(ver) > str(ultima_vista):
-            versiones_a_mostrar.append((ver, data))
-
-    if not versiones_a_mostrar:
+    """Construye el mensaje de notificación solo con la última versión disponible."""
+    if ultima_vista == changelog.VERSION_ACTUAL:
         return None
 
-    versiones_a_mostrar.sort(key=lambda x: x[0], reverse=True)
+    data = changelog.CHANGELOG.get(changelog.VERSION_ACTUAL)
+    if not data:
+        return None
 
-    lineas = []
-    for ver, data in versiones_a_mostrar:
-        emoji = data.get("emoji", "📢")
-        lineas.append(f"{emoji} **v{ver}** - {data['titulo']}")
-        for mejora in data.get("mejoras", []):
-            lineas.append(f"  • {mejora}")
-        lineas.append("")
-
+    lineas = [f"**v{changelog.VERSION_ACTUAL}** - {data['titulo']}"]
+    for mejora in data.get("mejoras", []):
+        lineas.append(f"• {mejora}")
+    lineas.append("")
     lineas.append("Escribe /help para ver todos los comandos.")
 
     return "\n".join(lineas)
