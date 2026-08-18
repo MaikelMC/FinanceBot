@@ -335,15 +335,36 @@ class AIResponder:
             if moneda_obj is None and len(monedas_usuario) == 1:
                 moneda_obj = monedas_usuario[0]
 
+        # Localizar el presupuesto existente que se vería afectado (por nombre o categoría),
+        # igual que database.guardar_presupuesto.
+        presupuestos_previos = database.obtener_presupuestos(usuario["id"])
+        target = None
+        for p in presupuestos_previos:
+            p_nombre = (p.get("nombre") or "").strip().lower()
+            if nombre and p_nombre and p_nombre == nombre.lower():
+                target = p
+                break
+        if target is None:
+            for p in presupuestos_previos:
+                p_cat = (p.get("categoria_nombre") or "").strip().lower()
+                if p_cat and p_cat == categoria.lower():
+                    target = p
+                    break
+
+        aviso_moneda = False
+        # En modo "sumar", el aumento se aplica SIEMPRE en la moneda del presupuesto existente
+        # (evita mezclar CUP + USD en un mismo presupuesto).
+        if modo == "sumar" and target and target.get("moneda_id"):
+            moneda_presup = next((m for m in monedas_usuario if m["id"] == target["moneda_id"]), None)
+            if moneda_presup:
+                if moneda_obj and moneda_obj["id"] != target["moneda_id"]:
+                    aviso_moneda = True
+                moneda_obj = moneda_presup
+
         if moneda_obj is None and len(monedas_usuario) > 1:
             # Reutilizar la moneda del presupuesto existente (mismo nombre o categoría) si ya tiene una
-            for p in database.obtener_presupuestos(usuario["id"]):
-                p_nombre = (p.get("nombre") or "").strip().lower()
-                p_cat = (p.get("categoria_nombre") or "").strip().lower()
-                if p_nombre == nombre.lower() or (not p_nombre and p_cat == categoria.lower()):
-                    if p.get("moneda_id"):
-                        moneda_obj = next((m for m in monedas_usuario if m["id"] == p["moneda_id"]), None)
-                    break
+            if target and target.get("moneda_id"):
+                moneda_obj = next((m for m in monedas_usuario if m["id"] == target["moneda_id"]), None)
 
         if moneda_obj is None and len(monedas_usuario) > 1:
             lineas = [
@@ -365,6 +386,11 @@ class AIResponder:
             }
             return "\n".join(lineas), pendiente
 
+        # Total final del presupuesto tras la operación (para validarlo contra el balance)
+        total_objetivo = cantidad
+        if modo == "sumar" and target:
+            total_objetivo = target["cantidad_planejada"] + cantidad
+
         try:
             tipo_cat = "gastos"
             categorias = database.obtener_categorias(usuario["id"], tipo_cat)
@@ -378,6 +404,27 @@ class AIResponder:
                 categoria_id = cat_info["id"]
 
             moneda_id = moneda_obj["id"] if moneda_obj else None
+
+            # Validación: el presupuesto no puede exceder el balance libre de su moneda
+            # (individual + acumulativo: suma de todos los presupuestos de la moneda <= balance).
+            if moneda_obj:
+                disponible = self._balance_disponible_moneda(usuario, moneda_obj["id"])
+                if disponible is not None:
+                    comprometido = self._presupuestos_comprometidos_moneda(
+                        usuario, moneda_obj["id"], excluir_id=target["id"] if target else None
+                    )
+                    libre = disponible - comprometido
+                    if total_objetivo - libre > 0.005:
+                        simbolo = moneda_obj.get("simbolo", "$")
+                        abrev = moneda_obj["abreviatura"]
+                        return (
+                            f"❌ **No puedes configurar un presupuesto de {simbolo}{total_objetivo:.2f} ({abrev}).**\n\n"
+                            f"Tu balance en {abrev} es **{simbolo}{disponible:.2f}** y ya tienes "
+                            f"**{simbolo}{comprometido:.2f}** en otros presupuestos, así que solo te quedan "
+                            f"**{simbolo}{max(libre, 0):.2f}** libres.\n\n"
+                            "Ajusta el monto o registra más ingresos primero."
+                        ), None
+
             presupuesto = database.guardar_presupuesto(usuario["id"], categoria_id, cantidad, modo, nombre=nombre, moneda_id=moneda_id)
             total = presupuesto.get("cantidad_planejada", cantidad)
             label = presupuesto.get("nombre") or categoria
@@ -385,14 +432,42 @@ class AIResponder:
             nombre_moneda = f" ({moneda_obj['nombre']})" if moneda_obj else ""
 
             if modo == "sumar":
+                aviso = f"\n💡 Se aplicó en la moneda del presupuesto ({moneda_obj['abreviatura']})." if aviso_moneda else ""
                 return (
                     f"✅ **Añadido {simbolo}{cantidad:.2f}{nombre_moneda} al presupuesto de '{label}'.**\n"
-                    f"📊 Total disponible: {simbolo}{total:.2f}"
+                    f"📊 Total disponible: {simbolo}{total:.2f}{aviso}"
                 ), None
             return f"✅ **Presupuesto configurado:** {simbolo}{total:.2f}{nombre_moneda} para '{label}'", None
         except Exception as e:
             logger.error("Error configurando presupuesto: %s", e)
             return "❌ Ocurrió un error al configurar el presupuesto.", None
+
+    def _balance_disponible_moneda(self, usuario: Dict[str, Any], moneda_id: int) -> Optional[float]:
+        """Balance neto del usuario en la moneda indicada (None si no se puede calcular)."""
+        try:
+            balance = database.obtener_balance(usuario["id"])
+            monedas = database.obtener_monedas(usuario["id"])
+            m = next((x for x in monedas if x["id"] == moneda_id), None)
+            if not m:
+                return None
+            info = balance.get("por_moneda", {}).get(m["abreviatura"])
+            if not info:
+                return 0.0
+            return info["ingresos"] - info["gastos"]
+        except Exception:
+            return None
+
+    def _presupuestos_comprometidos_moneda(self, usuario: Dict[str, Any], moneda_id: int,
+                                           excluir_id: Optional[int] = None) -> float:
+        """Suma de los montos planeados de todos los presupuestos en la moneda (opcionalmente excluyendo uno)."""
+        try:
+            return sum(
+                p.get("cantidad_planejada", 0.0) or 0.0
+                for p in database.obtener_presupuestos(usuario["id"])
+                if p.get("moneda_id") == moneda_id and p.get("id") != excluir_id
+            )
+        except Exception:
+            return 0.0
 
     @staticmethod
     def _extraer_nombre_presupuesto(mensaje: str) -> Optional[str]:

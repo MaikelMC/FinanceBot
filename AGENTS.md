@@ -115,6 +115,13 @@ python -c "import config, database, knowledge; config.validate_config(); databas
 - Prefs en `preferencias_notificaciones` (ambos backends): `alerta_80/100/125`, `resumen_diario`, `ultimo_resumen` (hora/zona se guardan pero no se usan por ahora)
 - Wake en Render free tier: `.github/workflows/notifications-wake.yml` (01:30 y 02:30 UTC) + Secret `BOT_WEBHOOK_URL`
 
+**Presupuestos vs balance (v2.11):**
+- Validación en `ai_client._procesar_presupuesto` (único punto de creación: NL, fast-path, callbacks de moneda): el presupuesto **no puede exceder el balance libre de su moneda**
+- Regla individual + acumulativa: `cantidad_planejada <= neto(moneda) - suma de otros presupuestos de la misma moneda`
+- Helpers: `_balance_disponible_moneda` (neto por moneda vía `obtener_balance().por_moneda`) y `_presupuestos_comprometidos_moneda` (excluye el target en edición)
+- Modo "sumar" fuerza la moneda del presupuesto existente (evita mezclar CUP+USD) y avisa con "Se aplicó en la moneda del presupuesto"
+- Rechazo con mensaje que muestra balance, comprometido y lo que queda libre; balance 0/negativo → no se puede crear presupuesto
+
 ## Important Gotchas
 
 **Database user isolation:**

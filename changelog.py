@@ -4,9 +4,19 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.10"
+VERSION_ACTUAL = "2.11"
 
 CHANGELOG = {
+    "2.11": {
+        "titulo": "⚖️ Presupuestos ligados a tu balance real",
+        "mejoras": [
+            "No puedes crear un presupuesto mayor al balance disponible en su moneda (ej: con $200 USD no puedes fijar $300)",
+            "La suma de todos tus presupuestos de una moneda no puede exceder el balance de esa moneda",
+            "Al añadir dinero a un presupuesto se respeta la moneda que ya tiene (no se mezclan CUP y USD)",
+            "Si el monto no cabe, te decimos cuánto balance tienes, cuánto ya comprometiste y cuánto te queda libre"
+        ],
+        "emoji": "⚖️"
+    },
     "2.10": {
         "titulo": "📤 Exporta tus datos a Excel",
         "mejoras": [
