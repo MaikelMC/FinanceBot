@@ -609,6 +609,8 @@ class GoogleSheetsDB:
         return resultado
 
     def obtener_balance(self, usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:
+        if fecha_inicio is None:
+            fecha_inicio = inicio_mes_actual()
         trans = self._cache.get("transacciones", [])
         monedas = self.obtener_monedas(usuario_id)
         moneda_lookup = {str(m["id"]): m for m in monedas}
@@ -1083,6 +1085,12 @@ def obtener_transacciones(usuario_id: int, limite: int = 50, tipo: Optional[str]
 def obtener_transacciones_por_fecha(usuario_id: int, fecha_inicio: str, fecha_fin: str,
                                      tipo: Optional[str] = None) -> List[Dict[str, Any]]:
     return _get_db().obtener_transacciones_por_fecha(usuario_id, fecha_inicio, fecha_fin, tipo)
+
+
+def inicio_mes_actual() -> str:
+    """Primer día del mes actual en formato YYYY-MM-DD (para el balance mensual)."""
+    from datetime import date
+    return date.today().replace(day=1).isoformat()
 
 
 def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:

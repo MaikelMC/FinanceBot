@@ -88,24 +88,24 @@ Error: `⚠️ Ocurrió un error al mostrar la ayuda.`
 ### `/user` — Información de usuario
 
 ```
-👤 **Usuario:** Ana
-🆔 **ID:** `123456789`
+👤 **Ana** · `ID 123456789`
 
-💰 **Balance:**
-  💱 $ Dolar (USD): +$2000.00 / -$350.00 = $1650.00
-  💱 $ Peso cubano (CUP): +$5000.00 / -$1200.00 = $3800.00
-📁 **Categorías:** 8
-💱 **Monedas:** 2
-📝 **Transacciones recientes:** 12
+💰 **Balance de agosto 2026**
+┈┈┈┈┈┈┈┈┈┈
+USD  📈 $2,000.00  📉 $350.00  → **$1,650.00**
+CUP  📈 $5,000.00  📉 $1,200.00  → **$3,800.00**
+
+📁 8 categorías · 💱 2 monedas · 12 transacciones
 ```
 
 Con una sola moneda:
 
 ```
-💰 **Balance:**
-  Ingresos: $2000.00
-  Gastos: $350.00
-  Neto: $1650.00
+💰 **Balance de agosto 2026**
+┈┈┈┈┈┈┈┈┈┈
+📈 $2,000.00
+📉 $350.00
+Neto: **$1,650.00**
 ```
 
 Error: `⚠️ Ocurrió un error al obtener tu información.`
@@ -341,7 +341,7 @@ Neto: **-$20.00**
 
 ### Balance
 ```
-💰 **Balance actual**
+💰 **Balance de agosto 2026**
 ┈┈┈┈┈┈┈┈┈┈
 ```
 
@@ -360,7 +360,7 @@ Varias monedas (una por moneda, formato tabular):
 Moneda única:
 
 ```
-💰 **Balance actual**
+💰 **Balance de agosto 2026**
 ┈┈┈┈┈┈┈┈┈┈
 📈 Ingresos: $2,000.00
 📉 Gastos: $350.00
@@ -529,7 +529,7 @@ Cuando el presupuesto excede el balance libre de su moneda (regla individual + a
 ```
 ❌ **No puedes configurar un presupuesto de $300.00 (USD).**
 
-Tu balance en **USD** es **$200.00** y ya tienes **$50.00** en otros presupuestos, así que solo te quedan **$150.00** libres.
+Tu balance del mes en **USD** es **$200.00** y ya tienes **$50.00** en otros presupuestos, así que solo te quedan **$150.00** libres.
 
 Ajusta el monto o registra más ingresos primero.
 ```
@@ -561,7 +561,7 @@ Estructura completa:
 Mayor gasto: 🍔 Comida, $420.00 (CUP) el día 17
 Promedio diario: $38.71 (CUP)/día
 
-💰 **Balance:**
+💰 **Balance del mes:**
 **+$3,800.00 (CUP)** · **+$200.00 (USD)**
 ```
 
@@ -575,8 +575,8 @@ Promedio diario: $38.71 (CUP)/día
 
 **Sin gastos (pero con movimientos):** en lugar de la sección de gastos aparece `📝 Sin gastos registrados este mes.`
 
-**Balance actual según el caso:**
-- Varias monedas: `💰 **Balance:**` + `**+$3,800.00 (CUP)** · **-$50.00 (USD)**` (con signo y abreviatura)
+**Balance del mes según el caso:**
+- Varias monedas: `💰 **Balance del mes:**` + `**+$3,800.00 (CUP)** · **-$50.00 (USD)**` (con signo y abreviatura)
 - Solo "Sin moneda": `**+$3,800.00**`
 - Sin monedas: `**$0.00**`
 
@@ -606,7 +606,7 @@ Varias alertas cruzadas en el mismo gasto se unen con salto de línea.
 📈 Ingresos: $500.00 (CUP)
 📋 3 movimiento(s) registrado(s).
 
-💰 Balance: **+$3,800.00 (CUP)**
+💰 Balance del mes: **+$3,800.00 (CUP)**
 ```
 
 Sin movimientos:
@@ -616,10 +616,10 @@ Sin movimientos:
 ┈┈┈┈┈┈┈┈┈┈
 😴 Sin movimientos hoy.
 
-💰 Balance: **+$3,800.00 (CUP)**
+💰 Balance del mes: **+$3,800.00 (CUP)**
 ```
 
-Sin gastos/ingresos se muestra `📉 Gastos: $0.00` / `📈 Ingresos: $0.00`. Con una sola moneda "Sin moneda": `💰 Balance: **+$3,800.00**`. Sin monedas: `💰 Balance: **+$0.00**`.
+Sin gastos/ingresos se muestra `📉 Gastos: $0.00` / `📈 Ingresos: $0.00`. Con una sola moneda "Sin moneda": `💰 Balance del mes: **+$3,800.00**`. Sin monedas: `💰 Balance del mes: **+$0.00**`.
 
 Error interno (solo log, no se envía al usuario): `📊 No pude generar tu resumen diario.` + salto + `Intenta de nuevo o escribe /help.`
 
@@ -1067,10 +1067,16 @@ Aplicado sobre todos los mensajes de uso frecuente (`/start`, `/user`, balance, 
 1. **Emojis semánticos de tabla cerrada:** 📈 ingreso, 📉 gasto, 💰 balance/dinero (solo en títulos), 📊 presupuesto/estadística, 🎯 meta, 💱 moneda, 🔔 notificación, ⚠️ advertencia (único para las 3 severidades de alerta), ✅ OK, ❌ error, ℹ️ info, 🗑️ eliminar. Se eliminaron 💸, 💵, 🚨, ⛔, 🏦, ⚙️ y los duplicados de emoji en el cuerpo.
 2. **Montos con separador de miles** vía `formato.fmt_moneda()` (`$1,500.00`) — nunca se concatenan a mano (`.2f`).
 3. **Separador corto** `┈┈┈┈┈┈┈┈┈┈` (`formato.SEPARADOR`) reemplaza `━━━━━━━━━━━━━━━━━`, y solo en mensajes multi-sección.
-4. **Títulos Title Case** (`Balance actual`, `Resumen diario`) en vez de MAYÚSCULAS SOSTENIDAS.
+4. **Títulos Title Case** (`Balance de agosto 2026`, `Resumen diario`) en vez de MAYÚSCULAS SOSTENIDAS.
 5. **Nombres en negrita sin comillas** (`**Comida**`, no `'comida'`); negrita solo en datos accionables (montos, nombres).
 6. **Barras de progreso en backticks** con `round()` (`formato.barra_progreso`, 10 segmentos), y la abreviatura de moneda solo en el total de presupuesto.
 7. **Fallback genérico** reducido a 3 ejemplos + derivación a `/help`.
+
+### Balance por mes (v2.13)
+1. **El balance consultado es del mes en curso:** `obtener_balance()` filtra por el primer día del mes actual (`inicio_mes_actual()`), así se "resetea" solo al cambiar de mes, sin borrar el historial.
+2. **El período queda explícito** en el encabezado: `💰 **Balance de agosto 2026**` (botón, `/user`, consultas NL, resumen mensual y resumen diario).
+3. **Presupuestos v2.11:** la validación del tope usa el balance del mes en curso (`Tu balance del mes en **USD** es ...`).
+4. **Histórico intacto y consultable:** para todo el historial se pasa `fecha_inicio="0000-01-01"` (exportación `/exportar todo`); el resto del pasado se ve con `/resumen`, análisis por fecha y `/exportar`.
 
 ### Correcciones previas (v2.11.1)
 
@@ -1085,4 +1091,4 @@ Correcciones de estilo y ortografía aplicadas al código para unificar los mens
    - `Ocurrio` → `Ocurrió` (transacciones y presupuestos)
    - `—Registrar un gasto` → `— Registrar un gasto` (espacio tras el em-dash)
 4. **Código muerto eliminado:** `_formatear_moneda_para_display` en `handlers.py`.
-5. **Resumen diario:** el balance por moneda usa ahora el mismo formato que el resto del bot: `💰 Balance: **+$3,800.00 (CUP)**` (símbolo + abreviatura, con signo), en lugar de `💵 Balance actual: +$3800.00 (CUP)`.
+5. **Resumen diario:** el balance por moneda usa ahora el mismo formato que el resto del bot: `💰 Balance del mes: **+$3,800.00 (CUP)**` (símbolo + abreviatura, con signo), en lugar de `💵 Balance actual: +$3800.00 (CUP)`.

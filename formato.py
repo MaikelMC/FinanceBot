@@ -43,6 +43,19 @@ def header(emoji: str, titulo: str) -> str:
     return f"{emoji} **{titulo}**"
 
 
+NOMBRES_MESES = {
+    1: "enero", 2: "febrero", 3: "marzo", 4: "abril", 5: "mayo", 6: "junio",
+    7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre",
+}
+
+
+def nombre_mes_actual() -> str:
+    """Nombre y año del mes en curso, p. ej. 'agosto 2026'."""
+    from datetime import date
+    hoy = date.today()
+    return f"{NOMBRES_MESES.get(hoy.month, str(hoy.month))} {hoy.year}"
+
+
 def barra_progreso(pct: float, largo: int = 10) -> str:
     """Barra de progreso en backticks, 0-100%."""
     pct = max(0.0, min(100.0, pct))

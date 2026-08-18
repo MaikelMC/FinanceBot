@@ -422,7 +422,7 @@ class AIResponder:
                         return (
                             f"❌ **No puedes configurar un presupuesto de "
                             f"{formato.fmt_moneda(total_objetivo, abrev=abrev, simbolo=simbolo)}.**\n\n"
-                            f"Tu balance en **{abrev}** es **{formato.fmt_moneda(disponible, abrev=abrev, simbolo=simbolo)}** "
+                            f"Tu balance del mes en **{abrev}** es **{formato.fmt_moneda(disponible, abrev=abrev, simbolo=simbolo)}** "
                             f"y ya tienes **{formato.fmt_moneda(comprometido, abrev=abrev, simbolo=simbolo)}** "
                             f"en otros presupuestos, así que solo te quedan "
                             f"**{formato.fmt_moneda(max(libre, 0), abrev=abrev, simbolo=simbolo)}** libres.\n\n"
@@ -451,7 +451,7 @@ class AIResponder:
             return "❌ Ocurrió un error al configurar el presupuesto.", None
 
     def _balance_disponible_moneda(self, usuario: Dict[str, Any], moneda_id: int) -> Optional[float]:
-        """Balance neto del usuario en la moneda indicada (None si no se puede calcular)."""
+        """Balance neto del mes en curso en la moneda indicada (None si no se puede calcular)."""
         try:
             balance = database.obtener_balance(usuario["id"])
             monedas = database.obtener_monedas(usuario["id"])

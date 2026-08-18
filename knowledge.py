@@ -220,7 +220,7 @@ def _procesar_balance(usuario: Dict[str, Any]) -> str:
         por_moneda = balance.get("por_moneda", {})
 
         lineas = [
-            formato.header(formato.EMOJI_BALANCE, "Balance actual"),
+            formato.header(formato.EMOJI_BALANCE, f"Balance de {formato.nombre_mes_actual()}"),
             formato.SEPARADOR,
         ]
 
@@ -804,10 +804,10 @@ def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
         else:
             lineas.append("\n📝 Sin gastos registrados este mes.")
 
-        # --- Balance actual (todo el historial) ---
+        # --- Balance del mes (por defecto el bot consulta el mes en curso) ---
         balance_act = database.obtener_balance(usuario["id"])
         pa = balance_act.get("por_moneda", {})
-        lineas.append(f"\n{formato.EMOJI_BALANCE} **Balance:**")
+        lineas.append(f"\n{formato.EMOJI_BALANCE} **Balance del mes:**")
         if pa and not (len(pa) == 1 and "Sin moneda" in pa):
             partes = []
             for abrev, d in pa.items():

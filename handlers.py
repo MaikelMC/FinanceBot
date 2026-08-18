@@ -387,7 +387,7 @@ async def consultar_usuario(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         mensaje = (
             f"👤 **{escape_markdown(user.first_name or 'Usuario', version=1)}** · `ID {user.id}`\n\n"
-            f"{formato.EMOJI_BALANCE} **Balance**\n{formato.SEPARADOR}\n{balance_text}\n"
+            f"{formato.EMOJI_BALANCE} **Balance de {formato.nombre_mes_actual()}**\n{formato.SEPARADOR}\n{balance_text}\n"
             f"\n📁 {len(categorias)} categorías · {formato.EMOJI_MONEDA} {len(monedas)} monedas · "
             f"{len(transacciones)} transacciones"
         )
@@ -534,7 +534,7 @@ async def _enviar_exportacion(msg, context: ContextTypes.DEFAULT_TYPE, usuario: 
             balance = database.obtener_balance(usuario["id"], fecha_inicio=inicio)
         else:
             transacciones = database.obtener_transacciones(usuario["id"], limite=exportador.MAX_TRANSACCIONES)
-            balance = database.obtener_balance(usuario["id"])
+            balance = database.obtener_balance(usuario["id"], fecha_inicio="0000-01-01")
 
         monedas = database.obtener_monedas(usuario["id"])
         IMAGES_DIR.mkdir(parents=True, exist_ok=True)
@@ -739,7 +739,7 @@ async def _manejar_boton_teclado(update: Update, context: ContextTypes.DEFAULT_T
         balance = database.obtener_balance(usuario_id)
         por_moneda = balance.get("por_moneda", {})
 
-        lineas = [f"{formato.EMOJI_BALANCE} **Balance actual**", formato.SEPARADOR]
+        lineas = [f"{formato.EMOJI_BALANCE} **Balance de {formato.nombre_mes_actual()}**", formato.SEPARADOR]
 
         if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
             for abrev, datos in por_moneda.items():
@@ -931,7 +931,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             balance = database.obtener_balance(usuario_id)
             por_moneda = balance.get("por_moneda", {})
 
-            lineas = [f"{formato.EMOJI_BALANCE} **Balance actual**", formato.SEPARADOR]
+            lineas = [f"{formato.EMOJI_BALANCE} **Balance de {formato.nombre_mes_actual()}**", formato.SEPARADOR]
             if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
                 for abrev, datos in por_moneda.items():
                     simbolo = datos.get("simbolo", "$")

@@ -4,9 +4,20 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.12"
+VERSION_ACTUAL = "2.13"
 
 CHANGELOG = {
+    "2.13": {
+        "titulo": "📅 Balance por mes (se resetea cada mes)",
+        "mejoras": [
+            "El balance consultado ahora es del mes en curso: al pasar de mes se resetea solo, sin borrar tu historial",
+            "El encabezado indica el período: \"Balance de agosto 2026\" en botón, /user y consultas",
+            "Los presupuestos se validan contra el balance del mes, no contra todo el historial",
+            "El resumen diario y el resumen mensual muestran el balance del mes",
+            "El histórico queda intacto: puedes consultarlo con el resumen mensual, análisis por fecha y /exportar"
+        ],
+        "emoji": "📅"
+    },
     "2.12": {
         "titulo": "🎨 Mensajes rediseñados, más claros",
         "mejoras": [

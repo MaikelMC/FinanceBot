@@ -352,8 +352,22 @@ def obtener_transacciones_por_fecha(usuario_id: int, fecha_inicio: str, fecha_fi
     return [dict(r) for r in rows]
 
 
+def inicio_mes_actual() -> str:
+    """Primer día del mes actual en formato YYYY-MM-DD (para el balance mensual)."""
+    from datetime import date
+    return date.today().replace(day=1).isoformat()
+
+
 def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:
-    """Obtiene el balance financiero de un usuario, agrupado por moneda."""
+    """Obtiene el balance financiero de un usuario, agrupado por moneda.
+
+    Por defecto muestra el balance del mes en curso (se "resetea" cada mes,
+    sin borrar el historial). Pasa fecha_inicio explícito (p. ej. '0000-01-01')
+    para consultar todo el historial o un período pasado.
+    """
+    if fecha_inicio is None:
+        fecha_inicio = inicio_mes_actual()
+
     conn = get_connection()
     cursor = conn.cursor()
 

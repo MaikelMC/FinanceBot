@@ -132,18 +132,18 @@ def formatear_resumen_diario(usuario: Dict[str, Any]) -> str:
         else:
             lineas.append("😴 Sin movimientos hoy.")
 
-        # Balance actual
+        # Balance del mes (el balance del bot se consulta por mes en curso)
         balance = database.obtener_balance(uid)
         por_moneda = balance.get("por_moneda", {})
         lineas.append("")
         if len(por_moneda) == 1 and list(por_moneda.keys()) == ["Sin moneda"]:
-            lineas.append(f"{formato.EMOJI_BALANCE} Balance: **{formato.fmt_moneda(balance.get('neto', 0), signo=True)}**")
+            lineas.append(f"{formato.EMOJI_BALANCE} Balance del mes: **{formato.fmt_moneda(balance.get('neto', 0), signo=True)}**")
         elif por_moneda:
             for abrev, datos in por_moneda.items():
                 simbolo = datos.get("simbolo", "$")
                 neto = datos["ingresos"] - datos["gastos"]
                 lineas.append(
-                    f"{formato.EMOJI_BALANCE} Balance: "
+                    f"{formato.EMOJI_BALANCE} Balance del mes: "
                     f"**{formato.fmt_moneda(neto, abrev=abrev, signo=True, simbolo=simbolo)}**"
                 )
         else:
