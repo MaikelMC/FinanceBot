@@ -207,6 +207,7 @@ REGLAS:
   * "gastos"/"ingresos"/"transacciones": pedir ver la lista de movimientos.
 - Estas consultas de subconsulta NO son ayuda_uso: el usuario pregunta por SUS datos, no por cómo usar el bot. NUNCA inventes cifras en "respuesta" para estas consultas: el sistema calculará los valores reales; deja "respuesta" en null y solo clasifica.
 - El campo "fecha" para períodos usa solo palabras: "hoy", "ayer", "anteayer", "esta semana", "este mes" u otro período que mencione el usuario, o null si no menciona ninguno.
+- Para "registrar": además de clasificar con "categoria" (usando la lista genérica), escribe en "categoria_sugerida" un NOMBRE CORTO, específico y con sentido en español de la categoría de la operación (ej: "Café", "Farmacia", "Alquiler", "Netflix", "Taxi", "Barbería", "Gimnasio"). Si el usuario menciona su propia etiqueta (ej: "gasté 200 en barbería"), usa esa palabra exacta (ej: "Barbería"). NO uses los nombres genéricos de la lista para "categoria_sugerida", y NO inventes detalles: usa solo lo que indica la descripción. Para el resto de intenciones, deja "categoria_sugerida" en null.
 
 JSON DE SALIDA:
 {
@@ -216,6 +217,7 @@ JSON DE SALIDA:
   "cantidad": numero | null,
   "descripcion": "texto | null",
   "categoria": "comida|transporte|salario|entretenimiento|servicios|salud|educacion|ropa|hogar|transporte|otros|null",
+  "categoria_sugerida": "nombre corto y con sentido de la categoría (solo para 'registrar') | null",
   "nombre": "nombre propio del presupuesto | null",
   "fecha": "YYYY-MM-DD | hoy | ayer | null",
   "moneda": "codigo_moneda | null",
@@ -282,6 +284,7 @@ _RESULTADO_VACIO: Dict[str, Any] = {
     "cantidad": None,
     "descripcion": None,
     "categoria": None,
+    "categoria_sugerida": None,
     "fecha": None,
     "moneda": None,
     "accion_mod": None,
@@ -373,6 +376,10 @@ def _validar_resultado(datos: dict) -> dict:
     categoria = datos.get("categoria")
     if categoria and isinstance(categoria, str):
         resultado["categoria"] = categoria.strip()
+
+    categoria_sugerida = datos.get("categoria_sugerida")
+    if categoria_sugerida and isinstance(categoria_sugerida, str):
+        resultado["categoria_sugerida"] = categoria_sugerida.strip()
 
     nombre = datos.get("nombre")
     if nombre and isinstance(nombre, str):

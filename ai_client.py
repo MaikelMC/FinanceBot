@@ -188,11 +188,12 @@ class AIResponder:
 
         try:
             from knowledge import _procesar_gasto, _procesar_ingreso
+            categoria_sugerida = resultado.get("categoria_sugerida")
 
             if tipo == "gasto":
-                return _procesar_gasto(mensaje, usuario, moneda=moneda_obj), None
+                return _procesar_gasto(mensaje, usuario, moneda=moneda_obj, categoria_sugerida=categoria_sugerida), None
             elif tipo == "ingreso":
-                return _procesar_ingreso(mensaje, usuario, moneda=moneda_obj), None
+                return _procesar_ingreso(mensaje, usuario, moneda=moneda_obj, categoria_sugerida=categoria_sugerida), None
             else:
                 # No se pudo determinar el tipo, preguntar
                 texto = (

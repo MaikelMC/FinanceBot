@@ -96,23 +96,12 @@ def _detectar_presupuesto_en_gasto(mensaje: str, usuario: Dict[str, Any]) -> Opt
     return None
 
 
-def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None) -> str:
+def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None,
+                    categoria_sugerida: Optional[str] = None) -> str:
     """Procesa una transacción de gasto."""
     cantidad = None
-    categoria = None
 
     cantidad = _parsear_cantidad(mensaje)
-
-    categorias_gastos = ["comida", "supermercado", "restaurante", "desayuno", "almuerzo", "cena",
-                         "transporte", "gasolina", "servicio", "hogar", "utiles"]
-
-    for cat in categorias_gastos:
-        if cat in mensaje.lower():
-            categoria = cat
-            break
-
-    if not categoria:
-        categoria = "otros"
 
     if not cantidad:
         return "No pude entender la cantidad en tu gasto. ¿Podrías especificar el monto?"
@@ -132,19 +121,11 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                     break
         if presupuesto:
             categoria_id = presupuesto["categoria_id"]
-            categoria = presupuesto.get("categoria_nombre") or presupuesto.get("nombre") or categoria
+            categoria = presupuesto.get("categoria_nombre") or presupuesto.get("nombre") or "otros"
         else:
-            categorias = database.obtener_categorias(usuario["id"], "gastos")
-            categoria_id = None
-
-            for cat in categorias:
-                if cat["nombre"].lower() == categoria.lower():
-                    categoria_id = cat["id"]
-                    break
-
-            if not categoria_id:
-                categoria_info = database.crear_categoria(usuario["id"], categoria, "gastos")
-                categoria_id = categoria_info["id"]
+            categoria, categoria_id = _categorizar_operacion(usuario, mensaje, "gasto", categoria_sugerida)
+            if categoria_id is None:
+                raise Exception(f"No se pudo crear/asociar la categoría '{categoria}'")
 
         gastado_antes = presupuesto.get("cantidad_gastada", 0) if presupuesto else 0
         database.agregar_transaccion(usuario["id"], categoria_id, "gasto", cantidad,
@@ -198,26 +179,15 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
         return f"✅ Gasto registrado: {simbolo}{cantidad:.2f}{nombre_moneda} en '{categoria}'"
     except Exception as e:
         logger.error("Error al procesar gasto: %s", e)
-        return f"❌ Ocurrió un error al registrar tu gasto: {cantidad:.2f} en '{categoria}'. Por favor, inténtalo de nuevo."
+        return f"❌ Ocurrió un error al registrar tu gasto: {cantidad:.2f}. Por favor, inténtalo de nuevo."
 
 
-def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None) -> str:
+def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None,
+                      categoria_sugerida: Optional[str] = None) -> str:
     """Procesa una transacción de ingreso."""
     cantidad = None
-    categoria = None
 
     cantidad = _parsear_cantidad(mensaje)
-
-    categorias_ingresos = ["salario", "remuneración", "pago", "bonus", "bonificación", "intereses",
-                           "dividendos", "regalo", "herencia", "ventas"]
-
-    for cat in categorias_ingresos:
-        if cat in mensaje.lower():
-            categoria = cat
-            break
-
-    if not categoria:
-        categoria = "otros ingresos"
 
     if not cantidad:
         return "No pude entender la cantidad en tu ingreso. ¿Podrías especificar el monto?"
@@ -225,17 +195,9 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Di
     moneda_id = moneda["id"] if moneda else None
 
     try:
-        categorias = database.obtener_categorias(usuario["id"], "ingresos")
-        categoria_id = None
-
-        for cat in categorias:
-            if cat["nombre"].lower() == categoria.lower():
-                categoria_id = cat["id"]
-                break
-
-        if not categoria_id:
-            categoria_info = database.crear_categoria(usuario["id"], categoria, "ingresos")
-            categoria_id = categoria_info["id"]
+        categoria, categoria_id = _categorizar_operacion(usuario, mensaje, "ingreso", categoria_sugerida)
+        if categoria_id is None:
+            raise Exception(f"No se pudo crear/asociar la categoría '{categoria}'")
 
         database.agregar_transaccion(usuario["id"], categoria_id, "ingreso", cantidad,
                                    mensaje, moneda_id=moneda_id)
@@ -245,7 +207,7 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Di
         return f"✅ Ingreso registrado: {simbolo}{cantidad:.2f}{nombre_moneda} de '{categoria}'"
     except Exception as e:
         logger.error("Error al procesar ingreso: %s", e)
-        return f"❌ Ocurrió un error al registrar tu ingreso: {cantidad:.2f} de '{categoria}'. Por favor, inténtalo de nuevo."
+        return f"❌ Ocurrió un error al registrar tu ingreso: {cantidad:.2f}. Por favor, inténtalo de nuevo."
 
 
 def _procesar_balance(usuario: Dict[str, Any]) -> str:
@@ -1135,57 +1097,145 @@ def _detectar_tipo_en_texto(texto: str) -> Optional[str]:
     return None
 
 
+_GRUPOS_GASTO = {
+    "comida": ["comida", "comer", "almuerzo", "cena", "desayuno", "restaurante",
+               "restaurant", "mcdo", "mcdonald", "burger", "pizza", "supermercado",
+               "super", "mercado", "almacén", "almacen"],
+    "ocio": ["ocio", "entretenimiento", "diversión", "diversion", "juego",
+            "juegos", "cinema", "cine", "teatro", "concierto", "música",
+            "musica", "netflix", "spotify", "streaming", "cerveza", "cervezas",
+            "bar", "birra", "alcohol", "trago", "tragos", "copa", "copas",
+            "fiesta", "party", "rumba", "disco"],
+    "transporte": ["transporte", "gasolina", "uber", "taxi", "bus", "peaje",
+                  "estacionamiento", "parking", "mecánico", "mekaniko",
+                  "combustible", "nafta", "garaje"],
+    "servicio": ["servicio", "servicios", "luz", "agua", "internet", "teléfono",
+                "telefono", "cable", "electricidad"],
+    "hogar": ["hogar", "casa", "alquiler", "renta", "hipoteca", "mantenimiento",
+             "reparación", "reparacion", "mueble"],
+    "salud": ["salud", "médico", "medico", "farmacia", "medicina", "doctor",
+             "hospital", "clínica", "clinica", "dentista"],
+    "educación": ["educación", "educacion", "curso", "clase", "universidad",
+                 "colegio", "escuela", "libro", "libros", "uteniles", "útiles"],
+    "ropa": ["ropa", "vestido", "camisa", "pantalón", "zapato", "calzado",
+            "tienda"],
+    "tecnología": ["tecnología", "tecnologia", "computadora", "celular",
+                  "teléfono", "telefono", "electrónica", "electronica", "equipo"],
+    "suscripción": ["suscripción", "suscripcion", "mensualidad", "abono"],
+}
+
+_GRUPOS_INGRESO = {
+    "salario": ["salario", "sueldo", "remuneración", "remuneracion", "pago",
+               "nómina", "nomina"],
+    "bonus": ["bonus", "bono", "bonificación", "bonificacion", "prima",
+             "comisión", "comision"],
+    "inversiones": ["inversión", "inversion", "inversiones", "dividendos",
+                  "intereses", "bitcoin", "crypto", "staking", "acciones"],
+    "regalos": ["regalo", "regalos", "herencia", "donación", "donacion"],
+    "ventas": ["venta", "ventas", "vendí", "vendi", "cobro"],
+}
+
+
 def _detectar_categoria_en_texto(texto: str, tipo: str) -> str:
     """Detecta la categoría de un fragmento de texto."""
     t = texto.lower()
 
     if tipo == "gasto":
-        cats = {
-            "comida": ["comida", "comer", "almuerzo", "cena", "desayuno", "restaurante",
-                       "restaurant", "mcdo", "mcdonald", "burger", "pizza", "supermercado",
-                       "super", "mercado", "almacén", "almacen"],
-            "ocio": ["ocio", "entretenimiento", "diversión", "diversion", "juego",
-                    "juegos", "cinema", "cine", "teatro", "concierto", "música",
-                    "musica", "netflix", "spotify", "streaming", "cerveza", "cervezas",
-                    "bar", "birra", "alcohol", "trago", "tragos", "copa", "copas",
-                    "fiesta", "party", "rumba", "disco"],
-            "transporte": ["transporte", "gasolina", "uber", "taxi", "bus", "peaje",
-                          "estacionamiento", "parking", "mecánico", "mekaniko",
-                          "combustible", "nafta", "garaje"],
-            "servicio": ["servicio", "servicios", "luz", "agua", "internet", "teléfono",
-                        "telefono", "cable", "electricidad"],
-            "hogar": ["hogar", "casa", "alquiler", "renta", "hipoteca", "mantenimiento",
-                     "reparación", "reparacion", "mueble"],
-            "salud": ["salud", "médico", "medico", "farmacia", "medicina", "doctor",
-                     "hospital", "clínica", "clinica", "dentista"],
-            "educación": ["educación", "educacion", "curso", "clase", "universidad",
-                         "colegio", "escuela", "libro", "libros", "uteniles", "útiles"],
-            "ropa": ["ropa", "vestido", "camisa", "pantalón", "zapato", "calzado",
-                    "tienda"],
-            "tecnología": ["tecnología", "tecnologia", "computadora", "celular",
-                          "teléfono", "telefono", "electrónica", "electronica", "equipo"],
-            "suscripción": ["suscripción", "suscripcion", "mensualidad", "abono"],
-        }
-        for cat, keywords in cats.items():
+        for cat, keywords in _GRUPOS_GASTO.items():
             if any(re.search(r'\b' + re.escape(kw) + r'\b', t) for kw in keywords):
                 return cat
 
     elif tipo == "ingreso":
-        cats = {
-            "salario": ["salario", "sueldo", "remuneración", "remuneracion", "pago",
-                       "nómina", "nomina"],
-            "bonus": ["bonus", "bono", "bonificación", "bonificacion", "prima",
-                     "comisión", "comision"],
-            "inversiones": ["inversión", "inversion", "inversiones", "dividendos",
-                          "intereses", "bitcoin", "crypto", "staking", "acciones"],
-            "regalos": ["regalo", "regalos", "herencia", "donación", "donacion"],
-            "ventas": ["venta", "ventas", "vendí", "vendi", "cobro"],
-        }
-        for cat, keywords in cats.items():
+        for cat, keywords in _GRUPOS_INGRESO.items():
             if any(re.search(r'\b' + re.escape(kw) + r'\b', t) for kw in keywords):
                 return cat
 
     return "otros"
+
+
+def _limpiar_nombre_categoria(nombre: Optional[str]) -> str:
+    """Limpia un nombre de categoría: sin emojis/símbolos, capitalizado y corto."""
+    n = (nombre or "").strip()
+    n = re.sub(r'[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9#& ]', ' ', n)
+    n = re.sub(r'\s+', ' ', n).strip()
+    if not n:
+        return ""
+    n = n[:40].strip()
+    return " ".join(w.capitalize() for w in n.split())
+
+
+def _grupo_de_nombre(nombre: str, tipo: str) -> Optional[str]:
+    """Devuelve el grupo de sinónimos al que pertenece un nombre de categoría."""
+    n = _normalizar_texto(nombre)
+    mapa = _GRUPOS_GASTO if tipo == "gastos" else _GRUPOS_INGRESO
+    for grupo, keywords in mapa.items():
+        for kw in keywords:
+            if kw in n:
+                return grupo
+    return None
+
+
+def _buscar_categoria_existente(usuario: Dict[str, Any], tipo: str, texto: str,
+                                candidato: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Busca una categoría existente del usuario que encaje semánticamente con la operación.
+
+    Compara el nombre del candidato, las palabras del texto y el grupo de sinónimos
+    para asociar nuevas operaciones a categorías ya creadas."""
+    categorias = database.obtener_categorias(usuario["id"], tipo)
+    if not categorias:
+        return None
+    t = _normalizar_texto(texto)
+    cand = _normalizar_texto(candidato) if candidato else ""
+    grupo_texto = _grupo_de_nombre(t, tipo)
+    mejor = None
+    mejor_score = 0
+    for cat in categorias:
+        norm = _normalizar_texto(cat.get("nombre") or "")
+        if not norm:
+            continue
+        score = 0
+        if cand and cand == norm:
+            score += 4
+        elif cand and (cand in norm or norm in cand):
+            score += 2
+        for p in (p for p in norm.split() if len(p) > 2):
+            if p in t:
+                score += 2
+        grupo_cat = _grupo_de_nombre(norm, tipo)
+        if grupo_cat and grupo_cat == grupo_texto:
+            score += 2
+        if score > mejor_score:
+            mejor_score = score
+            mejor = cat
+    return mejor if mejor_score >= 2 else None
+
+
+def _categorizar_operacion(usuario: Dict[str, Any], texto: str, tipo: str,
+                           candidato_ai: Optional[str] = None) -> tuple:
+    """Determina la categoría de una operación.
+
+    Reutiliza una categoría existente si encaja semánticamente; si no, crea una
+    nueva con un nombre con sentido (priorizando la sugerencia de la IA)."""
+    tipo_cat = "ingresos" if tipo == "ingreso" else "gastos"
+
+    candidato = None
+    if candidato_ai and isinstance(candidato_ai, str):
+        candidato = _limpiar_nombre_categoria(candidato_ai)
+    if not candidato:
+        candidato = _limpiar_nombre_categoria(_detectar_categoria_en_texto(texto, tipo))
+    if not candidato or candidato == "Otros":
+        candidato = "Otros Ingresos" if tipo == "ingreso" else "Otros"
+
+    existente = _buscar_categoria_existente(usuario, tipo_cat, texto, candidato)
+    if existente:
+        return existente["nombre"], existente["id"]
+
+    try:
+        info = database.crear_categoria(usuario["id"], candidato, tipo_cat)
+        return candidato, info["id"]
+    except Exception as e:
+        logger.error("Error creando categoría '%s': %s", candidato, e)
+        return candidato, None
 
 
 def _extraer_descripcion_limpia(texto: str, cantidad_texto: str = "") -> str:
@@ -1342,17 +1392,10 @@ def _guardar_multi_transacciones(transacciones: List[Dict[str, Any]], usuario: D
     for t in transacciones:
         try:
             tipo_cat = "ingresos" if t["tipo"] == "ingreso" else "gastos"
-            categorias = database.obtener_categorias(usuario["id"], tipo_cat)
-            categoria_id = None
-
-            for cat in categorias:
-                if cat["nombre"].lower() == t["categoria"].lower():
-                    categoria_id = cat["id"]
-                    break
-
-            if not categoria_id:
-                cat_info = database.crear_categoria(usuario["id"], t["categoria"], tipo_cat)
-                categoria_id = cat_info["id"]
+            texto_oper = t.get("descripcion") or ""
+            categoria, categoria_id = _categorizar_operacion(usuario, texto_oper, t["tipo"], t.get("categoria"))
+            if categoria_id is None:
+                raise Exception(f"No se pudo crear/asociar la categoría '{categoria}'")
 
             moneda_id = t.get("moneda_id") or t.get("moneda", {}).get("id")
             database.agregar_transaccion(
