@@ -350,6 +350,7 @@ Menú registrado con `set_my_commands` (sugerencias al escribir `/`).
 | `/ingresos`  | `consultar_ingresos()`   | Ver últimos ingresos                       |
 | `/metas`     | `consultar_metas()`      | Ver metas de ahorro                        |
 | `/notificaciones` | `configurar_notificaciones()` | Alertas de presupuesto y resumen diario (21:30 hora de Cuba) |
+| `/exportar`  | `exportar_datos()`      | Exportar datos a Excel (.xlsx) o CSV con período configurable |
 | `/help`      | `consultar_comandos()`   | Lista de comandos y ejemplos               |
 | `/user`      | `consultar_usuario()`    | Info del usuario                           |
 | `/delete`    | `eliminar_historial()`   | Borrar todo el historial                   |

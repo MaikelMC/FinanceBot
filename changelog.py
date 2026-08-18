@@ -4,9 +4,20 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.9"
+VERSION_ACTUAL = "2.10"
 
 CHANGELOG = {
+    "2.10": {
+        "titulo": "📤 Exporta tus datos a Excel",
+        "mejoras": [
+            "Descargá tus movimientos como archivo Excel (.xlsx) listo para abrir y editar, con balance, movimientos y gastos por categoría",
+            "También podés exportar en formato CSV compatible con otras apps",
+            "Elegí el período: todo el historial, este mes o los últimos 30 días (también con /exportar 2026-07)",
+            "Con lenguaje natural: 'exporta mis datos del mes', 'descarga mi historial'",
+            "Si hay demasiados movimientos, se dividen automáticamente en varias hojas para no pasar los límites de Excel"
+        ],
+        "emoji": "📤"
+    },
     "2.9": {
         "titulo": "🔔 Notificaciones: alertas y resumen diario",
         "mejoras": [

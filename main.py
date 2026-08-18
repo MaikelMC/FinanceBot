@@ -22,13 +22,8 @@ import database
 from handlers import start, handle_message, error_handler
 from handlers import consultar_usuario, consultar_comandos, handle_callback_query, eliminar_historial, anuncio
 from handlers import configurar_notificaciones
-from handlers import (
-    consultar_categorias,
-    consultar_gastos,
-    consultar_ingresos,
-    consultar_metas,
-    consultar_resumen,
-)
+from handlers import consultar_categorias, consultar_gastos, consultar_ingresos, consultar_metas, consultar_resumen
+from handlers import exportar_datos
 import notificaciones
 
 logging.basicConfig(
@@ -45,6 +40,7 @@ COMANDOS_MENU = [
     BotCommand("ingresos", "Ver tus últimos ingresos"),
     BotCommand("metas", "Ver tus metas de ahorro"),
     BotCommand("notificaciones", "Alertas de presupuesto y resumen diario"),
+    BotCommand("exportar", "Exporta tus datos a Excel/CSV"),
     BotCommand("help", "Ver todos los comandos y ejemplos de uso"),
     BotCommand("user", "Ver tu información de usuario"),
     BotCommand("delete", "Borrar todo el historial de transacciones"),
@@ -83,6 +79,7 @@ def _build_app():
     app.add_handler(CommandHandler("metas", consultar_metas))
     app.add_handler(CommandHandler("resumen", consultar_resumen))
     app.add_handler(CommandHandler("notificaciones", configurar_notificaciones))
+    app.add_handler(CommandHandler("exportar", exportar_datos))
 
     # === JOB DE RESÚMENES DIARIOS (sweep cada 60s) ===
     if app.job_queue is not None:

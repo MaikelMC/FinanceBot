@@ -4,6 +4,7 @@ Maneja comandos y mensajes en lenguaje natural para gestión financiera.
 """
 
 import logging
+import os
 from typing import Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
@@ -13,6 +14,7 @@ from telegram.helpers import escape_markdown
 
 import config
 import database
+import exportador
 import knowledge
 import ai_client
 import changelog
@@ -326,6 +328,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             botones_pendiente = _crear_botones_pendiente(pendiente, usuario_id)
             if botones_pendiente:
                 reply_markup = botones_pendiente
+
+        # Exportación por lenguaje natural: enviar el archivo directamente
+        if pendiente and pendiente.get("accion") == "exportar":
+            context.user_data.pop("transaccion_pendiente", None)
+            await msg.reply_text(respuesta, parse_mode="Markdown", reply_markup=_crear_teclado_permanente())
+            await _enviar_exportacion(msg, context, usuario,
+                                      pendiente.get("formato"), pendiente.get("periodo"))
+            return
+
         await msg.reply_text(respuesta, parse_mode="Markdown", reply_markup=reply_markup)
     except Exception as e:
         logger.error("Error procesando mensaje de %s: %s", user.first_name, e)
@@ -494,6 +505,104 @@ async def consultar_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error("Error en /resumen: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al generar tu resumen.")
+
+
+def _parsear_args_exportacion(args: list) -> tuple:
+    """Interpreta los argumentos de /exportar: (formato, periodo)."""
+    formato = "xlsx"
+    periodo = "todo"
+    valores_periodo = {"todo", "mes", "30", "30d", "mensual"}
+    for arg in args:
+        a = arg.strip().lower()
+        if a in ("xlsx", "excel", "csv"):
+            formato = a if a != "excel" else "xlsx"
+        elif a in valores_periodo:
+            periodo = "mes" if a in ("mes", "mensual") else ("30" if a in ("30", "30d") else "todo")
+        elif len(a) == 7 and a[4] == "-" and a[:4].isdigit() and a[5:].isdigit():
+            periodo = a
+    return formato, periodo
+
+
+async def _enviar_exportacion(msg, context: ContextTypes.DEFAULT_TYPE, usuario: dict,
+                              formato: Optional[str] = "xlsx", periodo: Optional[str] = "todo") -> None:
+    """Genera la exportación (XLSX/CSV) y la envía como documento(s)."""
+    rutas = []
+    try:
+        formato = (formato or "xlsx").lower()
+        periodo = (periodo or "todo").lower()
+        label, inicio, fin = exportador._resolver_periodo(periodo)
+
+        if inicio:
+            transacciones = database.obtener_transacciones_por_fecha(usuario["id"], inicio, fin)
+            balance = database.obtener_balance(usuario["id"], fecha_inicio=inicio)
+        else:
+            transacciones = database.obtener_transacciones(usuario["id"], limite=exportador.MAX_TRANSACCIONES)
+            balance = database.obtener_balance(usuario["id"])
+
+        monedas = database.obtener_monedas(usuario["id"])
+        IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+
+        if formato == "csv":
+            rutas = exportador.generar_csv_partes(usuario["id"], label, transacciones, monedas, str(IMAGES_DIR))
+            for ruta in rutas:
+                with open(ruta, "rb") as f:
+                    await context.bot.send_document(
+                        chat_id=msg.chat_id,
+                        document=f,
+                        filename=os.path.basename(ruta),
+                    )
+        else:
+            ruta = exportador.generar_xlsx(
+                usuario["id"], usuario.get("nombre") or "", label, balance,
+                transacciones, monedas, str(IMAGES_DIR),
+            )
+            rutas = [ruta]
+            with open(ruta, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=msg.chat_id,
+                    document=f,
+                    filename=os.path.basename(ruta),
+                )
+    except Exception as e:
+        logger.error("Error generando exportación para %s: %s", usuario.get("id"), e)
+        await context.bot.send_message(
+            chat_id=msg.chat_id,
+            text="❌ No pude generar tu exportación. Intenta de nuevo en un momento.",
+            reply_markup=_crear_teclado_permanente(),
+        )
+    finally:
+        for ruta in rutas:
+            try:
+                os.remove(ruta)
+            except OSError:
+                pass
+
+
+async def exportar_datos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja el comando /exportar (exporta datos a Excel/CSV)."""
+    try:
+        usuario = _obtener_usuario_contexto(update, context)
+        args = context.args or []
+        if args:
+            formato, periodo = _parsear_args_exportacion(args)
+            await update.message.reply_text("📤 **Generando tu exportación...**", parse_mode="Markdown")
+            await _enviar_exportacion(update.message, context, usuario, formato, periodo)
+            return
+        botones = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📊 Excel (.xlsx)", callback_data="exp_fmt_xlsx"),
+                InlineKeyboardButton("📄 CSV", callback_data="exp_fmt_csv"),
+            ],
+            [InlineKeyboardButton("❌ Cancelar", callback_data="exp_cancel")],
+        ])
+        await update.message.reply_text(
+            "📤 **¿En qué formato quieres exportar tus datos?**",
+            parse_mode="Markdown",
+            reply_markup=botones,
+        )
+    except Exception as e:
+        logger.error("Error en /exportar: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error al procesar tu solicitud.")
 
 
 async def eliminar_historial(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1197,6 +1306,37 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         elif query.data == "anuncio_cancelar":
             context.user_data.pop("anuncio_pendiente", None)
             await _responder_editando(query, "❌ Anuncio cancelado.")
+
+        # === CALLBACKS DE EXPORTACIÓN ===
+        elif query.data in ("exp_fmt_xlsx", "exp_fmt_csv"):
+            formato = "xlsx" if query.data == "exp_fmt_xlsx" else "csv"
+            context.user_data["exp_formato"] = formato
+            etiqueta = "Excel (.xlsx)" if formato == "xlsx" else "CSV"
+            botones_periodo = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗓 Todo el historial", callback_data="exp_per_todo")],
+                [InlineKeyboardButton("🗓 Este mes", callback_data="exp_per_mes")],
+                [InlineKeyboardButton("🗓 Últimos 30 días", callback_data="exp_per_30")],
+                [InlineKeyboardButton("❌ Cancelar", callback_data="exp_cancel")],
+            ])
+            await _responder_editando(
+                query,
+                f"📤 Formato elegido: **{etiqueta}**\n\n¿Qué período quieres exportar?",
+                botones_periodo,
+            )
+
+        elif query.data in ("exp_per_todo", "exp_per_mes", "exp_per_30"):
+            formato = context.user_data.get("exp_formato", "xlsx")
+            periodo = {"exp_per_todo": "todo", "exp_per_mes": "mes", "exp_per_30": "30"}[query.data]
+            context.user_data.pop("exp_formato", None)
+            await _responder_editando(
+                query,
+                "📤 **Generando tu exportación...**\n\nPuede tardar unos segundos.",
+            )
+            await _enviar_exportacion(query.message, context, usuario, formato, periodo)
+
+        elif query.data == "exp_cancel":
+            context.user_data.pop("exp_formato", None)
+            await _responder_editando(query, "❌ Exportación cancelada.")
 
     except Exception as e:
         logger.error("Error en callback query: %s", e)

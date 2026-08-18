@@ -33,7 +33,22 @@ def _subconsulta_gasto_ingreso(texto: str) -> str:
         return "ingresos"
     return "transacciones"
 
+
+def _build_exportar(mensaje: str) -> Dict[str, Any]:
+    """Construye el resultado del fast-path para exportación."""
+    from exportador import _detectar_formato, mapear_periodo_ia
+    return {
+        "intencion": "exportar",
+        "formato": _detectar_formato(mensaje),
+        "fecha": mapear_periodo_ia(None, mensaje),
+        "confianza": 0.9,
+    }
+
+
 _FAST_PATTERNS = [
+    # --- EXPORTAR ---
+    (re.compile(r'^\s*(?:exporta|exportar|descarga|descargar)\b.*', re.IGNORECASE),
+     lambda m: _build_exportar(m.string)),
     # --- REGISTRO: gasto explícito ---
     (re.compile(r'(?:gast[ée]?|compr[ée]?|pagu?[ée]?|cost[óo]|invert[ií])\s+\$?([\d,.]+)\s+(?:en\s+|para\s+)?(.+)', re.IGNORECASE),
      lambda m: {"intencion": "registrar", "tipo": "gasto", "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.98}),
@@ -208,10 +223,11 @@ REGLAS:
 - Estas consultas de subconsulta NO son ayuda_uso: el usuario pregunta por SUS datos, no por cómo usar el bot. NUNCA inventes cifras en "respuesta" para estas consultas: el sistema calculará los valores reales; deja "respuesta" en null y solo clasifica.
 - El campo "fecha" para períodos usa solo palabras: "hoy", "ayer", "anteayer", "esta semana", "este mes" u otro período que mencione el usuario, o null si no menciona ninguno.
 - Para "registrar": además de clasificar con "categoria" (usando la lista genérica), escribe en "categoria_sugerida" un NOMBRE CORTO, específico y con sentido en español de la categoría de la operación (ej: "Café", "Farmacia", "Alquiler", "Netflix", "Taxi", "Barbería", "Gimnasio"). Si el usuario menciona su propia etiqueta (ej: "gasté 200 en barbería"), usa esa palabra exacta (ej: "Barbería"). NO uses los nombres genéricos de la lista para "categoria_sugerida", y NO inventes detalles: usa solo lo que indica la descripción. Para el resto de intenciones, deja "categoria_sugerida" en null.
+- Para "exportar": el usuario quiere descargar/exportar sus datos (ej: "exporta mis movimientos", "descarga mi mes", "dame el excel de julio"). Pon el período en "fecha" ("todo" si no especifica, "este mes", "últimos 30 días", "2026-07") y el formato en "formato" ("xlsx" o "excel" por defecto, "csv" solo si el usuario lo menciona). NO inventes cifras: el sistema generará el archivo.
 
 JSON DE SALIDA:
 {
-  "intencion": "registrar|consultar|configurar_presupuesto|configurar_ahorro|modificar|eliminar|analizar_por_fecha|ayuda_uso|general",
+  "intencion": "registrar|consultar|configurar_presupuesto|configurar_ahorro|modificar|eliminar|analizar_por_fecha|ayuda_uso|general|exportar",
   "subconsulta": "balance|transacciones|gastos|ingresos|presupuesto|presupuesto_especifico|gastos_por_presupuestos|mayor_gasto|gastos_por_fecha|categorias|null",
   "tipo": "gasto|ingreso|null",
   "cantidad": numero | null,
@@ -219,7 +235,7 @@ JSON DE SALIDA:
   "categoria": "comida|transporte|salario|entretenimiento|servicios|salud|educacion|ropa|hogar|transporte|otros|null",
   "categoria_sugerida": "nombre corto y con sentido de la categoría (solo para 'registrar') | null",
   "nombre": "nombre propio del presupuesto | null",
-  "fecha": "YYYY-MM-DD | hoy | ayer | null",
+  "fecha": "YYYY-MM-DD | hoy | ayer | todo | este mes | últimos 30 días | null",
   "moneda": "codigo_moneda | null",
   "accion_mod": "cambiar_tipo|cambiar_monto|cambiar_descripcion|cambiar_categoria|cambiar_fecha|null",
   "referencia": "ultimo_gasto|ultimo_ingreso|monto_X|texto|null",
@@ -228,6 +244,7 @@ JSON DE SALIDA:
   "eliminar_objeto": "transaccion|presupuesto|null",
   "es_consulta_ayuda": true | false,
   "tipo_ayuda": "registrar_gasto|registrar_ingreso|ver_balance|ver_transacciones|presupuesto|ahorro|modificar|eliminar|comandos|general|null",
+  "formato": "xlsx|csv|null",
   "respuesta": "Texto amigable de respuesta al usuario"
 }"""
 
@@ -297,6 +314,7 @@ _RESULTADO_VACIO: Dict[str, Any] = {
     "modo_presupuesto": None,
     "eliminar_objeto": None,
     "nombre": None,
+    "formato": None,
 }
 
 
@@ -330,7 +348,7 @@ def _extraer_json(texto: str) -> Optional[Dict[str, Any]]:
 
 _INTENCIONES_VALIDAS = {
     "registrar", "consultar", "configurar_presupuesto", "configurar_ahorro",
-    "modificar", "eliminar", "analizar_por_fecha", "ayuda_uso", "general",
+    "modificar", "eliminar", "analizar_por_fecha", "ayuda_uso", "general", "exportar",
 }
 
 _TIPOS_VALIDOS = {"gasto", "ingreso", None}
@@ -392,6 +410,14 @@ def _validar_resultado(datos: dict) -> dict:
     moneda = datos.get("moneda")
     if moneda and isinstance(moneda, str):
         resultado["moneda"] = moneda.strip()
+
+    formato = datos.get("formato")
+    if formato and isinstance(formato, str):
+        fmt = formato.strip().lower()
+        if "csv" in fmt:
+            resultado["formato"] = "csv"
+        elif "xls" in fmt or "excel" in fmt:
+            resultado["formato"] = "xlsx"
 
     accion_mod = datos.get("accion_mod")
     if accion_mod in ("cambiar_tipo", "cambiar_monto", "cambiar_descripcion", "cambiar_categoria", "cambiar_fecha"):

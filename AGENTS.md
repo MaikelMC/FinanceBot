@@ -9,7 +9,7 @@ python main.py
 
 **Create virtual environment:**
 ```bash
-python -m venv venv && venv\\Scripts\\activate && pip install python-telegram-bot python-dotenv mistralai
+python -m venv venv && venv\\Scripts\\activate && pip install python-telegram-bot python-dotenv mistralai openpyxl
 ```
 
 ## Architecture & Entry Points
@@ -20,6 +20,7 @@ python -m venv venv && venv\\Scripts\\activate && pip install python-telegram-bo
 - `knowledge.py` - AI processing for Spanish messages
 - `ai_client.py` - AI client integration
 - `notificaciones.py` - Alertas de presupuesto (80/100/125%), resumen diario, sweep y catch-up
+- `exportador.py` - Exportación a Excel (.xlsx) y CSV con paginación por límite de filas
 
 **Database schema:**
 - SQLite at `data/finanzas.db`
@@ -98,6 +99,14 @@ python -c "import config, database, knowledge; config.validate_config(); databas
 - Query `database.obtener_balance(usuario_id)`
 - Aggregates ingresos/gastos/neto
 
+**Export data (v2.10):**
+- `/exportar` sin args → menú formato (Excel/CSV) → menú período (todo/mes/30 días); args: `/exportar xlsx todo|mes|YYYY-MM`, `/exportar csv 2026-07`
+- Flujo NL: intent `exportar` → `ai_client._procesar_exportar` devuelve pendiente `{"accion": "exportar", "formato", "periodo"}` → `handlers.handle_message` llama `_enviar_exportacion`
+- `_enviar_exportacion`: `_resolver_periodo(periodo)` → `obtener_transacciones[_por_fecha]` + `obtener_balance` + `obtener_monedas` → `exportador.generar_xlsx` (hojas Resumen/Movimientos/Gastos por categoría, paginada cada 100k filas) o `generar_csv_partes` (utf-8-sig, `_parte_N.csv`) → `send_document` → borra archivos en `try/finally`
+- Callbacks: `exp_fmt_xlsx`/`exp_fmt_csv` → `exp_per_todo`/`exp_per_mes`/`exp_per_30`; formato temporal en `context.user_data["exp_formato"]`
+- `requirements.txt` incluye `openpyxl>=3.1.5`; `exportador.py` es pura Python (OK en Render)
+- Límite: no conversión de monedas; "este mes" usa fecha UTC del servidor; gsheets lento para "todo" con mucho historial
+
 **Notifications (v2.9):**
 - `/notificaciones` → `configurar_notificaciones()` renders menu; callbacks `notif_*` toggle resumen/alerts
 - Hora y zona del resumen **fijas** para todos: 21:30 America/Havana (config.HORA_RESUMEN_DEFAULT / DEFAULT_TIMEZONE)
@@ -166,6 +175,7 @@ Single package structure with clear boundaries:
 - `knowledge.py` - AI processing (ES)
 - `ai_client.py` - AI integration
 - `notificaciones.py` - Alerts + daily summary (sweep & catch-up)
+- `exportador.py` - Excel/CSV export + period resolution
 - `setup_environment.py` - Dev environment setup
 
 All dependencies in virtual environment - no global installs.

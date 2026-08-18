@@ -79,6 +79,10 @@ class AIResponder:
         if intencion == "eliminar":
             return self._procesar_eliminacion(resultado, usuario, mensaje), None
 
+        # --- EXPORTAR ---
+        if intencion == "exportar":
+            return self._procesar_exportar(resultado, usuario, mensaje)
+
         # --- GENERAL / FALLBACK ---
         return self._procesar_general(resultado, usuario, mensaje), None
 
@@ -213,6 +217,26 @@ class AIResponder:
         except Exception as e:
             logger.error("Error registrando transacción: %s", e)
             return "❌ Ocurrió un error al registrar. Por favor, intenta de nuevo.", None
+
+    def _procesar_exportar(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> tuple:
+        """Procesa una solicitud de exportación de datos (XLSX/CSV)."""
+        try:
+            from exportador import _detectar_formato, mapear_periodo_ia
+        except Exception:
+            _detectar_formato, mapear_periodo_ia = None, None
+        formato = resultado.get("formato")
+        if not formato and _detectar_formato:
+            formato = _detectar_formato(mensaje)
+        formato = formato or "xlsx"
+        periodo = mapear_periodo_ia(resultado.get("fecha"), mensaje) if mapear_periodo_ia else "todo"
+        etiqueta = {
+            "xlsx": "Excel (.xlsx)",
+            "csv": "CSV",
+        }.get(formato, "Excel (.xlsx)")
+        return (
+            f"📤 Voy a exportar tus datos en **{etiqueta}**.\n\n"
+            "Dame un segundo mientras genero el archivo..."
+        ), {"accion": "exportar", "formato": formato, "periodo": periodo}
 
     def _procesar_consulta(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa una consulta del usuario."""
