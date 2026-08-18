@@ -318,6 +318,7 @@ class AIResponder:
                 _analizar_transacciones_por_fecha,
                 _procesar_presupuesto_especifico, _procesar_mayor_gasto,
                 _procesar_gastos_por_presupuestos, _procesar_gastos_por_fecha,
+                _procesar_metas_ahorro,
             )
 
             if subconsulta == "balance":
@@ -340,6 +341,8 @@ class AIResponder:
                 return _procesar_gastos_por_presupuestos(usuario, mensaje)
             elif subconsulta == "gastos_por_fecha":
                 return _procesar_gastos_por_fecha(usuario, mensaje)
+            elif subconsulta == "metas":
+                return _procesar_metas_ahorro(usuario)
             else:
                 # Intentar análisis por fecha si hay contexto temporal
                 respuesta_fecha = _analizar_transacciones_por_fecha(usuario, mensaje)
@@ -656,6 +659,28 @@ class AIResponder:
         return head
 
     @staticmethod
+    def _extraer_proposito_ahorro(mensaje: str) -> Optional[str]:
+        """Extrae el OBJETIVO de una meta de ahorro (lo que va tras 'para').
+
+        Ej: "quiero ahorrar 5000 para vacaciones" -> "vacaciones".
+        Si tras "para" solo hay una referencia ("eso", "ello"), intenta el tema
+        mencionado antes del monto.
+        """
+        if not mensaje:
+            return None
+        m = re.search(r'\bpara\s+(.+)', mensaje, re.IGNORECASE)
+        if not m:
+            return None
+        prop = m.group(1).strip().strip(' .,;:')
+        prop = re.sub(r'^(?:el|la|un|una|unos|unas|mi|mis|este|esta|los|las|eso|ello)\s+',
+                      '', prop, flags=re.IGNORECASE)
+        prop = re.sub(r'\s+', ' ', prop).strip()
+        prop = re.split(r'[,;:]', prop)[0].strip()
+        if AIResponder._nombre_presupuesto_valido(prop):
+            return prop
+        return AIResponder._extraer_tema_presupuesto(mensaje)
+
+    @staticmethod
     def _detectar_modo_presupuesto(mensaje: str) -> str:
         """Detecta si el mensaje pide sumar o reemplazar un presupuesto (fallback sin IA)."""
         if re.search(r'\b(?:a[ñn]ade|agrega|suma|aumenta|incrementa|mete|pon[eí])\b', mensaje, re.IGNORECASE):
@@ -665,7 +690,16 @@ class AIResponder:
     def _procesar_ahorro(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa la configuración de una meta de ahorro."""
         cantidad = resultado.get("cantidad")
-        descripcion = resultado.get("descripcion") or "meta general"
+        descripcion = (resultado.get("descripcion") or "").strip()
+
+        # Guarda: si el objetivo es un pronombre/referencia ("eso", "ello"...),
+        # re-derivar con el propósito tras "para" o el tema mencionado antes.
+        if not AIResponder._nombre_presupuesto_valido(descripcion):
+            descripcion = (
+                AIResponder._extraer_proposito_ahorro(mensaje)
+                or AIResponder._extraer_tema_presupuesto(mensaje)
+                or "meta general"
+            )
 
         if not cantidad or cantidad <= 0:
             try:

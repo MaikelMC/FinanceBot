@@ -4,9 +4,18 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.13.1"
+VERSION_ACTUAL = "2.13.2"
 
 CHANGELOG = {
+    "2.13.2": {
+        "titulo": "🎯 Consulta y creación de metas de ahorro corregidas",
+        "mejoras": [
+            "\"Ver mis ahorros\", \"revisar mis metas\" y \"cuánto llevo ahorrado\" ahora muestran tus metas de ahorro (antes saltaban a balance o presupuestos)",
+            "Al crear una meta, el objetivo ya no queda en pronombres como \"eso\" o \"ello\": se usa el propósito real (\"quiero ahorrar 5000 para vacaciones\" → \"vacaciones\")",
+            "Nueva subconsulta \"metas\" en el motor de intenciones (IA + regex) para que no se confunda con balance ni presupuestos"
+        ],
+        "emoji": "🎯"
+    },
     "2.13.1": {
         "titulo": "🏷️ Nombres de presupuesto más inteligentes",
         "mejoras": [

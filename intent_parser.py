@@ -109,6 +109,13 @@ _FAST_PATTERNS = [
     (re.compile(r'qu[eé]\s+(?:gast[eé]|compr[eé]|hice)\s+(?:hoy|ayer)', re.IGNORECASE),
      lambda m: {"intencion": "analizar_por_fecha", "confianza": 0.98}),
 
+    # --- CONSULTA: metas/ahorros/objetivos ---
+    # Va antes de balance/transacciones para que "cuánto tengo ahorrado" no sea balance
+    (re.compile(r'(?:ver|mostrar|listar|revisar|consultar)\s+(?:mis\s+)?(?:metas|metas\s+de\s+ahorro|ahorros|objetivos|ahorro)', re.IGNORECASE),
+     lambda m: {"intencion": "consultar", "subconsulta": "metas", "confianza": 0.99}),
+    (re.compile(r'(?:cu[áa]nto\s+(?:llevo|tengo|he|voy)\s+ahorrado|cu[áa]nto\s+he\s+ahorrado|c[oó]mo\s+va(?:n)?\s+(?:mi\s+)?(?:meta|metas|ahorro)|progreso\s+(?:de\s+)?(?:mi\s+)?(?:meta|ahorro))', re.IGNORECASE),
+     lambda m: {"intencion": "consultar", "subconsulta": "metas", "confianza": 0.99}),
+
     # --- CONSULTA: balance/saldo ---
     (re.compile(r'(?:cu[áa]nto\s+(?:tengo|dinero|plata|saldo)|(?:cu[áa]l\s+es\s+(?:mi\s+)?(?:balance|saldo))|ver\s+(?:balance|saldo|resumen))', re.IGNORECASE),
      lambda m: {"intencion": "consultar", "subconsulta": "balance", "confianza": 0.99}),
@@ -209,6 +216,7 @@ REGLAS:
 - La fecha debe ir en formato YYYY-MM-DD cuando sea explícita, o null si no se menciona.
 - Para "configurar_presupuesto": si el usuario quiere AÑADIR/SUMAR/AGREGAR un monto a un presupuesto existente (ej: "añade 500 al presupuesto de comida"), usa modo_presupuesto: "sumar". Si lo está definiendo o reemplazando (ej: "mi presupuesto para comida es 500"), usa modo_presupuesto: "reemplazar".
 - Para "configurar_presupuesto": el campo "nombre" es el nombre del presupuesto (puede diferir de la categoría). Debe ser una etiqueta CORTA y CONCRETA en español. NUNCA uses pronombres, demostrativos ni referencias ("ello", "eso", "esto", "este", "él", "ella", "lo", "comprarlo", etc.). Si el usuario describe el tema ANTES del monto y tras el monto solo aparece una referencia (ej: "quiero comprarme un cable nuevo para cargar mi teléfono, destinaré un presupuesto de 1000 cup para ello"), el nombre debe ser ESE TEMA, no el pronombre (ej: nombre: "cable de carga", categoria: "otros"). Si el usuario da una etiqueta propia concreta tras el monto (ej: "tengo un presupuesto de 1000 cup para barbería"), copia esa etiqueta en "nombre" (ej: "barbería"), aunque la categoría sea "otros".
+- Para "configurar_ahorro": el campo "descripcion" es el OBJETIVO de la meta, una etiqueta CORTA y CONCRETA en español (ej: "vacaciones", "un teléfono nuevo"). NUNCA uses pronombres ni referencias ("eso", "ello", "comprarlo", "lo"). Si tras el monto solo hay una referencia a un tema mencionado antes (ej: "quiero comprarme un teléfono nuevo, voy a ahorrar 5000 para eso"), usa ese tema como descripcion (ej: "teléfono"), no el pronombre.
 - Para "eliminar": si el usuario quiere borrar un PRESUPUESTO (ej: "elimina el presupuesto de comida"), usa eliminar_objeto: "presupuesto" y categoria: "comida". Para transacciones usa eliminar_objeto: "transaccion".
 - La respuesta debe ser en español neutro, amigable, con emojis y sin regionalismos.
 - Cuando el usuario haga una PREGUNTA general o pida un consejo financiero (no una operación de registrar/consultar/configurar), respóndele DIRECTAMENTE y con sustancia en el campo "respuesta" usando intencion "general" o "ayuda_uso". No devuelvas un menú genérico de comandos.
@@ -218,6 +226,7 @@ REGLAS:
   * "gastos_por_presupuestos": pregunta cuánto gastó en un período en relación a sus presupuestos (ej: "cuánto gasté ayer de mis presupuestos", "cuánto gasté esta semana de mis presupuestos"). Pon el período en "fecha".
   * "gastos_por_fecha": pregunta cuánto gastó o recibió en total en un período (ej: "cuánto gasté en total esta semana", "cuánto ingresé ayer"). Pon el período en "fecha".
   * "balance": pregunta por su saldo/balance/plata actual (ej: "cuánto tengo", "cuál es mi balance").
+  * "metas": pregunta por sus METAS DE AHORRO o el progreso de su ahorro (ej: "ver mis ahorros", "revisar mis metas", "cuánto llevo ahorrado", "cómo va mi meta de vacaciones"). NO es un balance ni un presupuesto.
   * "presupuesto": pregunta genérica por sus presupuestos ("ver mis presupuestos").
   * "gastos"/"ingresos"/"transacciones": pedir ver la lista de movimientos.
 - Estas consultas de subconsulta NO son ayuda_uso: el usuario pregunta por SUS datos, no por cómo usar el bot. NUNCA inventes cifras en "respuesta" para estas consultas: el sistema calculará los valores reales; deja "respuesta" en null y solo clasifica.
@@ -354,7 +363,8 @@ _INTENCIONES_VALIDAS = {
 _TIPOS_VALIDOS = {"gasto", "ingreso", None}
 
 _CONSULTAS_VALIDAS = {"balance", "transacciones", "gastos", "ingresos", "presupuesto", "categorias",
-                      "presupuesto_especifico", "gastos_por_presupuestos", "mayor_gasto", "gastos_por_fecha", None}
+                      "presupuesto_especifico", "gastos_por_presupuestos", "mayor_gasto", "gastos_por_fecha",
+                      "metas", None}
 
 
 def _validar_resultado(datos: dict) -> dict:
