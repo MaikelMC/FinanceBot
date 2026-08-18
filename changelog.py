@@ -4,9 +4,20 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.11"
+VERSION_ACTUAL = "2.12"
 
 CHANGELOG = {
+    "2.12": {
+        "titulo": "🎨 Mensajes rediseñados, más claros",
+        "mejoras": [
+            "Diseño unificado de mensajes: emojis semánticos, montos con separador de miles (1,500.00) y jerarquía clara",
+            "Balance y resumen mensual por moneda en formato tabular: 📈 ingresos · 📉 gastos → neto",
+            "Presupuestos con barra de progreso y porcentaje en una sola línea, con la abreviatura de la moneda",
+            "Alertas de presupuesto con un único emoji de aviso y el nombre del presupuesto en negrita",
+            "El bot que no entiende te muestra 3 ejemplos cortos y te deriva a /help"
+        ],
+        "emoji": "🎨"
+    },
     "2.11": {
         "titulo": "⚖️ Presupuestos ligados a tu balance real",
         "mejoras": [

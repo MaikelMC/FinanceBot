@@ -8,6 +8,7 @@ import re
 from typing import Dict, Any, Optional, Tuple
 
 import database
+import formato
 import intent_parser
 from config import AI_PROVIDER
 from telegram.helpers import escape_markdown
@@ -201,7 +202,8 @@ class AIResponder:
             else:
                 # No se pudo determinar el tipo, preguntar
                 texto = (
-                    f"Detecté un monto de **${cantidad:.2f}**{' en ' + descripcion if descripcion else ''}, "
+                    f"Detecté un monto de **{formato.fmt_moneda(cantidad)}**"
+                    f"{' en ' + descripcion if descripcion else ''}, "
                     f"pero no estoy seguro si es un **gasto** o un **ingreso**.\n\n"
                     f"¿Podrías confirmar con un botón?"
                 )
@@ -418,10 +420,12 @@ class AIResponder:
                         simbolo = moneda_obj.get("simbolo", "$")
                         abrev = moneda_obj["abreviatura"]
                         return (
-                            f"❌ **No puedes configurar un presupuesto de {simbolo}{total_objetivo:.2f} ({abrev}).**\n\n"
-                            f"Tu balance en {abrev} es **{simbolo}{disponible:.2f}** y ya tienes "
-                            f"**{simbolo}{comprometido:.2f}** en otros presupuestos, así que solo te quedan "
-                            f"**{simbolo}{max(libre, 0):.2f}** libres.\n\n"
+                            f"❌ **No puedes configurar un presupuesto de "
+                            f"{formato.fmt_moneda(total_objetivo, abrev=abrev, simbolo=simbolo)}.**\n\n"
+                            f"Tu balance en **{abrev}** es **{formato.fmt_moneda(disponible, abrev=abrev, simbolo=simbolo)}** "
+                            f"y ya tienes **{formato.fmt_moneda(comprometido, abrev=abrev, simbolo=simbolo)}** "
+                            f"en otros presupuestos, así que solo te quedan "
+                            f"**{formato.fmt_moneda(max(libre, 0), abrev=abrev, simbolo=simbolo)}** libres.\n\n"
                             "Ajusta el monto o registra más ingresos primero."
                         ), None
 
@@ -429,15 +433,19 @@ class AIResponder:
             total = presupuesto.get("cantidad_planejada", cantidad)
             label = presupuesto.get("nombre") or categoria
             simbolo = moneda_obj.get("simbolo", "$") if moneda_obj else "$"
-            nombre_moneda = f" ({moneda_obj['nombre']})" if moneda_obj else ""
+            abrev = moneda_obj["abreviatura"] if moneda_obj else None
 
             if modo == "sumar":
                 aviso = f"\n💡 Se aplicó en la moneda del presupuesto ({moneda_obj['abreviatura']})." if aviso_moneda else ""
                 return (
-                    f"✅ **Añadido {simbolo}{cantidad:.2f}{nombre_moneda} al presupuesto de '{label}'.**\n"
-                    f"📊 Total disponible: {simbolo}{total:.2f}{aviso}"
+                    f"{formato.EMOJI_OK} **Añadido {formato.fmt_moneda(cantidad, abrev=abrev, simbolo=simbolo)} "
+                    f"al presupuesto de {label}.**\n"
+                    f"{formato.EMOJI_PRESUPUESTO} Total disponible: {formato.fmt_moneda(total, abrev=abrev, simbolo=simbolo)}{aviso}"
                 ), None
-            return f"✅ **Presupuesto configurado:** {simbolo}{total:.2f}{nombre_moneda} para '{label}'", None
+            return (
+                f"{formato.EMOJI_OK} **Presupuesto configurado:** "
+                f"{formato.fmt_moneda(total, abrev=abrev, simbolo=simbolo)} para {label}"
+            ), None
         except Exception as e:
             logger.error("Error configurando presupuesto: %s", e)
             return "❌ Ocurrió un error al configurar el presupuesto.", None
@@ -507,7 +515,7 @@ class AIResponder:
 
         try:
             database.crear_meta_ahorro(usuario["id"], descripcion, cantidad)
-            return f"✅ **Meta de ahorro creada:** ${cantidad:.2f} para '{descripcion}'"
+            return f"{formato.EMOJI_OK} **Meta de ahorro creada:** {formato.fmt_moneda(cantidad)} para {descripcion}"
         except Exception as e:
             logger.error("Error creando meta de ahorro: %s", e)
             return "❌ Ocurrió un error al crear la meta de ahorro."

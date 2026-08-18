@@ -3,6 +3,8 @@
 Referencia de **todos los mensajes de texto** que FinanzasBot envía al usuario, su estructura y cuándo aparecen.
 
 > **Formato:** todos los mensajes se envían con `parse_mode="Markdown"` (Markdown v1 de Telegram): `**negrita**`, `*negrita*` (equivalente), `` `código` ``, `_cursiva_`. Los ejemplos muestran valores realistas (`$50.00`) en lugar de variables.
+>
+> **Diseño v2.12 (`REDISENO MENSAJES.md`):** emojis semánticos de tabla cerrada (📈 ingreso, 📉 gasto, 💰 balance, 📊 presupuesto/estadística, 🎯 meta, 💱 moneda, 🔔 notificación, ⚠️ advertencia, ✅ OK, ❌ error, ℹ️ info, 🗑️ eliminar), montos con separador de miles (`$1,500.00`), separador corto `┈┈┈┈┈┈┈┈┈┈` solo en mensajes multi-sección, títulos Title Case y nombres en negrita sin comillas.
 
 ---
 
@@ -31,18 +33,19 @@ Referencia de **todos los mensajes de texto** que FinanzasBot envía al usuario,
 Aparece al iniciar el bot. Incluye el teclado persistente (💰 Balance / 📋 Transacciones / 📊 Presupuestos / 💱 Monedas).
 
 ```
-¡Hola Ana! 👋 Soy **FinanzasBot**, tu asistente financiero personal.
+👋 Hola Ana, soy **FinanzasBot**.
 
-📊 Tengo **12 transacciones** registradas:
-  💸 Gastos: 8
-  💰 Ingresos: 4
+📊 **Actividad registrada**
+┈┈┈┈┈┈┈┈┈┈
+📉 8 gastos · 📈 4 ingresos · 12 en total
 
-🏦 **Qué puedo ayudarte hoy:**
-• Registrar un gasto o ingreso (ej: "Gasté $50 en comida para el desayuno")
-• Configurar presupuestos por categoría
-• Hacer un seguimiento de metas de ahorro e inversión
-• Consultar tu balance y transacciones recientes
-• Ver tus categorías financieras
+**Qué puedes hacer:**
+• Registrar: `Gasté $50 en comida`
+• Consultar: `¿Cuánto tengo?`
+• Presupuestar: `Mi presupuesto para comida es $500`
+• Metas: `Quiero ahorrar $5000 para vacaciones`
+
+Usa /help para ver todos los comandos.
 ```
 
 Error: `⚠️ Ocurrió un error. Intenta de nuevo con /start.`
@@ -316,14 +319,14 @@ Asegúrate de incluir un número, por ejemplo:
 Preview:
 
 ```
-📋 **Transacciones detectadas:**
-━━━━━━━━━━━━━━━━━
+📋 **Transacciones detectadas**
+┈┈┈┈┈┈┈┈┈┈
 📉 **1.** $50.00 - Gasto: comida (Comida)
 📈 **2.** $30.00 - Ingreso: reembolso (Otros)
-━━━━━━━━━━━━━━━━━
-📉 Total gastos: $50.00
-📈 Total ingresos: $30.00
-💵 Neto: -$20.00
+┈┈┈┈┈┈┈┈┈┈
+📉 Total gastos: **$50.00**
+📈 Total ingresos: **$30.00**
+Neto: **-$20.00**
 
 ¿Quieres guardar estas transacciones?
 ```
@@ -338,66 +341,61 @@ Preview:
 
 ### Balance
 ```
-💰 **TU BALANCE FINANCIERO ACTUAL**
-━━━━━━━━━━━━━━━━━
+💰 **Balance actual**
+┈┈┈┈┈┈┈┈┈┈
 ```
 
-Varias monedas (una por moneda):
+Varias monedas (una por moneda, formato tabular):
 
 ```
-**$ Dolar (USD)**
-  📈 Ingresos: $2000.00
-  📉 Gastos: $350.00
-  💵 Neto: $1650.00
+**USD**
+📈 $2,000.00   📉 $350.00   → **$1,650.00**
 
-**$ Peso cubano (CUP)**
-  📈 Ingresos: $5000.00
-  📉 Gastos: $1200.00
-  💵 Neto: $3800.00
+**CUP**
+📈 $5,000.00   📉 $1,200.00   → **$3,800.00**
 
-¿Necesitas detalles sobre transacciones recientes o quieres configurar un presupuesto?
+¿Ver transacciones recientes o configurar un presupuesto?
 ```
 
 Moneda única:
 
 ```
-💵 Total Ingresos: $2000.00
-💳 Total Gastos: $350.00
-📊 Balance Neto: $1650.00
+💰 **Balance actual**
+┈┈┈┈┈┈┈┈┈┈
+📈 Ingresos: $2,000.00
+📉 Gastos: $350.00
+Neto: **$1,650.00**
 
-¿Necesitas detalles sobre transacciones recientes o quieres configurar un presupuesto?
+¿Ver transacciones recientes o configurar un presupuesto?
 ```
 
 Error: `❌ Ocurrió un error al obtener tu balance. Por favor, inténtalo de nuevo.`
 
 ### Transacciones / gastos / ingresos
 ```
-📋 **TUS GASTOS RECIENTES**
-━━━━━━━━━━━━━━━━━
+📋 **Tus gastos recientes**
+┈┈┈┈┈┈┈┈┈┈
 📉 $50.00 - Gasto: almuerzo (2026-08-17)
 📉 $30.00 - Gasto: transporte (2026-08-16)
 
-💰 Total gastado: $80.00
-📊 2 registro(s)
+📉 **Total gastado:** $80.00 · 2 registros
 ```
 
-Vacío (según tipo): `📝 No tienes gastos registrados todavía.` · `📝 No tienes ingresos registrados todavía.` · `📝 No tienes transacciones registradas todavía.`
-Error: `Ocurrió un error al obtener tus transacciones.`
+Sin filtro de tipo, el cierre es `ℹ️ N registros` (sin total). Vacío (según tipo): `📝 No tienes gastos registrados todavía.` · `📝 No tienes ingresos registrados todavía.` · `📝 No tienes transacciones registradas todavía.`
+Error: `❌ Ocurrió un error al obtener tus transacciones.` + salto + `Intenta de nuevo o escribe /help.`
 
 ### Mayor gasto (día / semana / mes)
 ```
-🔥 **Mayor gasto de hoy:**
-   💸 $120.00 (CUP) - supermercado
-   📂 Categoría: Supermercado
-   📅 Fecha: 2026-08-17
+📉 **Mayor gasto de hoy**
+$120.00 (CUP) - supermercado
+Supermercado · 2026-08-17
 
-📈 **Top 3 gastos:**
-   • $120.00 (CUP) - supermercado (Supermercado)
-   • $80.00 (CUP) - almuerzo (Comida)
-   • $35.00 (CUP) - taxi (Transporte)
+**Top 3 gastos**
+• $120.00 (CUP) - supermercado (Supermercado)
+• $80.00 (CUP) - almuerzo (Comida)
+• $35.00 (CUP) - taxi (Transporte)
 
-📊 **Total gastado:**
-   💸 $235.00 (CUP)
+📉 **Total:** $235.00 (CUP)
 ```
 
 Vacío: `📅 No registraste gastos para hoy.`
@@ -405,11 +403,12 @@ Error: `❌ Ocurrió un error al consultar tus gastos.`
 
 ### Movimientos por fecha
 ```
-📅 **Movimientos de ayer:**
-💸 **Total gastado:**
-   • $235.00 (CUP)
-💰 **Total recibido:**
-   • $500.00 (CUP)
+📅 **Movimientos de ayer**
+📉 **Total gastado:**
+• $235.00 (CUP)
+
+📈 **Total recibido:**
+• $500.00 (CUP)
 ```
 
 Vacío: `📅 No tienes movimientos para ayer.`
@@ -417,27 +416,22 @@ Error: `❌ Ocurrió un error al consultar tus movimientos.`
 
 ### Presupuestos (ver todos)
 ```
-📋 **TUS PRESUPUESTOS**
-━━━━━━━━━━━━━━━━━
-📌 **comida**
-   Presupuesto: $500.00 (CUP)
-   Gastado: $320.00 (CUP) (64%)
-   Restante: $180.00 (CUP)
-   ██████░░░░
-   Periodo: mensual
+📊 **Tus presupuestos**
+┈┈┈┈┈┈┈┈┈┈
+
+**Comida** · mensual
+`██████░░░░` 64% — $320.00 de $500.00 (CUP)
+Restante: **$180.00 (CUP)**
 ```
 
-Vacío: `📋 No tienes presupuestos configurados. Usa: 'Mi presupuesto para X es $Y este mes'`
-Error: `Ocurrió un error al obtener tus presupuestos.`
+Vacío: `📊 No tienes presupuestos configurados.` + salto + `Prueba con: ` + `` `Mi presupuesto para comida es $500 este mes` ``
+Error: `❌ Ocurrió un error al obtener tus presupuestos.`
 
 ### Presupuesto específico (restante/progreso)
 ```
-📌 **Presupuesto 'comida'**
-   Planeado: $500.00 (CUP)
-   Gastado: $320.00 (CUP) (64%)
-   🔥 Te quedan: $180.00 (CUP)
-   ██████░░░░
-   Periodo: mensual
+📊 **Comida** · mensual
+`██████░░░░` 64% — $320.00 de $500.00 (CUP)
+Restante: **$180.00 (CUP)**
 ```
 
 - Sin nombre: `¿De qué presupuesto quieres saber? Dime su nombre (ej: 'comida', 'barbería').`
@@ -447,61 +441,58 @@ Error: `Ocurrió un error al obtener tus presupuestos.`
 
 ### Gastos del período en tus presupuestos
 ```
-📅 **Gastos de ayer en tus presupuestos:**
-━━━━━━━━━━━━━━━━━
-📌 **comida**
-   Gastado en ayer: $120.00 (CUP)
-   Restante: $180.00 (CUP) (40% usado)
-   ████░░░░░░
+📊 **Gastos de ayer en tus presupuestos**
+┈┈┈┈┈┈┈┈┈┈
 
-📊 **Total gastado:**
-   💸 $120.00 (CUP)
-   🚫 Fuera de presupuesto: $35.00
+**barbería**
+Gastado en ayer: **$120.00 (CUP)**
+Restante: **$180.00 (CUP)** · 40% usado
+`████░░░░░░`
+
+📉 **Total:** $120.00 (CUP)
 ```
 
 Vacío: `📅 No registraste gastos para ayer.` · Error: `❌ Ocurrió un error al consultar tus gastos.`
 
 ### Categorías
 ```
-📋 **TUS CATEGORÍAS FINANCIERAS**
-━━━━━━━━━━━━━━━━━
-💸 **Gastos:**
-  • Comida - Alimentación diaria
-  • Transporte - Desplazamientos
+📋 **Tus categorías**
+┈┈┈┈┈┈┈┈┈┈
+📉 **Gastos**
+• Comida - Alimentación diaria
+• Transporte - Desplazamientos
 
-💰 **Ingresos:**
-  • Salario - Nómina mensual
+📈 **Ingresos**
+• Salario - Nómina mensual
+
+¿Crear una categoría o registrar una transacción?
 ```
 Vacío: `📝 No tienes categorías configuradas todavía. ¡Crea algunas para empezar!`
-Cierre: `¿Quieres crear una nueva categoría o registrar una transacción?`
 Error: `❌ Ocurrió un error al obtener tus categorías. Por favor, inténtalo de nuevo.`
 
 ### Análisis por fecha (rango)
 ```
 📅 **Análisis: esta semana**
-━━━━━━━━━━━━━━━━━
+┈┈┈┈┈┈┈┈┈┈
 
-💰 **Ingresos (2 transacciones):**
+📈 **Ingresos (2 transacciones):**
    $2000.00 (CUP)
-💸 **Gastos (5 transacciones):**
+📉 **Gastos (5 transacciones):**
    $350.00 (CUP)
-💵 **Neto:** $1650.00
-📊 **Total transacciones:** 7
+Neto: **+$1,650.00**
+ℹ️ 7 transacciones
 
-📂 **Gastos por categoría:**
-  • Comida: $180.00 (3x) ██████░░░░ 62%
+**Gastos por categoría**
+• Comida: $180.00 (3x) `██████░░░░` 62%
+• Transporte: $170.00 (2x) `████░░░░░░` 38%
 
-🔥 **Mayor gasto:** $120.00 (CUP) - supermercado (Supermercado)
+📉 **Mayor gasto:** $120.00 (CUP) - supermercado (Supermercado)
 
-💸 **Detalle de gastos:**
-  📉 $120.00 (CUP) - supermercado (Supermercado) [2026-08-17]
+**Detalle de gastos**
+📉 $120.00 (CUP) - supermercado (Supermercado) [2026-08-17]
 
-💰 **Detalle de ingresos:**
-  📈 $2000.00 (CUP) - salario (Salario) [2026-08-15]
-
-📊 **Promedio diario (7 días):**
-  💸 Gasto promedio: $50.00/día
-  💰 Ingreso promedio: $285.71/día
+**Detalle de ingresos**
+📈 $2000.00 (CUP) - salario (Salario) [2026-08-15]
 ```
 
 Vacío: `📅 **Esta semana:**` + salto + `No tienes transacciones registradas para esta semana.` + salto + `¿Quieres registrar algo? Por ejemplo:` + salto + `• \`Gasté $50 en comida\`` + salto + `• \`Recibí $300 de salario\``
@@ -511,10 +502,10 @@ Vacío: `📅 **Esta semana:**` + salto + `No tienes transacciones registradas p
 ## 5. Presupuestos
 
 ### Crear presupuesto
-`✅ **Presupuesto configurado:** $500.00 (Peso Cubano) para 'comida'`
+`✅ **Presupuesto configurado:** $500.00 (CUP) para comida`
 
 ### Añadir monto (modo "sumar")
-`✅ **Añadido $100.00 (Peso Cubano) al presupuesto de 'comida'.**` + salto + `📊 Total disponible: $600.00`
+`✅ **Añadido $100.00 (CUP) al presupuesto de comida.**` + salto + `📊 Total disponible: $600.00 (CUP)`
 
 Si se forzó la moneda del presupuesto (el usuario escribió una moneda distinta):
 `\n💡 Se aplicó en la moneda del presupuesto (CUP).`
@@ -538,15 +529,15 @@ Cuando el presupuesto excede el balance libre de su moneda (regla individual + a
 ```
 ❌ **No puedes configurar un presupuesto de $300.00 (USD).**
 
-Tu balance en USD es **$200.00** y ya tienes **$50.00** en otros presupuestos, así que solo te quedan **$150.00** libres.
+Tu balance en **USD** es **$200.00** y ya tienes **$50.00** en otros presupuestos, así que solo te quedan **$150.00** libres.
 
 Ajusta el monto o registra más ingresos primero.
 ```
 
 ### Eliminar presupuesto
-- Eliminado: `🗑️ **Presupuesto eliminado:** 'comida'`
+- Eliminado: `🗑️ **Presupuesto eliminado:** comida`
 - Sin nombre: `❌ Dime el nombre del presupuesto a eliminar.`
-- No encontrado: `❌ No encontré un presupuesto llamado 'comida'.` + salto + ``Verifica su nombre con `Ver presupuestos` ``
+- No encontrado: `❌ No encontré un presupuesto llamado comida.` + salto + ``Verifica su nombre con `Ver presupuestos` ``
 - Error: `❌ Ocurrió un error al eliminar el presupuesto.`
 
 ---
@@ -556,43 +547,40 @@ Ajusta el monto o registra más ingresos primero.
 Estructura completa:
 
 ```
-📊 **RESUMEN DE AGOSTO**
-━━━━━━━━━━━━━━━━━
-💵 **MOVIMIENTOS DEL MES**
-💰 Ingresos: $5000.00 (CUP) · $200.00 (USD)
-💸 Gastos: $1200.00 (CUP)
-💵 Neto: +$3800.00 (CUP) · +$200.00 (USD)
+📊 **Resumen de agosto**
+┈┈┈┈┈┈┈┈┈┈
 
-🔥 **MAYORES GASTOS**
-💱 CUP: total $1200.00
-🍔 Comida: $420.00 · 35%
-   `███░░░░░░░` 35%
-🚕 Transporte: $300.00 · 25%
-   `██░░░░░░░░` 25%
+📈 $5,000.00 (CUP)
+📉 $1,200.00 (CUP)
+💰 Neto: **+$3,800.00 (CUP)** · **+$200.00 (USD)**
 
-📌 **Mayor gasto:** 🍔 Comida — $420.00 (CUP) (el 17)
-📈 **Promedio diario de gasto**
-   $38.71 (CUP)/día (17 días del mes)
+**Gastos por categoría (CUP)**
+🍔 Comida                    `██████░░░░` 35% — $420.00
+🚕 Transporte                `███░░░░░░░` 25% — $300.00
 
-💵 **BALANCE ACTUAL**
-   +$3800.00 (CUP) · +$200.00 (USD)
+Mayor gasto: 🍔 Comida, $420.00 (CUP) el día 17
+Promedio diario: $38.71 (CUP)/día
+
+💰 **Balance:**
+**+$3,800.00 (CUP)** · **+$200.00 (USD)**
 ```
 
 **Sin movimientos en el mes:**
 ```
-📊 **RESUMEN DE AGOSTO**
-━━━━━━━━━━━━━━━━━
+📊 **Resumen de agosto**
+┈┈┈┈┈┈┈┈┈┈
+
 😴 Sin movimientos este mes.
 ```
 
 **Sin gastos (pero con movimientos):** en lugar de la sección de gastos aparece `📝 Sin gastos registrados este mes.`
 
 **Balance actual según el caso:**
-- Varias monedas: `+$3800.00 (CUP) · -$50.00 (USD)` (con signo y abreviatura)
-- Solo "Sin moneda": `+$3800.00`
-- Sin monedas: `$0.00`
+- Varias monedas: `💰 **Balance:**` + `**+$3,800.00 (CUP)** · **-$50.00 (USD)**` (con signo y abreviatura)
+- Solo "Sin moneda": `**+$3,800.00**`
+- Sin monedas: `**$0.00**`
 
-> **Emojis por categoría** en "MAYORES GASTOS": 🍔 comida · 🍽️ restaurante · ☕ café · 🛒 supermercado · 🚕 transporte/taxi · ⛽ gasolina · 🚌 bus · 💊 salud · 🎓 educación · 👕 ropa · 🏠 hogar · 💡 luz · 🚰 agua · 📶 internet · 📱 teléfono · 🎬 cine/entretenimiento · 🎮 juego · 📺 suscripciones · ⚽ deporte · 🏋️ gym · 💼 salario · 🏪 negocio · 💻 freelance · 📈 trading · 🐷 ahorro · 🎯 meta · 🧾 impuestos · 🔧 servicio · 💳 pagos · 🎉 fiesta · 🎁 regalo · 🤝 donación; default 📦.
+> **Emojis por categoría** en "Gastos por categoría": 🍔 comida · 🍽️ restaurante · ☕ café · 🛒 supermercado · 🚕 transporte/taxi · ⛽ gasolina · 🚌 bus · 💊 salud · 🎓 educación · 👕 ropa · 🏠 hogar · 💡 luz · 🚰 agua · 📶 internet · 📱 teléfono · 🎬 cine/entretenimiento · 🎮 juego · 📺 suscripciones · ⚽ deporte · 🏋️ gym · 💼 salario · 🏪 negocio · 💻 freelance · 📈 trading · 🐷 ahorro · 🎯 meta · 🧾 impuestos · 🔧 servicio · 💳 pagos · 🎉 fiesta · 🎁 regalo · 🤝 donación; default 📦.
 
 Error: `❌ Ocurrió un error al generar tu resumen.`
 
@@ -601,39 +589,39 @@ Error: `❌ Ocurrió un error al generar tu resumen.`
 ## 7. Notificaciones
 
 ### Alertas de presupuesto (se anexan al mensaje del gasto)
-Se disparan solo cuando el presupuesto **cruza** el umbral con ese gasto y la alerta está activa.
+Se disparan solo cuando el presupuesto **cruza** el umbral con ese gasto y la alerta está activa. Un único emoji ⚠️ para las tres severidades (la palabra distingue la gravedad).
 
-- **80%:** `⚠️ **Presupuesto 'comida'** al 80%: $400.00 (CUP) de $500.00 (CUP). ¡Cuidado!`
-- **100% (agotado):** `🚨 **Presupuesto 'comida'** agotado: $500.00 (CUP) de $500.00 (CUP).`
-- **125% (excedido):** `⛔ **Presupuesto 'comida'** excedido: $625.00 (CUP) de $500.00 (CUP) (125%).`
+- **80%:** `⚠️ **Comida** cerca del límite: $400.00 de $500.00 (CUP) — 80%`
+- **100% (agotado):** `⚠️ **Comida** agotado: $500.00 de $500.00 (CUP)`
+- **125% (excedido):** `⚠️ **Comida** excedido: $625.00 de $500.00 (CUP) — 125%`
 
 Varias alertas cruzadas en el mismo gasto se unen con salto de línea.
 
 ### Resumen diario (todos los días 21:30 hora de Cuba)
 ```
-📊 **RESUMEN DIARIO**
+📊 **Resumen diario**
 📅 17/08/2026
-━━━━━━━━━━━━━━━━━
-💸 Gastos: $120.00 (CUP)
-💰 Ingresos: $500.00 (CUP)
+┈┈┈┈┈┈┈┈┈┈
+📉 Gastos: $120.00 (CUP)
+📈 Ingresos: $500.00 (CUP)
 📋 3 movimiento(s) registrado(s).
 
-💵 Balance actual: +$3800.00 (CUP)
+💰 Balance: **+$3,800.00 (CUP)**
 ```
 
 Sin movimientos:
 ```
-📊 **RESUMEN DIARIO**
+📊 **Resumen diario**
 📅 17/08/2026
-━━━━━━━━━━━━━━━━━
+┈┈┈┈┈┈┈┈┈┈
 😴 Sin movimientos hoy.
 
-💵 Balance actual: +$3800.00 (CUP)
+💰 Balance: **+$3,800.00 (CUP)**
 ```
 
-Sin gastos/ingresos se muestra `💸 Gastos: $0.00` / `💰 Ingresos: $0.00`. Con una sola moneda "Sin moneda": `💵 Balance actual: $3800.00`. Sin monedas: `💵 Balance actual: $0.00`.
+Sin gastos/ingresos se muestra `📉 Gastos: $0.00` / `📈 Ingresos: $0.00`. Con una sola moneda "Sin moneda": `💰 Balance: **+$3,800.00**`. Sin monedas: `💰 Balance: **+$0.00**`.
 
-Error interno (solo log, no se envía al usuario): `📊 No pude generar tu resumen diario en este momento.`
+Error interno (solo log, no se envía al usuario): `📊 No pude generar tu resumen diario.` + salto + `Intenta de nuevo o escribe /help.`
 
 ---
 
@@ -716,26 +704,27 @@ Errores comunes: `❌ No pude actualizar el monto. Intenta de nuevo.` · `❌ No
 ## 10. Metas de ahorro
 
 ```
-🎯 **TUS METAS DE AHORRO**
-━━━━━━━━━━━━━━━━━
-📌 **Vacaciones**
-   $1200.00 / $5000.00 (24%)
-   Restante: $3800.00
-   ██░░░░░░░░
-   Meta para: 2026-12-31
+🎯 **Tus metas de ahorro**
+┈┈┈┈┈┈┈┈┈┈
+
+**Vacaciones**
+$1,200.00 / $5,000.00 (24%)
+Restante: **$3,800.00**
+`██░░░░░░░░`
+Meta para: 2026-12-31
 ```
 
 Vacío: `🎯 No tienes metas de ahorro.` + salto + ``Usa: `Quiero ahorrar $5000 para vacaciones` ``
-Creada: `✅ **Meta de ahorro creada:** $5000.00 para 'vacaciones'`
+Creada: `✅ **Meta de ahorro creada:** $5,000.00 para vacaciones`
 Error: `❌ Ocurrió un error al obtener tus metas de ahorro.` · `❌ Ocurrió un error al crear la meta de ahorro.`
 
 ---
 
 ## 11. Ayuda "cómo…"
 
-### 💰 Registrar un gasto
+### 📉 Registrar un gasto
 ```
-💰 **Cómo registrar un gasto:**
+📉 **Cómo registrar un gasto:**
 
 Escribe un mensaje con tu gasto en lenguaje natural:
 
@@ -765,9 +754,9 @@ Escribe un mensaje con tu ingreso:
 El bot lo clasifica como ingreso automáticamente.
 ```
 
-### 💵 Ver balance
+### 💰 Ver balance
 ```
-💵 **Cómo ver tu balance:**
+💰 **Cómo ver tu balance:**
 
 • `¿Cuánto tengo?` — Balance general
 • `¿Cuál es mi saldo?` — Ver saldo actual
@@ -912,11 +901,11 @@ O simplemente escribe tu gasto o ingreso directamente.
 ¡Hola Ana! 👋 ¿En qué te puedo ayudar?
 
 Puedes:
-• 💸 Registrar un gasto: `Gasté $50 en comida`
-• 💰 Registrar un ingreso: `Recibí $300 de salario`
-• 📊 Ver tu balance: `¿Cuánto tengo?`
+• 📉 Registrar un gasto: `Gasté $50 en comida`
+• 📈 Registrar un ingreso: `Recibí $300 de salario`
+• 💰 Ver tu balance: `¿Cuánto tengo?`
 • 📋 Ver transacciones: `¿Qué gasté hoy?`
-• ⚙️ Configurar presupuesto: `Mi presupuesto es $500 para comida`
+• 📊 Configurar presupuesto: `Mi presupuesto es $500 para comida`
 ```
 
 ### Intención de consulta
@@ -996,29 +985,14 @@ Para registrar necesito el monto:
 
 ### Respuesta genérica (fallback final)
 ```
-🤔 Ana, no estoy seguro de qué quieres hacer con: "tu mensaje"
+🤔 No identifiqué qué necesitas con: _"tu mensaje"_
 
-¿Puedes decirme algo como?
+**Prueba con:**
+📉 `Gasté $50 en comida`
+💰 `¿Cuánto tengo?`
+🎯 `Quiero ahorrar $2000`
 
-💸 **Registrar:**
-• `Gasté $50 en comida`
-• `Recibí $300 de salario`
-• `$20 en transporte`
-
-📊 **Consultar:**
-• `¿Cuánto tengo?`
-• `¿Qué gasté hoy?`
-• `¿Cuánto gasté en comida?`
-
-⚙️ **Configurar:**
-• `Mi presupuesto es $500 para comida`
-• `Quiero ahorrar $2000`
-
-✏️ **Modificar:**
-• `Cambiar mi último gasto a $75`
-• `Eliminar mi último gasto`
-
-¿Qué necesitas? 😊
+O escribe /help para ver todo lo que puedo hacer.
 ```
 
 ### Errores del sistema / IA no disponible
@@ -1087,6 +1061,19 @@ Comandos sugeridos al escribir `/` (registrados con `set_my_commands`):
 
 ## 14. Notas de estilo — correcciones aplicadas
 
+### Rediseño v2.12 (`REDISENO MENSAJES.md`)
+Aplicado sobre todos los mensajes de uso frecuente (`/start`, `/user`, balance, presupuestos, alertas, resumen mensual, resumen diario, fallback):
+
+1. **Emojis semánticos de tabla cerrada:** 📈 ingreso, 📉 gasto, 💰 balance/dinero (solo en títulos), 📊 presupuesto/estadística, 🎯 meta, 💱 moneda, 🔔 notificación, ⚠️ advertencia (único para las 3 severidades de alerta), ✅ OK, ❌ error, ℹ️ info, 🗑️ eliminar. Se eliminaron 💸, 💵, 🚨, ⛔, 🏦, ⚙️ y los duplicados de emoji en el cuerpo.
+2. **Montos con separador de miles** vía `formato.fmt_moneda()` (`$1,500.00`) — nunca se concatenan a mano (`.2f`).
+3. **Separador corto** `┈┈┈┈┈┈┈┈┈┈` (`formato.SEPARADOR`) reemplaza `━━━━━━━━━━━━━━━━━`, y solo en mensajes multi-sección.
+4. **Títulos Title Case** (`Balance actual`, `Resumen diario`) en vez de MAYÚSCULAS SOSTENIDAS.
+5. **Nombres en negrita sin comillas** (`**Comida**`, no `'comida'`); negrita solo en datos accionables (montos, nombres).
+6. **Barras de progreso en backticks** con `round()` (`formato.barra_progreso`, 10 segmentos), y la abreviatura de moneda solo en el total de presupuesto.
+7. **Fallback genérico** reducido a 3 ejemplos + derivación a `/help`.
+
+### Correcciones previas (v2.11.1)
+
 Correcciones de estilo y ortografía aplicadas al código para unificar los mensajes:
 
 1. **Negrita unificada:** todos los mensajes usan ahora `**negrita**`. Se cambiaron de `*negrita*` (asterisco simple) el resumen mensual, las alertas de presupuesto, el resumen diario, la bienvenida `/start`, el menú `/notificaciones` y el encabezado del changelog (`*v2.x*`).
@@ -1098,4 +1085,4 @@ Correcciones de estilo y ortografía aplicadas al código para unificar los mens
    - `Ocurrio` → `Ocurrió` (transacciones y presupuestos)
    - `—Registrar un gasto` → `— Registrar un gasto` (espacio tras el em-dash)
 4. **Código muerto eliminado:** `_formatear_moneda_para_display` en `handlers.py`.
-5. **Resumen diario:** el balance por moneda usa ahora el mismo formato que el resto del bot: `💵 Balance actual: +$3800.00 (CUP)` (símbolo + abreviatura, con signo), en lugar de `💵 Balance actual (CUP): $3800.00`.
+5. **Resumen diario:** el balance por moneda usa ahora el mismo formato que el resto del bot: `💰 Balance: **+$3,800.00 (CUP)**` (símbolo + abreviatura, con signo), en lugar de `💵 Balance actual: +$3800.00 (CUP)`.

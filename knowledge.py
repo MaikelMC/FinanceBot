@@ -9,6 +9,7 @@ from collections import defaultdict
 from typing import Dict, Any, Optional, List
 
 import database
+import formato
 from telegram.helpers import escape_markdown
 
 logger = logging.getLogger(__name__)
@@ -152,12 +153,13 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                             moneda_b = m
                             break
                 s_b = moneda_b.get("simbolo", "$") if moneda_b else "$"
-                n_b = f" ({moneda_b['abreviatura']})" if moneda_b else ""
+                abrev_b = moneda_b.get("abreviatura", "") if moneda_b else ""
                 texto = (
-                    f"✅ Gasto registrado: {simbolo}{cantidad:.2f}{nombre_moneda} del presupuesto de '{label}'\n"
-                    f"📊 Presupuesto '{label}': {s_b}{planeado:.2f}{n_b} planeado, "
-                    f"{s_b}{gastado:.2f}{n_b} usado ({pct:.0f}%). "
-                    f"Te quedan {s_b}{restante:.2f}{n_b}."
+                    f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev_b)}** "
+                    f"del presupuesto de **{label}**\n"
+                    f"{formato.EMOJI_PRESUPUESTO} **{label}**: {formato.fmt_moneda(planeado, abrev=abrev_b)} planeado, "
+                    f"{formato.fmt_moneda(gastado, abrev=abrev_b)} usado (**{pct:.0f}%**). "
+                    f"Te quedan **{formato.fmt_moneda(restante, abrev=abrev_b)}**."
                 )
                 try:
                     from notificaciones import verificar_alertas_presupuesto
@@ -171,15 +173,17 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                 except Exception as e:
                     logger.error("Error generando alerta de presupuesto: %s", e)
                 return texto
+            abrev_b = moneda_b.get("abreviatura", "") if moneda_b else ""
             return (
-                f"✅ Gasto registrado: {simbolo}{cantidad:.2f}{nombre_moneda} "
-                f"del presupuesto de '{presupuesto.get('nombre') or categoria}'"
+                f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev_b)}** "
+                f"del presupuesto de **{presupuesto.get('nombre') or categoria}**"
             )
 
-        return f"✅ Gasto registrado: {simbolo}{cantidad:.2f}{nombre_moneda} en '{categoria}'"
+        abrev = moneda.get("abreviatura", "") if moneda else ""
+        return f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev)}** en **{categoria}**"
     except Exception as e:
         logger.error("Error al procesar gasto: %s", e)
-        return f"❌ Ocurrió un error al registrar tu gasto: {cantidad:.2f}. Por favor, inténtalo de nuevo."
+        return f"{formato.EMOJI_ERROR} Ocurrió un error al registrar tu gasto: **{formato.fmt_monto(cantidad)}**. Intenta de nuevo."
 
 
 def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None,
@@ -202,12 +206,11 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Di
         database.agregar_transaccion(usuario["id"], categoria_id, "ingreso", cantidad,
                                    mensaje, moneda_id=moneda_id)
 
-        simbolo = moneda.get("simbolo", "$") if moneda else "$"
-        nombre_moneda = f" ({moneda['nombre']})" if moneda else ""
-        return f"✅ Ingreso registrado: {simbolo}{cantidad:.2f}{nombre_moneda} de '{categoria}'"
+        abrev = moneda.get("abreviatura", "") if moneda else ""
+        return f"{formato.EMOJI_OK} Ingreso registrado: **{formato.fmt_moneda(cantidad, abrev=abrev)}** de **{categoria}**"
     except Exception as e:
         logger.error("Error al procesar ingreso: %s", e)
-        return f"❌ Ocurrió un error al registrar tu ingreso: {cantidad:.2f}. Por favor, inténtalo de nuevo."
+        return f"{formato.EMOJI_ERROR} Ocurrió un error al registrar tu ingreso: **{formato.fmt_monto(cantidad)}**. Intenta de nuevo."
 
 
 def _procesar_balance(usuario: Dict[str, Any]) -> str:
@@ -217,27 +220,27 @@ def _procesar_balance(usuario: Dict[str, Any]) -> str:
         por_moneda = balance.get("por_moneda", {})
 
         lineas = [
-            "💰 **TU BALANCE FINANCIERO ACTUAL**",
-            "━━━━━━━━━━━━━━━━━",
+            formato.header(formato.EMOJI_BALANCE, "Balance actual"),
+            formato.SEPARADOR,
         ]
 
         if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
             for abrev, datos in por_moneda.items():
-                simbolo = datos.get("simbolo", "$")
-                nombre = datos.get("nombre", abrev)
                 neto_m = datos["ingresos"] - datos["gastos"]
-                lineas.append(f"**{simbolo} {nombre} ({abrev})**")
-                lineas.append(f"  📈 Ingresos: {simbolo}{datos['ingresos']:.2f}")
-                lineas.append(f"  📉 Gastos: {simbolo}{datos['gastos']:.2f}")
-                lineas.append(f"  💵 Neto: {simbolo}{neto_m:.2f}")
                 lineas.append("")
+                lineas.append(f"**{abrev}**")
+                lineas.append(
+                    f"{formato.EMOJI_INGRESO} {formato.fmt_moneda(datos['ingresos'])}   "
+                    f"{formato.EMOJI_GASTO} {formato.fmt_moneda(datos['gastos'])}   "
+                    f"→ **{formato.fmt_moneda(neto_m)}**"
+                )
         else:
-            lineas.append(f"💵 Total Ingresos: ${balance['ingresos']:.2f}")
-            lineas.append(f"💳 Total Gastos: ${balance['gastos']:.2f}")
-            lineas.append(f"📊 Balance Neto: ${balance['neto']:.2f}")
+            lineas.append(f"{formato.EMOJI_INGRESO} Ingresos: ${formato.fmt_monto(balance['ingresos'])}")
+            lineas.append(f"{formato.EMOJI_GASTO} Gastos: ${formato.fmt_monto(balance['gastos'])}")
+            lineas.append(f"Neto: **${formato.fmt_monto(balance['neto'])}**")
 
         lineas.append("")
-        lineas.append("¿Necesitas detalles sobre transacciones recientes o quieres configurar un presupuesto?")
+        lineas.append("¿Ver transacciones recientes o configurar un presupuesto?")
 
         return "\n".join(lineas)
     except Exception as e:
@@ -257,30 +260,37 @@ def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Opt
                 return "📝 No tienes ingresos registrados todavía."
             return "📝 No tienes transacciones registradas todavía."
 
-        titulo = "TUS TRANSACCIONES RECIENTES"
+        titulo = "Tus transacciones recientes"
         if tipo == "gasto":
-            titulo = "TUS GASTOS RECIENTES"
+            titulo = "Tus gastos recientes"
         elif tipo == "ingreso":
-            titulo = "TUS INGRESOS RECIENTES"
+            titulo = "Tus ingresos recientes"
 
-        emoji = {"gasto": "📉", "ingreso": "📈"}
-        lineas = [f"📋 **{titulo}**", "━━━━━━━━━━━━━━━━━"]
+        emoji = {"gasto": formato.EMOJI_GASTO, "ingreso": formato.EMOJI_INGRESO}
+        lookup = _moneda_lookup_usuario(usuario)
+        lineas = [formato.header("📋", titulo), formato.SEPARADOR]
         for t in transacciones:
             icono = emoji.get(t["tipo"], "🔹")
             tipo_label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
             desc = _limpiar_descripcion(t.get("descripcion", "") or "")
             fecha = t.get("fecha", "")[:10]
-            lineas.append(f"{icono} ${t['cantidad']:.2f} - {tipo_label}: {desc} ({fecha})")
+            mid = t.get("moneda_id")
+            moneda = lookup.get(mid) if mid else None
+            abrev = moneda.get("abreviatura") if moneda else None
+            monto = formato.fmt_moneda(t["cantidad"], abrev=abrev)
+            lineas.append(f"{icono} {monto} - {tipo_label}: {desc} ({fecha})")
 
         total = sum(t["cantidad"] for t in transacciones)
+        lineas.append("")
         if tipo:
-            label = "gastado" if tipo == "gasto" else "recibido"
-            lineas.append(f"\n💰 Total {label}: ${total:.2f}")
-        lineas.append(f"📊 {len(transacciones)} registro(s)")
+            label = "Total gastado" if tipo == "gasto" else "Total recibido"
+            lineas.append(f"{emoji[tipo]} **{label}:** {formato.fmt_moneda(total)} · {len(transacciones)} registros")
+        else:
+            lineas.append(f"{formato.EMOJI_INFO} {len(transacciones)} registros")
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error al obtener transacciones: %s", e)
-        return "Ocurrió un error al obtener tus transacciones."
+        return "❌ Ocurrió un error al obtener tus transacciones.\nIntenta de nuevo o escribe /help."
 
 
 def _procesar_gastos(usuario: Dict[str, Any]) -> str:
@@ -299,35 +309,37 @@ def _procesar_presupuestos(usuario: Dict[str, Any]) -> str:
         presupuestos = database.obtener_presupuestos(usuario["id"])
 
         if not presupuestos:
-            return "📋 No tienes presupuestos configurados. Usa: 'Mi presupuesto para X es $Y este mes'"
+            return (
+                f"{formato.EMOJI_PRESUPUESTO} No tienes presupuestos configurados.\n"
+                "Prueba con: `Mi presupuesto para comida es $500 este mes`"
+            )
 
         monedas_usuario = database.obtener_monedas(usuario["id"])
         moneda_lookup = {m["id"]: m for m in monedas_usuario}
 
-        lineas = ["📋 **TUS PRESUPUESTOS**", "━━━━━━━━━━━━━━━━━"]
+        lineas = [formato.header(formato.EMOJI_PRESUPUESTO, "Tus presupuestos"), formato.SEPARADOR]
         for p in presupuestos:
             cat = p.get("nombre") or p.get("categoria_nombre", "General")
             moneda = moneda_lookup.get(p.get("moneda_id"))
+            abrev = moneda.get("abreviatura") if moneda else None
             simbolo = moneda.get("simbolo", "$") if moneda else "$"
-            abrev = f" ({moneda['abreviatura']})" if moneda else ""
             planeado = p["cantidad_planejada"]
             gastado = p["cantidad_gastada"]
             restante = planeado - gastado
             progreso = (gastado / planeado * 100) if planeado > 0 else 0
-            barra = _crear_barra_progreso(progreso)
-
-            lineas.append(f"📌 **{cat}**")
-            lineas.append(f"   Presupuesto: {simbolo}{planeado:.2f}{abrev}")
-            lineas.append(f"   Gastado: {simbolo}{gastado:.2f}{abrev} ({progreso:.0f}%)")
-            lineas.append(f"   Restante: {simbolo}{restante:.2f}{abrev}")
-            lineas.append(f"   {barra}")
-            if p["periodo"]:
-                lineas.append(f"   Periodo: {p['periodo']}")
+            periodo = p.get("periodo")
+            lineas.append("")
+            lineas.append(f"**{cat}**{f' · {periodo}' if periodo else ''}")
+            lineas.append(
+                f"{formato.barra_progreso(progreso)} {progreso:.0f}% — "
+                f"{formato.fmt_moneda(gastado, simbolo=simbolo)} de {formato.fmt_moneda(planeado, abrev=abrev, simbolo=simbolo)}"
+            )
+            lineas.append(f"Restante: **{formato.fmt_moneda(restante, abrev=abrev)}**")
 
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error al obtener presupuestos: %s", e)
-        return "Ocurrió un error al obtener tus presupuestos."
+        return "❌ Ocurrió un error al obtener tus presupuestos.\nIntenta de nuevo o escribe /help."
 
 
 def _moneda_lookup_usuario(usuario: Dict[str, Any]) -> Dict[Any, Dict[str, Any]]:
@@ -342,8 +354,8 @@ def _formatear_monto(moneda_lookup: Dict[Any, Dict[str, Any]], moneda_id: Option
     """Formatea un monto con símbolo y abreviatura de moneda si existe."""
     m = moneda_lookup.get(moneda_id)
     if m:
-        return f"{m['simbolo']}{cantidad:.2f} ({m['abreviatura']})"
-    return f"${cantidad:.2f}"
+        return formato.fmt_moneda(cantidad, abrev=m["abreviatura"], simbolo=m.get("simbolo", "$"))
+    return formato.fmt_moneda(cantidad)
 
 
 def _buscar_presupuesto(usuario: Dict[str, Any], etiqueta: str) -> Optional[Dict[str, Any]]:
@@ -395,7 +407,7 @@ def _procesar_presupuesto_especifico(usuario: Dict[str, Any], etiqueta: str) -> 
             presupuestos = database.obtener_presupuestos(usuario["id"])
             if not presupuestos:
                 return (
-                    f"❌ No tienes un presupuesto para '{etiqueta}' y todavía no tienes "
+                    f"{formato.EMOJI_ERROR} No tienes un presupuesto para **{etiqueta}** y todavía no tienes "
                     "ninguno configurado.\n\n"
                     f"Para crearlo: `Mi presupuesto para {etiqueta} es $500`"
                 )
@@ -403,7 +415,7 @@ def _procesar_presupuesto_especifico(usuario: Dict[str, Any], etiqueta: str) -> 
                 f"'{x.get('nombre') or x.get('categoria_nombre')}'" for x in presupuestos
             )
             return (
-                f"❌ No encontré un presupuesto para '{etiqueta}'.\n"
+                f"{formato.EMOJI_ERROR} No encontré un presupuesto para **{etiqueta}**.\n"
                 f"Tus presupuestos actuales: {nombres}.\n\n"
                 f"Para crearlo: `Mi presupuesto para {etiqueta} es $500`"
             )
@@ -414,18 +426,21 @@ def _procesar_presupuesto_especifico(usuario: Dict[str, Any], etiqueta: str) -> 
         gastado = p["cantidad_gastada"]
         restante = max(planeado - gastado, 0)
         pct = (gastado / planeado * 100) if planeado > 0 else 0
+        moneda = lookup.get(p.get("moneda_id"))
+        abrev = moneda.get("abreviatura") if moneda else None
+        simbolo = moneda.get("simbolo", "$") if moneda else "$"
+        periodo = p.get("periodo")
 
-        lineas = [f"📌 **Presupuesto '{label}'**"]
-        lineas.append(f"   Planeado: {_formatear_monto(lookup, p.get('moneda_id'), planeado)}")
-        lineas.append(f"   Gastado: {_formatear_monto(lookup, p.get('moneda_id'), gastado)} ({pct:.0f}%)")
-        lineas.append(f"   🔥 Te quedan: {_formatear_monto(lookup, p.get('moneda_id'), restante)}")
-        lineas.append(f"   {_crear_barra_progreso(pct)}")
-        if p.get("periodo"):
-            lineas.append(f"   Periodo: {p['periodo']}")
+        lineas = [f"{formato.EMOJI_PRESUPUESTO} **{label}**{f' · {periodo}' if periodo else ''}"]
+        lineas.append(
+            f"{formato.barra_progreso(pct)} {pct:.0f}% — "
+            f"{formato.fmt_moneda(gastado, simbolo=simbolo)} de {formato.fmt_moneda(planeado, abrev=abrev, simbolo=simbolo)}"
+        )
+        lineas.append(f"Restante: **{formato.fmt_moneda(restante, abrev=abrev)}**")
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error en presupuesto específico: %s", e)
-        return "❌ Ocurrió un error al consultar tu presupuesto."
+        return "❌ Ocurrió un error al consultar tu presupuesto.\nIntenta de nuevo o escribe /help."
 
 
 def _procesar_mayor_gasto(usuario: Dict[str, Any], mensaje: str) -> str:
@@ -450,22 +465,25 @@ def _procesar_mayor_gasto(usuario: Dict[str, Any], mensaje: str) -> str:
         ordenados = sorted(gastos, key=lambda t: t["cantidad"], reverse=True)
         mayor = ordenados[0]
 
-        lineas = [f"🔥 **Mayor gasto de {etiqueta}:**"]
+        lineas = [f"{formato.EMOJI_GASTO} **Mayor gasto de {etiqueta}**"]
         lineas.append(
-            f"   💸 {_formatear_monto(lookup, mayor.get('moneda_id'), mayor['cantidad'])} - "
+            f"{_formatear_monto(lookup, mayor.get('moneda_id'), mayor['cantidad'])} - "
             f"{mayor.get('descripcion') or 'Sin descripción'}"
         )
+        detalle = []
         if mayor.get("categoria_nombre"):
-            lineas.append(f"   📂 Categoría: {mayor['categoria_nombre']}")
+            detalle.append(mayor["categoria_nombre"])
         if mayor.get("fecha"):
-            lineas.append(f"   📅 Fecha: {str(mayor['fecha'])[:10]}")
+            detalle.append(str(mayor["fecha"])[:10])
+        if detalle:
+            lineas.append(" · ".join(detalle))
 
         if len(ordenados) > 1:
             lineas.append("")
-            lineas.append("📈 **Top 3 gastos:**")
+            lineas.append("**Top 3 gastos**")
             for t in ordenados[:3]:
                 lineas.append(
-                    f"   • {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} - "
+                    f"• {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} - "
                     f"{t.get('descripcion') or 'Sin descripción'} ({t.get('categoria_nombre') or 'otros'})"
                 )
 
@@ -474,14 +492,13 @@ def _procesar_mayor_gasto(usuario: Dict[str, Any], mensaje: str) -> str:
             mid = t.get("moneda_id")
             totales[mid] = totales.get(mid, 0.0) + t["cantidad"]
         lineas.append("")
-        lineas.append("📊 **Total gastado:**")
         for mid, tot in sorted(totales.items(), key=lambda x: -x[1]):
-            lineas.append(f"   💸 {_formatear_monto(lookup, mid, tot)}")
+            lineas.append(f"{formato.EMOJI_GASTO} **Total:** {_formatear_monto(lookup, mid, tot)}")
 
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error en mayor gasto: %s", e)
-        return "❌ Ocurrió un error al consultar tus gastos."
+        return "❌ Ocurrió un error al consultar tus gastos.\nIntenta de nuevo o escribe /help."
 
 
 def _procesar_gastos_por_presupuestos(usuario: Dict[str, Any], mensaje: str) -> str:
@@ -510,7 +527,7 @@ def _procesar_gastos_por_presupuestos(usuario: Dict[str, Any], mensaje: str) -> 
             cid = t.get("categoria_id")
             gasto_por_cat[cid] = gasto_por_cat.get(cid, 0.0) + t["cantidad"]
 
-        lineas = [f"📅 **Gastos de {etiqueta} en tus presupuestos:**", "━━━━━━━━━━━━━━━━━"]
+        lineas = [formato.header(formato.EMOJI_PRESUPUESTO, f"Gastos de {etiqueta} en tus presupuestos"), formato.SEPARADOR]
 
         for p in presupuestos:
             gastado_periodo = gasto_por_cat.get(p["categoria_id"], 0.0)
@@ -522,29 +539,28 @@ def _procesar_gastos_por_presupuestos(usuario: Dict[str, Any], mensaje: str) -> 
             restante = max(planeado - gastado_total, 0)
             pct = (gastado_total / planeado * 100) if planeado > 0 else 0
             lineas.append("")
-            lineas.append(f"📌 **{label}**")
-            lineas.append(f"   Gastado en {etiqueta}: {_formatear_monto(lookup, p.get('moneda_id'), gastado_periodo)}")
-            lineas.append(f"   Restante: {_formatear_monto(lookup, p.get('moneda_id'), restante)} ({pct:.0f}% usado)")
-            lineas.append(f"   {_crear_barra_progreso(pct)}")
+            lineas.append(f"**{label}**")
+            lineas.append(f"Gastado en {etiqueta}: **{_formatear_monto(lookup, p.get('moneda_id'), gastado_periodo)}**")
+            lineas.append(f"Restante: **{_formatear_monto(lookup, p.get('moneda_id'), restante)}** · {pct:.0f}% usado")
+            lineas.append(formato.barra_progreso(pct))
 
         totales: Dict[Any, float] = {}
         for t in gastos:
             mid = t.get("moneda_id")
             totales[mid] = totales.get(mid, 0.0) + t["cantidad"]
         lineas.append("")
-        lineas.append("📊 **Total gastado:**")
         for mid, tot in sorted(totales.items(), key=lambda x: -x[1]):
-            lineas.append(f"   💸 {_formatear_monto(lookup, mid, tot)}")
+            lineas.append(f"{formato.EMOJI_GASTO} **Total:** {_formatear_monto(lookup, mid, tot)}")
 
         con_presupuesto = sum(gasto_por_cat.get(p["categoria_id"], 0.0) for p in presupuestos)
         sin_presupuesto = sum(totales.values()) - con_presupuesto
         if sin_presupuesto > 0.005:
-            lineas.append(f"   🚫 Fuera de presupuesto: {_formatear_monto(lookup, None, sin_presupuesto)}")
+            lineas.append(f"{formato.EMOJI_ADVERTENCIA} Fuera de presupuesto: {_formatear_monto(lookup, None, sin_presupuesto)}")
 
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error en gastos por presupuestos: %s", e)
-        return "❌ Ocurrió un error al consultar tus gastos."
+        return "❌ Ocurrió un error al consultar tus gastos.\nIntenta de nuevo o escribe /help."
 
 
 def _procesar_gastos_por_fecha(usuario: Dict[str, Any], mensaje: str) -> str:
@@ -569,30 +585,30 @@ def _procesar_gastos_por_fecha(usuario: Dict[str, Any], mensaje: str) -> str:
             return f"📅 No tienes movimientos para {etiqueta}."
 
         lookup = _moneda_lookup_usuario(usuario)
-        lineas = [f"📅 **Movimientos de {etiqueta}:**"]
+        lineas = [f"📅 **Movimientos de {etiqueta}**"]
 
         if gastos:
             totales: Dict[Any, float] = {}
             for t in gastos:
                 mid = t.get("moneda_id")
                 totales[mid] = totales.get(mid, 0.0) + t["cantidad"]
-            lineas.append("💸 **Total gastado:**")
+            lineas.append(f"{formato.EMOJI_GASTO} **Total gastado:**")
             for mid, tot in sorted(totales.items(), key=lambda x: -x[1]):
-                lineas.append(f"   • {_formatear_monto(lookup, mid, tot)}")
+                lineas.append(f"• {_formatear_monto(lookup, mid, tot)}")
 
         if ingresos:
             totales_in: Dict[Any, float] = {}
             for t in ingresos:
                 mid = t.get("moneda_id")
                 totales_in[mid] = totales_in.get(mid, 0.0) + t["cantidad"]
-            lineas.append("💰 **Total recibido:**")
+            lineas.append(f"{formato.EMOJI_INGRESO} **Total recibido:**")
             for mid, tot in sorted(totales_in.items(), key=lambda x: -x[1]):
-                lineas.append(f"   • {_formatear_monto(lookup, mid, tot)}")
+                lineas.append(f"• {_formatear_monto(lookup, mid, tot)}")
 
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error en gastos por fecha: %s", e)
-        return "❌ Ocurrió un error al consultar tus movimientos."
+        return "❌ Ocurrió un error al consultar tus movimientos.\nIntenta de nuevo o escribe /help."
 
 
 def _procesar_categorias(usuario: Dict[str, Any]) -> str:
@@ -603,37 +619,40 @@ def _procesar_categorias(usuario: Dict[str, Any]) -> str:
         categorias_ahorros = database.obtener_categorias(usuario["id"], "ahorros")
         categorias_inversiones = database.obtener_categorias(usuario["id"], "inversiones")
 
-        lineas = ["📋 **TUS CATEGORÍAS FINANCIERAS**", "━━━━━━━━━━━━━━━━━"]
+        lineas = [formato.header("📋", "Tus categorías"), formato.SEPARADOR]
 
         if categorias_gastos:
-            lineas.append("💸 **Gastos:**")
+            lineas.append(f"{formato.EMOJI_GASTO} **Gastos**")
             for cat in categorias_gastos:
-                lineas.append(f"  • {cat['nombre']} - {cat.get('descripcion', '')}")
+                lineas.append(f"• {cat['nombre']} - {cat.get('descripcion', '')}")
 
         if categorias_ingresos:
-            lineas.append("\n💰 **Ingresos:**")
+            lineas.append("")
+            lineas.append(f"{formato.EMOJI_INGRESO} **Ingresos**")
             for cat in categorias_ingresos:
-                lineas.append(f"  • {cat['nombre']} - {cat.get('descripcion', '')}")
+                lineas.append(f"• {cat['nombre']} - {cat.get('descripcion', '')}")
 
         if categorias_ahorros:
-            lineas.append("\n🏦 **Ahorros:**")
+            lineas.append("")
+            lineas.append("**Ahorros**")
             for cat in categorias_ahorros:
-                lineas.append(f"  • {cat['nombre']} - {cat.get('descripcion', '')}")
+                lineas.append(f"• {cat['nombre']} - {cat.get('descripcion', '')}")
 
         if categorias_inversiones:
-            lineas.append("\n📈 **Inversiones:**")
+            lineas.append("")
+            lineas.append("**Inversiones**")
             for cat in categorias_inversiones:
-                lineas.append(f"  • {cat['nombre']} - {cat.get('descripcion', '')}")
+                lineas.append(f"• {cat['nombre']} - {cat.get('descripcion', '')}")
 
         if not (categorias_gastos or categorias_ingresos or categorias_ahorros or categorias_inversiones):
             lineas.append("\n📝 No tienes categorías configuradas todavía. ¡Crea algunas para empezar!")
 
-        lineas.append("\n¿Quieres crear una nueva categoría o registrar una transacción?")
+        lineas.append("\n¿Crear una categoría o registrar una transacción?")
 
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error al obtener categorías: %s", e)
-        return "❌ Ocurrió un error al obtener tus categorías. Por favor, inténtalo de nuevo."
+        return "❌ Ocurrió un error al obtener tus categorías.\nIntenta de nuevo o escribe /help."
 
 
 def _procesar_metas_ahorro(usuario: Dict[str, Any]) -> str:
@@ -643,24 +662,24 @@ def _procesar_metas_ahorro(usuario: Dict[str, Any]) -> str:
         if not metas:
             return "🎯 No tienes metas de ahorro.\n\nUsa: `Quiero ahorrar $5000 para vacaciones`"
 
-        lineas = ["🎯 **TUS METAS DE AHORRO**", "━━━━━━━━━━━━━━━━━"]
+        lineas = [formato.header(formato.EMOJI_META, "Tus metas de ahorro"), formato.SEPARADOR]
         for m in metas:
             objetivo = m.get("objetivo", 0)
             actual = m.get("cantidad_actual", 0) or 0
             nombre = m.get("nombre", "Meta")
             progreso = (actual / objetivo * 100) if objetivo > 0 else 0
-            barra = _crear_barra_progreso(progreso)
             restante = objetivo - actual
-            lineas.append(f"📌 **{nombre}**")
-            lineas.append(f"   ${actual:.2f} / ${objetivo:.2f} ({progreso:.0f}%)")
-            lineas.append(f"   Restante: ${restante:.2f}")
-            lineas.append(f"   {barra}")
+            lineas.append("")
+            lineas.append(f"**{nombre}**")
+            lineas.append(f"${formato.fmt_monto(actual)} / ${formato.fmt_monto(objetivo)} ({progreso:.0f}%)")
+            lineas.append(f"Restante: **${formato.fmt_monto(restante)}**")
+            lineas.append(formato.barra_progreso(progreso))
             if m.get("fecha_meta"):
-                lineas.append(f"   Meta para: {str(m['fecha_meta'])[:10]}")
+                lineas.append(f"Meta para: {str(m['fecha_meta'])[:10]}")
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error al obtener metas de ahorro: %s", e)
-        return "❌ Ocurrió un error al obtener tus metas de ahorro."
+        return "❌ Ocurrió un error al obtener tus metas de ahorro.\nIntenta de nuevo o escribe /help."
 
 
 def _emoji_categoria(nombre: Optional[str]) -> str:
@@ -702,7 +721,7 @@ def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
         por_moneda = balance_mes.get("por_moneda", {})
 
         nombre_mes = {v: k for k, v in MESES_ES.items()}.get(hoy.month, str(hoy.month))
-        lineas = [f"📊 **RESUMEN DE {nombre_mes.upper()}**", "━━━━━━━━━━━━━━━━━"]
+        lineas = [formato.header(formato.EMOJI_PRESUPUESTO, f"Resumen de {nombre_mes}"), formato.SEPARADOR]
 
         # --- Monedas activas del mes (o fallback "Sin moneda") ---
         monedas_activas = [(abrev, d) for abrev, d in por_moneda.items()]
@@ -715,24 +734,26 @@ def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
                 {"simbolo": "$", "ingresos": balance_mes.get("ingresos", 0),
                  "gastos": balance_mes.get("gastos", 0), "nombre": "Sin moneda"},
             )]
-        simbolo_por_cur = {abrev: d["simbolo"] for abrev, d in monedas_activas}
 
-        def _etiqueta(abrev: str) -> str:
-            return f" ({abrev})" if abrev != "Sin moneda" else ""
-
-        def _linea_concepto(concepto: str, getter, con_signo: bool = False) -> str:
-            partes = []
-            for abrev, d in monedas_activas:
-                val = getter(d)
-                signo = ("+" if val >= 0 else "-") if con_signo else ""
-                partes.append(f"{signo}{d['simbolo']}{val:.2f}{_etiqueta(abrev)}")
-            return f"{concepto} {' · '.join(partes)}"
+        def _fmt_cur(abrev: str, d: Dict[str, Any], val: float, signo: bool = False) -> str:
+            return formato.fmt_moneda(
+                val, abrev=(None if abrev == "Sin moneda" else abrev),
+                signo=signo, simbolo=d.get("simbolo", "$"),
+            )
 
         # --- Movimientos del mes (compacto por moneda) ---
-        lineas.append("\n💵 **MOVIMIENTOS DEL MES**")
-        lineas.append(_linea_concepto("💰 Ingresos:", lambda d: d["ingresos"]))
-        lineas.append(_linea_concepto("💸 Gastos:", lambda d: d["gastos"]))
-        lineas.append(_linea_concepto("💵 Neto:", lambda d: d["ingresos"] - d["gastos"], con_signo=True))
+        for abrev, d in monedas_activas:
+            if d["ingresos"]:
+                lineas.append(f"{formato.EMOJI_INGRESO} {_fmt_cur(abrev, d, d['ingresos'])}")
+        for abrev, d in monedas_activas:
+            if d["gastos"]:
+                lineas.append(f"{formato.EMOJI_GASTO} {_fmt_cur(abrev, d, d['gastos'])}")
+        neto_linea = " **·** ".join(
+            f"**{_fmt_cur(abrev, d, d['ingresos'] - d['gastos'], signo=True)}**"
+            for abrev, d in monedas_activas if d["ingresos"] or d["gastos"]
+        )
+        if neto_linea:
+            lineas.append(f"{formato.EMOJI_BALANCE} Neto: {neto_linea}")
 
         # --- Gastos del mes agrupados por moneda y categoría ---
         gastos_mes = database.obtener_transacciones_por_fecha(usuario["id"], inicio, fin, "gasto")
@@ -746,66 +767,60 @@ def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
             por_cat_cur[abrev][cat] += float(t.get("cantidad", 0))
 
         if por_cat_cur:
-            lineas.append("\n🔥 **MAYORES GASTOS**")
             for abrev, cats in por_cat_cur.items():
                 total_cur = sum(cats.values())
                 if total_cur <= 0:
                     continue
-                simbolo = simbolo_por_cur.get(abrev, "$")
-                if len(por_cat_cur) > 1:
-                    lineas.append(f"💱 {abrev}: total {simbolo}{total_cur:.2f}")
+                simbolo_cur = next((d.get("simbolo", "$") for a, d in monedas_activas if a == abrev), "$")
+                lineas.append(f"\n**Gastos por categoría{f' ({abrev})' if abrev != 'Sin moneda' else ''}**")
                 top = sorted(cats.items(), key=lambda kv: kv[1], reverse=True)[:5]
                 for cat, monto in top:
                     pct = monto / total_cur * 100
-                    barra = _crear_barra_progreso(pct)
-                    lineas.append(f"{_emoji_categoria(cat)} {cat}: {simbolo}{monto:.2f} · {pct:.0f}%")
-                    lineas.append(f"   `{barra}` {pct:.0f}%")
+                    barra = formato.barra_progreso(pct)
+                    label = f"{_emoji_categoria(cat)} {cat}"
+                    lineas.append(
+                        f"{label:<24}{barra} {pct:.0f}% — {simbolo_cur}{formato.fmt_monto(monto)}"
+                    )
 
             # --- Mayor gasto individual del mes ---
             mayor = max(gastos_mes, key=lambda t: float(t.get("cantidad", 0)))
-            monto_m = float(mayor.get("cantidad", 0))
-            mid_m = mayor.get("moneda_id")
-            mm = moneda_lookup.get(mid_m)
-            simbolo_m = mm["simbolo"] if mm else "$"
-            abrev_m = f" ({mm['abreviatura']})" if mm else ""
             cat_m = mayor.get("categoria_nombre") or "Otros"
             fecha_m = (mayor.get("fecha") or "")[:10]
+            monto_m = _formatear_monto(moneda_lookup, mayor.get("moneda_id"), float(mayor.get("cantidad", 0)))
             lineas.append(
-                f"\n📌 **Mayor gasto:** {_emoji_categoria(cat_m)} {cat_m} — "
-                f"{simbolo_m}{monto_m:.2f}{abrev_m}"
-                + (f" (el {fecha_m})" if fecha_m else "")
+                f"\nMayor gasto: {_emoji_categoria(cat_m)} {cat_m}, {monto_m}"
+                + (f" el día {fecha_m[8:10]}" if fecha_m else "")
             )
 
             # --- Promedio diario de gasto ---
             dias = hoy.day
             if dias > 0:
                 promedios = [
-                    f"{d['simbolo']}{d['gastos'] / dias:.2f}{_etiqueta(abrev)}/día"
+                    f"{_fmt_cur(abrev, d, d['gastos'] / dias)}/día"
                     for abrev, d in monedas_activas if d["gastos"] > 0
                 ]
                 if promedios:
-                    lineas.append("\n📈 **Promedio diario de gasto**")
-                    lineas.append(f"   {' · '.join(promedios)} ({dias} día{'s' if dias != 1 else ''} del mes)")
+                    lineas.append(f"Promedio diario: {' · '.join(promedios)}")
         else:
             lineas.append("\n📝 Sin gastos registrados este mes.")
 
         # --- Balance actual (todo el historial) ---
         balance_act = database.obtener_balance(usuario["id"])
         pa = balance_act.get("por_moneda", {})
-        lineas.append("\n💵 **BALANCE ACTUAL**")
+        lineas.append(f"\n{formato.EMOJI_BALANCE} **Balance:**")
         if pa and not (len(pa) == 1 and "Sin moneda" in pa):
             partes = []
             for abrev, d in pa.items():
                 neto = d["ingresos"] - d["gastos"]
-                signo = "+" if neto >= 0 else "-"
-                partes.append(f"{signo}{d['simbolo']}{abs(neto):.2f} ({abrev})")
-            lineas.append(f"   {' · '.join(partes)}")
+                partes.append(
+                    f"**{formato.fmt_moneda(neto, abrev=abrev, signo=True, simbolo=d.get('simbolo', '$'))}**"
+                )
+            lineas.append(" · ".join(partes))
         elif pa:
             neto = balance_act.get("neto", 0)
-            signo = "+" if neto >= 0 else "-"
-            lineas.append(f"   {signo}${abs(neto):.2f}")
+            lineas.append(f"**{formato.fmt_moneda(neto, signo=True)}**")
         else:
-            lineas.append("   $0.00")
+            lineas.append("**$0.00**")
 
         return "\n".join(lineas)
     except Exception as e:
@@ -1327,7 +1342,7 @@ def _parsear_multi_transaccion(mensaje: str, usuario: Optional[Dict[str, Any]] =
         transaccion = {
             "tipo": tipo,
             "cantidad": cantidad,
-            "descripcion": descripcion or f"Transacción de ${cantidad:.2f}",
+            "descripcion": descripcion or f"Transacción de {formato.fmt_moneda(cantidad)}",
             "categoria": categoria,
         }
         if moneda:
@@ -1344,39 +1359,41 @@ def _formatear_preview_transacciones(transacciones: List[Dict[str, Any]]) -> str
     if not transacciones:
         return "❌ No pude detectar ninguna transacción en tu mensaje."
 
-    lineas = ["📋 **Transacciones detectadas:**", "━━━━━━━━━━━━━━━━━"]
+    lineas = [formato.header("📋", "Transacciones detectadas"), formato.SEPARADOR]
 
     for i, t in enumerate(transacciones, 1):
-        emoji = "📈" if t["tipo"] == "ingreso" else "📉"
+        emoji = formato.EMOJI_INGRESO if t["tipo"] == "ingreso" else formato.EMOJI_GASTO
         label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
         desc = t.get("descripcion", "Sin descripción")
         cat = t.get("categoria", "otros")
         moneda = t.get("moneda", {})
+        abrev = moneda.get("abreviatura") if moneda else None
         simbolo = moneda.get("simbolo", "$") if moneda else "$"
-        abrev = f" ({moneda['abreviatura']})" if moneda else ""
-        lineas.append(f"{emoji} **{i}.** {simbolo}{t['cantidad']:.2f}{abrev} - {label}: {desc} ({cat})")
+        monto = formato.fmt_moneda(t["cantidad"], abrev=abrev, simbolo=simbolo)
+        lineas.append(f"{emoji} **{i}.** {monto} - {label}: {desc} ({cat})")
 
-    lineas.append("━━━━━━━━━━━━━━━━━")
+    lineas.append(formato.SEPARADOR)
 
-    totales_por_moneda = defaultdict(lambda: {"ingresos": 0.0, "gastos": 0.0})
+    totales_por_moneda = defaultdict(lambda: {"ingresos": 0.0, "gastos": 0.0, "abrev": None, "simbolo": "$"})
     for t in transacciones:
         moneda = t.get("moneda", {})
-        clave = moneda.get("abreviatura", "$") if moneda else "$"
-        simbolo = moneda.get("simbolo", "$") if moneda else "$"
+        clave = moneda.get("abreviatura") if moneda else "Sin moneda"
         if t["tipo"] == "ingreso":
             totales_por_moneda[clave]["ingresos"] += t["cantidad"]
         else:
             totales_por_moneda[clave]["gastos"] += t["cantidad"]
-        totales_por_moneda[clave]["simbolo"] = simbolo
+        totales_por_moneda[clave]["abrev"] = moneda.get("abreviatura") if moneda else None
+        totales_por_moneda[clave]["simbolo"] = moneda.get("simbolo", "$") if moneda else "$"
 
-    for abrev, datos in totales_por_moneda.items():
+    for clave, datos in totales_por_moneda.items():
         sim = datos.get("simbolo", "$")
-        if datos["ingresos"] > 0:
-            lineas.append(f"📈 Total ingresos ({abrev}): {sim}{datos['ingresos']:.2f}")
+        abr = datos.get("abrev")
         if datos["gastos"] > 0:
-            lineas.append(f"📉 Total gastos ({abrev}): {sim}{datos['gastos']:.2f}")
+            lineas.append(f"{formato.EMOJI_GASTO} Total gastos: **{formato.fmt_moneda(datos['gastos'], abrev=abr, simbolo=sim)}**")
+        if datos["ingresos"] > 0:
+            lineas.append(f"{formato.EMOJI_INGRESO} Total ingresos: **{formato.fmt_moneda(datos['ingresos'], abrev=abr, simbolo=sim)}**")
         neto = datos["ingresos"] - datos["gastos"]
-        lineas.append(f"💵 Neto ({abrev}): {sim}{neto:.2f}")
+        lineas.append(f"Neto: **{formato.fmt_moneda(neto, abrev=abr, signo=True, simbolo=sim)}**")
 
     lineas.append("")
     lineas.append("¿Quieres guardar estas transacciones?")
@@ -1755,14 +1772,14 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
     if accion == "eliminar":
         confirmado = database.eliminar_transaccion(usuario["id"], tid)
         if confirmado:
-            tipo_icono = "📉" if transaccion["tipo"] == "gasto" else "📈"
+            tipo_icono = formato.EMOJI_GASTO if transaccion["tipo"] == "gasto" else formato.EMOJI_INGRESO
             tipo_label = "Gasto" if transaccion["tipo"] == "gasto" else "Ingreso"
             desc = _limpiar_descripcion(transaccion.get("descripcion", "Sin descripción"))
             return (
-                f"🗑️ **Transacción eliminada:**\n"
-                f"{tipo_icono} ${transaccion['cantidad']:.2f} - {tipo_label}: {desc}"
+                f"{formato.EMOJI_ELIMINAR} **Transacción eliminada:**\n"
+                f"{tipo_icono} {formato.fmt_moneda(transaccion['cantidad'])} - {tipo_label}: {desc}"
             )
-        return "❌ No pude eliminar la transacción. Intenta de nuevo."
+        return f"{formato.EMOJI_ERROR} No pude eliminar la transacción.\nIntenta de nuevo o escribe /help."
 
     # --- CAMBIAR TIPO ---
     if accion == "cambiar_tipo":
@@ -1786,17 +1803,17 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
         )
 
         if actualizada:
-            emoji_nuevo = "📈" if nuevo_tipo == "ingreso" else "📉"
+            emoji_nuevo = formato.EMOJI_INGRESO if nuevo_tipo == "ingreso" else formato.EMOJI_GASTO
             label_nuevo = "Ingreso" if nuevo_tipo == "ingreso" else "Gasto"
             label_viejo = "Gasto" if nuevo_tipo == "ingreso" else "Ingreso"
-            icono_viejo = "📉" if nuevo_tipo == "ingreso" else "📈"
+            icono_viejo = formato.EMOJI_GASTO if nuevo_tipo == "ingreso" else formato.EMOJI_INGRESO
             desc = _limpiar_descripcion(transaccion.get("descripcion", "Sin descripción"))
             return (
-                f"✅ **Tipo cambiado:**\n"
+                f"{formato.EMOJI_OK} **Tipo cambiado:**\n"
                 f"De: {icono_viejo} {label_viejo}: {desc}\n"
-                f"A: {emoji_nuevo} ${transaccion['cantidad']:.2f} - {label_nuevo}: {desc}"
+                f"A: {emoji_nuevo} {formato.fmt_moneda(transaccion['cantidad'])} - {label_nuevo}: {desc}"
             )
-        return "❌ No pude cambiar el tipo. Intenta de nuevo."
+        return f"{formato.EMOJI_ERROR} No pude cambiar el tipo.\nIntenta de nuevo o escribe /help."
 
     # --- CAMBIAR MONTO ---
     if accion == "cambiar_monto":
@@ -1809,10 +1826,10 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
         )
         if actualizada:
             return (
-                f"✅ **Monto actualizado:**\n"
-                f"De ${transaccion['cantidad']:.2f} → **${nuevo_monto:.2f}**"
+                f"{formato.EMOJI_OK} **Monto actualizado:**\n"
+                f"De {formato.fmt_moneda(transaccion['cantidad'])} → **{formato.fmt_moneda(nuevo_monto)}**"
             )
-        return "❌ No pude actualizar el monto. Intenta de nuevo."
+        return f"{formato.EMOJI_ERROR} No pude actualizar el monto.\nIntenta de nuevo o escribe /help."
 
     # --- CAMBIAR DESCRIPCIÓN ---
     if accion == "cambiar_descripcion":
@@ -1918,7 +1935,7 @@ def _responder_ayuda_uso(mensaje: str) -> str:
     if any(w in m for w in ["gasto", "gastar", "gasté", "gaste", "compra", "comprar",
                             "compré", "compre", "pago", "pagar", "pagué", "pague"]):
         return "\n".join([
-            "💰 **Cómo registrar un gasto:**",
+            f"{formato.EMOJI_GASTO} **Cómo registrar un gasto:**",
             "",
             "Escribe un mensaje con tu gasto en lenguaje natural:",
             "",
@@ -1955,7 +1972,7 @@ def _responder_ayuda_uso(mensaje: str) -> str:
     if any(w in m for w in ["balance", "saldo", "cuánto tengo", "cuanto tengo",
                             "ver dinero", "mi plata", "mi dinero", "mis finanzas"]):
         return "\n".join([
-            "💵 **Cómo ver tu balance:**",
+            f"{formato.EMOJI_BALANCE} **Cómo ver tu balance:**",
             "",
             "• `¿Cuánto tengo?` — Balance general",
             "• `¿Cuál es mi saldo?` — Ver saldo actual",
@@ -2142,11 +2159,11 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
         return (
             f"¡Hola {nombre}! 👋 ¿En qué te puedo ayudar?\n\n"
             "Puedes:\n"
-            "• 💸 Registrar un gasto: `Gasté $50 en comida`\n"
-            "• 💰 Registrar un ingreso: `Recibí $300 de salario`\n"
-            "• 📊 Ver tu balance: `¿Cuánto tengo?`\n"
+            f"• {formato.EMOJI_GASTO} Registrar un gasto: `Gasté $50 en comida`\n"
+            f"• {formato.EMOJI_INGRESO} Registrar un ingreso: `Recibí $300 de salario`\n"
+            f"• {formato.EMOJI_BALANCE} Ver tu balance: `¿Cuánto tengo?`\n"
             "• 📋 Ver transacciones: `¿Qué gasté hoy?`\n"
-            "• ⚙️ Configurar presupuesto: `Mi presupuesto es $500 para comida`"
+            f"• {formato.EMOJI_PRESUPUESTO} Configurar presupuesto: `Mi presupuesto es $500 para comida`"
         )
 
     if tiene_consulta and not tiene_accion:
@@ -2166,7 +2183,7 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
 
     if tiene_config:
         return (
-            f"⚙️ {nombre}, veo que quieres **configurar** algo.\n\n"
+            f"🤔 {nombre}, veo que quieres **configurar** algo.\n\n"
             "¿Qué necesitas?\n"
             "• `Mi presupuesto para comida es $500 este mes`\n"
             "• `Quiero ahorrar $2000 para vacaciones`\n"
@@ -2208,34 +2225,24 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
         )
 
     if tiene_numero and not tiene_accion:
+        numero = re.search(r'\d+', msg).group()
         return (
             f"💡 {nombre}, veo un **monto** pero no sé qué hacer con él.\n\n"
             "¿Quieres registrarlo?\n"
-            "• `Gasté ${re.search(r'\\d+', msg).group()} en comida`\n"
-            "• `Recibí ${re.search(r'\\d+', msg).group()} de salario`\n\n"
+            f"• `Gasté ${numero} en comida`\n"
+            f"• `Recibí ${numero} de salario`\n\n"
             "¿O es parte de una consulta?\n"
-            "• `¿Cuánto gasté en ${re.search(r'\\d+', msg).group()}?`"
+            f"• `¿Cuánto gasté en ${numero}?`"
         )
 
-    # --- RESPUESTA GENÉRICA CON EJEMPLOS ---
+    # --- RESPUESTA GENÉRICA (rediseño 4.8) ---
     return (
-        f"🤔 {nombre}, no estoy seguro de qué quieres hacer con: \"{mensaje_esc}\"\n\n"
-        "¿Puedes decirme algo como?\n\n"
-        "💸 **Registrar:**\n"
-        "• `Gasté $50 en comida`\n"
-        "• `Recibí $300 de salario`\n"
-        "• `$20 en transporte`\n\n"
-        "📊 **Consultar:**\n"
-        "• `¿Cuánto tengo?`\n"
-        "• `¿Qué gasté hoy?`\n"
-        "• `¿Cuánto gasté en comida?`\n\n"
-        "⚙️ **Configurar:**\n"
-        "• `Mi presupuesto es $500 para comida`\n"
-        "• `Quiero ahorrar $2000`\n\n"
-        "✏️ **Modificar:**\n"
-        "• `Cambiar mi último gasto a $75`\n"
-        "• `Eliminar mi último gasto`\n\n"
-        "¿Qué necesitas? 😊"
+        f"🤔 No identifiqué qué necesitas con: _{mensaje_esc}_\n\n"
+        "**Prueba con:**\n"
+        f"{formato.EMOJI_GASTO} `Gasté $50 en comida`\n"
+        f"{formato.EMOJI_BALANCE} `¿Cuánto tengo?`\n"
+        f"{formato.EMOJI_META} `Quiero ahorrar $2000`\n\n"
+        "O escribe /help para ver todo lo que puedo hacer."
     )
 
 
@@ -2255,9 +2262,9 @@ def _procesar_eliminar_presupuesto(usuario: Dict[str, Any], nombre: str) -> str:
 
         borrados = database.eliminar_presupuesto(usuario["id"], nombre=nombre, categoria_id=categoria_id)
         if borrados:
-            return f"🗑️ **Presupuesto eliminado:** '{nombre}'"
+            return f"{formato.EMOJI_ELIMINAR} **Presupuesto eliminado:** {nombre}"
         return (
-            f"❌ No encontré un presupuesto llamado '{nombre}'.\n"
+            f"❌ No encontré un presupuesto llamado {nombre}.\n"
             "Verifica su nombre con `Ver presupuestos`."
         )
     except Exception as e:
@@ -2279,14 +2286,14 @@ def _procesar_eliminar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> str
     confirmado = database.eliminar_transaccion(usuario["id"], tid)
 
     if confirmado:
-        tipo_icono = "📉" if transaccion["tipo"] == "gasto" else "📈"
+        tipo_icono = formato.EMOJI_GASTO if transaccion["tipo"] == "gasto" else formato.EMOJI_INGRESO
         tipo_label = "Gasto" if transaccion["tipo"] == "gasto" else "Ingreso"
         desc = _limpiar_descripcion(transaccion.get("descripcion", "Sin descripción"))
         return (
-            f"🗑️ **Transacción eliminada:**\n"
-            f"{tipo_icono} ${transaccion['cantidad']:.2f} - {tipo_label}: {desc}"
+            f"{formato.EMOJI_ELIMINAR} **Transacción eliminada:**\n"
+            f"{tipo_icono} {formato.fmt_moneda(transaccion['cantidad'])} - {tipo_label}: {desc}"
         )
-    return "❌ No pude eliminar la transacción. Intenta de nuevo."
+    return f"{formato.EMOJI_ERROR} No pude eliminar la transacción.\nIntenta de nuevo o escribe /help."
 
 
 # ============================================================
@@ -2515,69 +2522,69 @@ def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> 
         por_categoria[cat]["cantidad"] += 1
         por_categoria[cat]["transacciones"].append(t)
 
-    lineas = [f"📅 **Análisis: {etiqueta}**", "━━━━━━━━━━━━━━━━━"]
+    lineas = [f"📅 **Análisis: {etiqueta}**", formato.SEPARADOR]
 
     # Resumen general
     lineas.append("")
     if tiene_moneda:
-        lineas.append(f"💰 **Ingresos ({len(ingresos)} transacciones):**")
+        lineas.append(f"{formato.EMOJI_INGRESO} **Ingresos ({len(ingresos)} transacciones):**")
         if tot_ingresos_m:
             for mid, tot in sorted(tot_ingresos_m.items(), key=lambda x: -x[1]):
                 lineas.append(f"   {_formatear_monto(lookup, mid, tot)}")
         else:
             lineas.append("   Sin ingresos")
-        lineas.append(f"💸 **Gastos ({len(gastos)} transacciones):**")
+        lineas.append(f"{formato.EMOJI_GASTO} **Gastos ({len(gastos)} transacciones):**")
         if tot_gastos_m:
             for mid, tot in sorted(tot_gastos_m.items(), key=lambda x: -x[1]):
                 lineas.append(f"   {_formatear_monto(lookup, mid, tot)}")
         else:
             lineas.append("   Sin gastos")
     else:
-        lineas.append(f"💰 **Ingresos:** ${total_ingresos:.2f} ({len(ingresos)} transacciones)")
-        lineas.append(f"💸 **Gastos:** ${total_gastos:.2f} ({len(gastos)} transacciones)")
+        lineas.append(f"{formato.EMOJI_INGRESO} **Ingresos:** {formato.fmt_moneda(total_ingresos)} ({len(ingresos)} transacciones)")
+        lineas.append(f"{formato.EMOJI_GASTO} **Gastos:** {formato.fmt_moneda(total_gastos)} ({len(gastos)} transacciones)")
     if not tiene_moneda or (len(tot_gastos_m) <= 1 and len(tot_ingresos_m) <= 1):
-        lineas.append(f"💵 **Neto:** ${neto:.2f}")
-    lineas.append(f"📊 **Total transacciones:** {len(transacciones)}")
+        lineas.append(f"Neto: **{formato.fmt_moneda(neto, signo=True)}**")
+    lineas.append(f"{formato.EMOJI_INFO} {len(transacciones)} transacciones")
 
     # Desglose de gastos por categoría
     if por_categoria:
         lineas.append("")
-        lineas.append("📂 **Gastos por categoría:**")
+        lineas.append("**Gastos por categoría**")
         for cat, datos in sorted(por_categoria.items(), key=lambda x: x[1]["total"], reverse=True):
             porcentaje = (datos["total"] / total_gastos * 100) if total_gastos > 0 else 0
-            barra = _crear_barra_progreso(porcentaje)
-            lineas.append(f"  • {cat}: ${datos['total']:.2f} ({datos['cantidad']}x) {barra} {porcentaje:.0f}%")
+            barra = formato.barra_progreso(porcentaje)
+            lineas.append(f"• {cat}: {formato.fmt_moneda(datos['total'])} ({datos['cantidad']}x) {barra} {porcentaje:.0f}%")
 
     # Mayor gasto del período
     if gastos:
         mayor = max(gastos, key=lambda t: t["cantidad"])
         lineas.append("")
         lineas.append(
-            f"🔥 **Mayor gasto:** {_formatear_monto(lookup, mayor.get('moneda_id'), mayor['cantidad'])} - "
+            f"{formato.EMOJI_GASTO} **Mayor gasto:** {_formatear_monto(lookup, mayor.get('moneda_id'), mayor['cantidad'])} - "
             f"{mayor.get('descripcion') or 'Sin descripción'} ({mayor.get('categoria_nombre') or 'otros'})"
         )
 
     # Detalle de gastos
     if gastos:
         lineas.append("")
-        lineas.append("💸 **Detalle de gastos:**")
+        lineas.append("**Detalle de gastos**")
         for t in gastos:
             fecha = str(t.get("fecha", ""))[:10]
             desc = t.get("descripcion", "Sin descripción")
             cat = t.get("categoria_nombre", "")
             cat_str = f" ({cat})" if cat else ""
-            lineas.append(f"  📉 {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} - {desc}{cat_str} [{fecha}]")
+            lineas.append(f"{formato.EMOJI_GASTO} {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} - {desc}{cat_str} [{fecha}]")
 
     # Detalle de ingresos
     if ingresos:
         lineas.append("")
-        lineas.append("💰 **Detalle de ingresos:**")
+        lineas.append("**Detalle de ingresos**")
         for t in ingresos:
             fecha = str(t.get("fecha", ""))[:10]
             desc = t.get("descripcion", "Sin descripción")
             cat = t.get("categoria_nombre", "")
             cat_str = f" ({cat})" if cat else ""
-            lineas.append(f"  📈 {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} - {desc}{cat_str} [{fecha}]")
+            lineas.append(f"{formato.EMOJI_INGRESO} {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} - {desc}{cat_str} [{fecha}]")
 
     # Promedio diario si es rango de varios días
     try:
@@ -2587,9 +2594,9 @@ def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> 
         dias = (d_fin - d_inicio).days + 1
         if dias > 1:
             lineas.append("")
-            lineas.append(f"📊 **Promedio diario ({dias} días):**")
-            lineas.append(f"  💸 Gasto promedio: ${total_gastos / dias:.2f}/día")
-            lineas.append(f"  💰 Ingreso promedio: ${total_ingresos / dias:.2f}/día")
+            lineas.append(f"📊 **Promedio diario ({dias} días)**")
+            lineas.append(f"{formato.EMOJI_GASTO} Gasto promedio: {formato.fmt_moneda(total_gastos / dias)}/día")
+            lineas.append(f"{formato.EMOJI_INGRESO} Ingreso promedio: {formato.fmt_moneda(total_ingresos / dias)}/día")
     except Exception:
         pass
 
@@ -2597,7 +2604,5 @@ def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> 
 
 
 def _crear_barra_progreso(porcentaje: float, largo: int = 10) -> str:
-    """Crea una barra de progreso visual."""
-    llenos = int(porcentaje / 100 * largo)
-    vacios = largo - llenos
-    return "█" * llenos + "░" * vacios
+    """Crea una barra de progreso visual (delega en formato.barra_progreso)."""
+    return formato.barra_progreso(porcentaje, largo)

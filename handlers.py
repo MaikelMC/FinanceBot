@@ -15,6 +15,7 @@ from telegram.helpers import escape_markdown
 import config
 import database
 import exportador
+import formato
 import knowledge
 import ai_client
 import changelog
@@ -204,16 +205,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         estadisticas = database.contar_transacciones(usuario["id"])
 
         mensaje = (
-            f"¡Hola {nombre_mostrar}! 👋 Soy **FinanzasBot**, tu asistente financiero personal.\n\n"
-            f"📊 Tengo **{estadisticas.get('total', 0)} transacciones** registradas:\n"
-            f"  💸 Gastos: {estadisticas.get('gastos', 0)}\n"
-            f"  💰 Ingresos: {estadisticas.get('ingresos', 0)}\n\n"
-            f"🏦 **Qué puedo ayudarte hoy:**\n"
-            f"• Registrar un gasto o ingreso (ej: \"Gasté $50 en comida para el desayuno\")\n"
-            f"• Configurar presupuestos por categoría\n"
-            f"• Hacer un seguimiento de metas de ahorro e inversión\n"
-            f"• Consultar tu balance y transacciones recientes\n"
-            f"• Ver tus categorías financieras\n"
+            f"👋 Hola {nombre_mostrar}, soy **FinanzasBot**.\n\n"
+            f"{formato.EMOJI_PRESUPUESTO} **Actividad registrada**\n"
+            f"{formato.SEPARADOR}\n"
+            f"{formato.EMOJI_GASTO} {estadisticas.get('gastos', 0)} gastos · "
+            f"{formato.EMOJI_INGRESO} {estadisticas.get('ingresos', 0)} ingresos · "
+            f"{estadisticas.get('total', 0)} en total\n\n"
+            "**Qué puedes hacer:**\n"
+            "• Registrar: `Gasté $50 en comida`\n"
+            "• Consultar: `¿Cuánto tengo?`\n"
+            "• Presupuestar: `Mi presupuesto para comida es $500`\n"
+            "• Metas: `Quiero ahorrar $5000 para vacaciones`\n\n"
+            "Usa /help para ver todos los comandos."
         )
 
         botones = _crear_teclado_permanente()
@@ -376,24 +379,29 @@ async def consultar_usuario(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
             for abrev, datos in por_moneda.items():
                 simbolo = datos.get("simbolo", "$")
-                nombre = datos.get("nombre", abrev)
                 neto_m = datos["ingresos"] - datos["gastos"]
-                balance_text += f"  {simbolo} {nombre} ({abrev}): +{simbolo}{datos['ingresos']:.2f} / -{simbolo}{datos['gastos']:.2f} = {simbolo}{neto_m:.2f}\n"
+                balance_text += (
+                    f"{abrev}  {formato.EMOJI_INGRESO} {formato.fmt_moneda(datos['ingresos'], simbolo=simbolo)}  "
+                    f"{formato.EMOJI_GASTO} {formato.fmt_moneda(datos['gastos'], simbolo=simbolo)}  "
+                    f"→ **{formato.fmt_moneda(neto_m, simbolo=simbolo)}**\n"
+                )
         else:
-            balance_text = f"  Ingresos: ${balance['ingresos']:.2f}\n  Gastos: ${balance['gastos']:.2f}\n  Neto: ${balance['neto']:.2f}\n"
+            balance_text = (
+                f"{formato.EMOJI_INGRESO} {formato.fmt_moneda(balance['ingresos'])}\n"
+                f"{formato.EMOJI_GASTO} {formato.fmt_moneda(balance['gastos'])}\n"
+                f"Neto: **{formato.fmt_moneda(balance['neto'])}**"
+            )
 
         mensaje = (
-            f"👤 **Usuario:** {escape_markdown(user.first_name or 'Usuario', version=1)}\n"
-            f"🆔 **ID:** `{user.id}`\n\n"
-            f"💰 **Balance:**\n{balance_text}\n"
-            f"📁 **Categorías:** {len(categorias)}\n"
-            f"💱 **Monedas:** {len(monedas)}\n"
-            f"📝 **Transacciones recientes:** {len(transacciones)}"
+            f"👤 **{escape_markdown(user.first_name or 'Usuario', version=1)}** · `ID {user.id}`\n\n"
+            f"{formato.EMOJI_BALANCE} **Balance**\n{formato.SEPARADOR}\n{balance_text}\n"
+            f"\n📁 {len(categorias)} categorías · {formato.EMOJI_MONEDA} {len(monedas)} monedas · "
+            f"{len(transacciones)} transacciones"
         )
         await update.message.reply_text(mensaje, parse_mode="Markdown")
     except Exception as e:
         logger.error("Error en /user: %s", e)
-        await update.message.reply_text("⚠️ Ocurrió un error al obtener tu información.")
+        await update.message.reply_text("❌ Ocurrió un error al obtener tu información.\nIntenta de nuevo o escribe /help.")
 
 
 async def consultar_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -636,15 +644,12 @@ def _crear_menu_notificaciones(prefs: dict):
     zona = config.DEFAULT_TIMEZONE
 
     texto = (
-        "🔔 **Configuración de notificaciones**\n"
-        "━━━━━━━━━━━━━━━━━\n"
-        f"{'✅' if resumen else '❌'} Resumen diario: **{'Activado' if resumen else 'Desactivado'}**\n"
-        f"🕐 Hora del resumen: **{hora}** (hora de Cuba)\n"
-        "━━━━━━━━━━━━━━━━━\n"
-        f"⚙️ **Alertas de presupuesto:**\n"
+        f"{formato.EMOJI_NOTIFICACION} **Notificaciones**\n"
+        f"{formato.SEPARADOR}\n"
+        f"Resumen diario: **{'activado' if resumen else 'desactivado'}** — {hora} (hora de Cuba)\n"
+        f"Alertas de presupuesto: "
         f"{'✅' if a80 else '⬜'} 80% · {'✅' if a100 else '⬜'} 100% · {'✅' if a125 else '⬜'} 125%\n\n"
-        "_El resumen diario llega todos los días a las 21:30 hora de Cuba. "
-        "Las alertas avisan cuando un presupuesto cruza el umbral._"
+        "_Las alertas avisan al cruzar cada umbral. El resumen llega una vez al día._"
     )
     kb = InlineKeyboardMarkup([
         [
@@ -739,28 +744,28 @@ async def _manejar_boton_teclado(update: Update, context: ContextTypes.DEFAULT_T
 
     if mensaje == BTN_BALANCE:
         balance = database.obtener_balance(usuario_id)
-        monedas = database.obtener_monedas(usuario_id)
         por_moneda = balance.get("por_moneda", {})
 
-        lineas = ["💰 **Tu balance actual:**\n"]
+        lineas = [f"{formato.EMOJI_BALANCE} **Balance actual**", formato.SEPARADOR]
 
         if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
-            # Mostrar balance por moneda
             for abrev, datos in por_moneda.items():
                 simbolo = datos.get("simbolo", "$")
-                nombre = datos.get("nombre", abrev)
                 neto_m = datos["ingresos"] - datos["gastos"]
-                lineas.append(f"**{simbolo} {nombre} ({abrev})**")
-                lineas.append(f"  📈 Ingresos: {simbolo}{datos['ingresos']:.2f}")
-                lineas.append(f"  📉 Gastos: {simbolo}{datos['gastos']:.2f}")
-                lineas.append(f"  💵 Neto: {simbolo}{neto_m:.2f}")
                 lineas.append("")
+                lineas.append(f"**{abrev}**")
+                lineas.append(
+                    f"{formato.EMOJI_INGRESO} {formato.fmt_moneda(datos['ingresos'], simbolo=simbolo)}   "
+                    f"{formato.EMOJI_GASTO} {formato.fmt_moneda(datos['gastos'], simbolo=simbolo)}   "
+                    f"→ **{formato.fmt_moneda(neto_m, simbolo=simbolo)}**"
+                )
         else:
-            # Sin monedas configuradas, mostrar balance simple
-            lineas.append(f"  📈 Ingresos: ${balance['ingresos']:.2f}")
-            lineas.append(f"  📉 Gastos: ${balance['gastos']:.2f}")
-            lineas.append(f"  💵 Neto: ${balance['neto']:.2f}")
+            lineas.append(f"{formato.EMOJI_INGRESO} Ingresos: {formato.fmt_moneda(balance['ingresos'])}")
+            lineas.append(f"{formato.EMOJI_GASTO} Gastos: {formato.fmt_moneda(balance['gastos'])}")
+            lineas.append(f"Neto: **{formato.fmt_moneda(balance['neto'])}**")
 
+        lineas.append("")
+        lineas.append("¿Ver transacciones recientes o configurar un presupuesto?")
         texto = "\n".join(lineas)
         await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
 
@@ -769,13 +774,13 @@ async def _manejar_boton_teclado(update: Update, context: ContextTypes.DEFAULT_T
         if not transacciones:
             texto = "📝 No tienes transacciones registradas aún."
         else:
-            lineas = ["📝 **Tus últimas transacciones:**\n"]
+            lineas = [f"📝 **Tus últimas transacciones**", formato.SEPARADOR]
             for t in transacciones:
-                icono = "📈" if t["tipo"] == "ingreso" else "📉"
+                icono = formato.EMOJI_INGRESO if t["tipo"] == "ingreso" else formato.EMOJI_GASTO
                 label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
                 fecha = t.get("fecha", "N/A")[:10]
                 desc = knowledge._limpiar_descripcion(t.get("descripcion", ""))
-                lineas.append(f"{icono} ${t['cantidad']:.2f} - {label}: {desc} ({fecha})")
+                lineas.append(f"{icono} {formato.fmt_moneda(t['cantidad'])} - {label}: {desc} ({fecha})")
             texto = "\n".join(lineas)
         await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
 
@@ -786,21 +791,25 @@ async def _manejar_boton_teclado(update: Update, context: ContextTypes.DEFAULT_T
         else:
             monedas_usuario = database.obtener_monedas(usuario_id)
             moneda_lookup = {m["id"]: m for m in monedas_usuario}
-            lineas = ["📊 **Tus presupuestos:**\n"]
+            lineas = [f"{formato.EMOJI_PRESUPUESTO} **Tus presupuestos**", formato.SEPARADOR]
             for p in presupuestos:
                 cat = p.get("nombre") or p.get("categoria_nombre", "General")
                 moneda = moneda_lookup.get(p.get("moneda_id"))
+                abrev = moneda.get("abreviatura") if moneda else None
                 simbolo = moneda.get("simbolo", "$") if moneda else "$"
-                abrev = f" ({moneda['abreviatura']})" if moneda else ""
                 planeado = p["cantidad_planejada"]
                 gastado = p["cantidad_gastada"]
                 restante = planeado - gastado
                 progreso = (gastado / planeado * 100) if planeado > 0 else 0
-                barra = knowledge._crear_barra_progreso(progreso)
-                lineas.append(f"📌 **{cat}**")
-                lineas.append(f"   {simbolo}{gastado:.2f}{abrev} / {simbolo}{planeado:.2f}{abrev} ({progreso:.0f}%)")
-                lineas.append(f"   Restante: {simbolo}{restante:.2f}{abrev}")
-                lineas.append(f"   {barra}")
+                periodo = p.get("periodo")
+                lineas.append("")
+                lineas.append(f"**{cat}**{f' · {periodo}' if periodo else ''}")
+                lineas.append(
+                    f"{formato.barra_progreso(progreso)} {progreso:.0f}% — "
+                    f"{formato.fmt_moneda(gastado, simbolo=simbolo)} de "
+                    f"{formato.fmt_moneda(planeado, abrev=abrev, simbolo=simbolo)}"
+                )
+                lineas.append(f"Restante: **{formato.fmt_moneda(restante, abrev=abrev, simbolo=simbolo)}**")
             texto = "\n".join(lineas)
         await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
 
@@ -824,7 +833,7 @@ async def _mostrar_menu_monedas(update: Update, context: ContextTypes.DEFAULT_TY
             "Toca **➕ Agregar** para crear tu primera moneda."
         )
     else:
-        lineas = ["💱 **Tus monedas:**\n━━━━━━━━━━━━━━━━━"]
+        lineas = [f"{formato.EMOJI_MONEDA} **Tus monedas**", formato.SEPARADOR]
         for m in monedas:
             default = " ⭐ predeterminada" if m.get("es_default") else ""
             lineas.append(f"  {m['simbolo']} {m['nombre']} ({m['abreviatura']}){default}")
@@ -929,22 +938,25 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             balance = database.obtener_balance(usuario_id)
             por_moneda = balance.get("por_moneda", {})
 
-            lineas = ["💰 **Tu balance actual:**\n"]
+            lineas = [f"{formato.EMOJI_BALANCE} **Balance actual**", formato.SEPARADOR]
             if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
                 for abrev, datos in por_moneda.items():
                     simbolo = datos.get("simbolo", "$")
-                    nombre = datos.get("nombre", abrev)
                     neto_m = datos["ingresos"] - datos["gastos"]
-                    lineas.append(f"**{simbolo} {nombre} ({abrev})**")
-                    lineas.append(f"  📈 Ingresos: {simbolo}{datos['ingresos']:.2f}")
-                    lineas.append(f"  📉 Gastos: {simbolo}{datos['gastos']:.2f}")
-                    lineas.append(f"  💵 Neto: {simbolo}{neto_m:.2f}")
                     lineas.append("")
+                    lineas.append(f"**{abrev}**")
+                    lineas.append(
+                        f"{formato.EMOJI_INGRESO} {formato.fmt_moneda(datos['ingresos'], simbolo=simbolo)}   "
+                        f"{formato.EMOJI_GASTO} {formato.fmt_moneda(datos['gastos'], simbolo=simbolo)}   "
+                        f"→ **{formato.fmt_moneda(neto_m, simbolo=simbolo)}**"
+                    )
             else:
-                lineas.append(f"  📈 Ingresos: ${balance['ingresos']:.2f}")
-                lineas.append(f"  📉 Gastos: ${balance['gastos']:.2f}")
-                lineas.append(f"  💵 Neto: ${balance['neto']:.2f}")
+                lineas.append(f"{formato.EMOJI_INGRESO} Ingresos: {formato.fmt_moneda(balance['ingresos'])}")
+                lineas.append(f"{formato.EMOJI_GASTO} Gastos: {formato.fmt_moneda(balance['gastos'])}")
+                lineas.append(f"Neto: **{formato.fmt_moneda(balance['neto'])}**")
 
+            lineas.append("")
+            lineas.append("¿Ver transacciones recientes o configurar un presupuesto?")
             mensaje = "\n".join(lineas)
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
@@ -958,9 +970,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             if not transacciones:
                 mensaje = "📝 No tienes transacciones registradas aún."
             else:
-                mensaje = "📝 **Tus últimas transacciones:**\n\n"
+                mensaje = f"📝 **Tus últimas transacciones**\n{formato.SEPARADOR}\n\n"
                 for t in transacciones:
-                    tipo_icono = "📈" if t["tipo"] == "ingreso" else "📉"
+                    tipo_icono = formato.EMOJI_INGRESO if t["tipo"] == "ingreso" else formato.EMOJI_GASTO
                     tipo_label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
                     fecha = t.get("fecha", "N/A")[:10]
                     desc = t.get("descripcion", "Sin descripción")
@@ -972,7 +984,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                         if desc.lower().startswith(pv):
                             desc = desc[len(pv):].strip()
                             break
-                    mensaje += f"{tipo_icono} ${t['cantidad']:.2f} - {tipo_label}: {desc} ({fecha})\n"
+                    mensaje += f"{tipo_icono} {formato.fmt_moneda(t['cantidad'])} - {tipo_label}: {desc} ({fecha})\n"
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=mensaje,
@@ -1007,7 +1019,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
                 preview = knowledge._formatear_preview_transacciones(transacciones_pendientes)
                 botones_multi = _crear_botones_multi_transacciones(len(transacciones_pendientes))
-                texto = f"🗑️ Eliminada: ${eliminada['cantidad']:.2f} - {eliminada.get('descripcion', '')}\n\n{preview}"
+                texto = (
+                    f"🗑️ Eliminada: {formato.fmt_moneda(eliminada['cantidad'])} - "
+                    f"{eliminada.get('descripcion', '')}\n\n{preview}"
+                )
                 await _responder_editando(query, texto, botones_multi)
 
         elif query.data.startswith("multi_edit_"):
@@ -1019,7 +1034,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     chat_id=query.message.chat_id,
                     text=(
                         f"✏️ **Editando transacción {idx+1}:**\n"
-                        f"{'📈' if t['tipo'] == 'ingreso' else '📉'} ${t['cantidad']:.2f} - {t.get('descripcion', '')}\n\n"
+                        f"{formato.EMOJI_INGRESO if t['tipo'] == 'ingreso' else formato.EMOJI_GASTO} "
+                        f"{formato.fmt_moneda(t['cantidad'])} - {t.get('descripcion', '')}\n\n"
                         f"Envíame la transacción corregida, por ejemplo:\n"
                         f"• `$50 en comida`\n"
                         f"• `Recibí $200 de salario`\n\n"
@@ -1305,9 +1321,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         # === CALLBACKS DE EXPORTACIÓN ===
         elif query.data in ("exp_fmt_xlsx", "exp_fmt_csv"):
-            formato = "xlsx" if query.data == "exp_fmt_xlsx" else "csv"
-            context.user_data["exp_formato"] = formato
-            etiqueta = "Excel (.xlsx)" if formato == "xlsx" else "CSV"
+            exp_formato = "xlsx" if query.data == "exp_fmt_xlsx" else "csv"
+            context.user_data["exp_formato"] = exp_formato
+            etiqueta = "Excel (.xlsx)" if exp_formato == "xlsx" else "CSV"
             botones_periodo = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🗓 Todo el historial", callback_data="exp_per_todo")],
                 [InlineKeyboardButton("🗓 Este mes", callback_data="exp_per_mes")],
@@ -1321,14 +1337,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             )
 
         elif query.data in ("exp_per_todo", "exp_per_mes", "exp_per_30"):
-            formato = context.user_data.get("exp_formato", "xlsx")
+            exp_formato = context.user_data.get("exp_formato", "xlsx")
             periodo = {"exp_per_todo": "todo", "exp_per_mes": "mes", "exp_per_30": "30"}[query.data]
             context.user_data.pop("exp_formato", None)
             await _responder_editando(
                 query,
                 "📤 **Generando tu exportación...**\n\nPuede tardar unos segundos.",
             )
-            await _enviar_exportacion(query.message, context, usuario, formato, periodo)
+            await _enviar_exportacion(query.message, context, usuario, exp_formato, periodo)
 
         elif query.data == "exp_cancel":
             context.user_data.pop("exp_formato", None)

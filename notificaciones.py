@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 import config
 import database
+import formato
 import knowledge
 
 logger = logging.getLogger(__name__)
@@ -62,28 +63,29 @@ def verificar_alertas_presupuesto(
 
     pct_antes = gastado_antes / planeado * 100
     pct_despues = gastado_despues / planeado * 100
-    abrev = f" ({abreviatura})" if abreviatura else ""
+    abrev = abreviatura or None
 
     lineas: List[str] = []
     for umbral, clave in UMBRALES_ALERTA:
         if not prefs.get(clave):
             continue
         if pct_antes < umbral <= pct_despues:
+            monto_actual = formato.fmt_moneda(gastado_despues, simbolo=simbolo)
+            monto_total = formato.fmt_moneda(planeado, abrev=abrev, simbolo=simbolo)
             if umbral == 80:
                 lineas.append(
-                    f"⚠️ **Presupuesto '{label}'** al 80%: "
-                    f"{simbolo}{gastado_despues:.2f}{abrev} de {simbolo}{planeado:.2f}{abrev}. ¡Cuidado!"
+                    f"{formato.EMOJI_ADVERTENCIA} **{label}** cerca del límite: "
+                    f"{monto_actual} de {monto_total} — 80%"
                 )
             elif umbral == 100:
                 lineas.append(
-                    f"🚨 **Presupuesto '{label}'** agotado: "
-                    f"{simbolo}{gastado_despues:.2f}{abrev} de {simbolo}{planeado:.2f}{abrev}."
+                    f"{formato.EMOJI_ADVERTENCIA} **{label}** agotado: "
+                    f"{monto_actual} de {monto_total}"
                 )
             else:
                 lineas.append(
-                    f"⛔ **Presupuesto '{label}'** excedido: "
-                    f"{simbolo}{gastado_despues:.2f}{abrev} de {simbolo}{planeado:.2f}{abrev} "
-                    f"({pct_despues:.0f}%)."
+                    f"{formato.EMOJI_ADVERTENCIA} **{label}** excedido: "
+                    f"{monto_actual} de {monto_total} — {pct_despues:.0f}%"
                 )
 
     return "\n".join(lineas) if lineas else None
@@ -110,22 +112,22 @@ def formatear_resumen_diario(usuario: Dict[str, Any]) -> str:
         total_i = totales_por_moneda(ingresos)
 
         lineas = [
-            "📊 **RESUMEN DIARIO**",
+            f"{formato.EMOJI_PRESUPUESTO} **Resumen diario**",
             f"📅 {date.today().strftime('%d/%m/%Y')}",
-            "━━━━━━━━━━━━━━━━━",
+            formato.SEPARADOR,
         ]
 
         if total_i or total_g:
             if total_g:
                 for mid, monto in total_g.items():
-                    lineas.append(f"💸 Gastos: {knowledge._formatear_monto(moneda_lookup, mid, monto)}")
+                    lineas.append(f"{formato.EMOJI_GASTO} Gastos: {knowledge._formatear_monto(moneda_lookup, mid, monto)}")
             else:
-                lineas.append("💸 Gastos: $0.00")
+                lineas.append(f"{formato.EMOJI_GASTO} Gastos: $0.00")
             if total_i:
                 for mid, monto in total_i.items():
-                    lineas.append(f"💰 Ingresos: {knowledge._formatear_monto(moneda_lookup, mid, monto)}")
+                    lineas.append(f"{formato.EMOJI_INGRESO} Ingresos: {knowledge._formatear_monto(moneda_lookup, mid, monto)}")
             else:
-                lineas.append("💰 Ingresos: $0.00")
+                lineas.append(f"{formato.EMOJI_INGRESO} Ingresos: $0.00")
             lineas.append(f"📋 {len(gastos) + len(ingresos)} movimiento(s) registrado(s).")
         else:
             lineas.append("😴 Sin movimientos hoy.")
@@ -135,20 +137,22 @@ def formatear_resumen_diario(usuario: Dict[str, Any]) -> str:
         por_moneda = balance.get("por_moneda", {})
         lineas.append("")
         if len(por_moneda) == 1 and list(por_moneda.keys()) == ["Sin moneda"]:
-            lineas.append(f"💵 Balance actual: ${balance.get('neto', 0):.2f}")
+            lineas.append(f"{formato.EMOJI_BALANCE} Balance: **{formato.fmt_moneda(balance.get('neto', 0), signo=True)}**")
         elif por_moneda:
             for abrev, datos in por_moneda.items():
                 simbolo = datos.get("simbolo", "$")
                 neto = datos["ingresos"] - datos["gastos"]
-                signo = "+" if neto >= 0 else "-"
-                lineas.append(f"💵 Balance actual: {signo}{simbolo}{abs(neto):.2f} ({abrev})")
+                lineas.append(
+                    f"{formato.EMOJI_BALANCE} Balance: "
+                    f"**{formato.fmt_moneda(neto, abrev=abrev, signo=True, simbolo=simbolo)}**"
+                )
         else:
-            lineas.append("💵 Balance actual: $0.00")
+            lineas.append(f"{formato.EMOJI_BALANCE} Balance: **{formato.fmt_moneda(0, signo=True)}**")
 
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error formateando resumen diario: %s", e)
-        return "📊 No pude generar tu resumen diario en este momento."
+        return "📊 No pude generar tu resumen diario.\nIntenta de nuevo o escribe /help."
 
 
 def _resumen_due(usuario: Dict[str, Any], prefs: Dict[str, Any]) -> bool:
