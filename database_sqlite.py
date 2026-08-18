@@ -672,6 +672,17 @@ def eliminar_meta_ahorro(usuario_id: int, meta_id: Optional[int] = None,
     return borrados
 
 
+def eliminar_todas_metas_ahorro(usuario_id: int) -> int:
+    """Elimina TODAS las metas de ahorro de un usuario. Retorna cuántas se borraron."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM metas_ahorro WHERE usuario_id = ?", (usuario_id,))
+    borrados = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return borrados
+
+
 def contar_transacciones(usuario_id: int) -> Dict[str, Any]:
     """Retorna conteos de transacciones y categorías."""
     conn = get_connection()

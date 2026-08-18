@@ -802,7 +802,10 @@ class AIResponder:
             eliminar_objeto = resultado.get("eliminar_objeto")
             # Meta de ahorro: SIEMPRE primero (antes que presupuesto/transacción)
             if eliminar_objeto == "meta_ahorro" or re.search(r'\b(?:meta\s+de\s+ahorro|meta\s+de\s+ahorros|objetivo\s+de\s+ahorro|ahorro)\b', mensaje, re.IGNORECASE):
-                from knowledge import _procesar_eliminar_meta
+                from knowledge import _procesar_eliminar_todas_metas, _procesar_eliminar_meta
+                # "elimina TODAS mis metas" -> borrado masivo
+                if resultado.get("eliminar_todas") or re.search(r'\b(?:todas?|todos?)\b', mensaje, re.IGNORECASE):
+                    return _procesar_eliminar_todas_metas(usuario)
                 nombre = (
                     resultado.get("categoria")
                     or resultado.get("referencia")

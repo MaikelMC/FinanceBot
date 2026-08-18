@@ -869,6 +869,23 @@ class GoogleSheetsDB:
                 logger.info("Metas eliminadas: %d", borrados)
             return borrados
 
+    def eliminar_todas_metas_ahorro(self, usuario_id: int) -> int:
+        with LOCK:
+            metas = self._cache.get("metas_ahorro", [])
+            restantes = []
+            borrados = 0
+            for m in metas:
+                if int(m.get("usuario_id", 0)) == usuario_id:
+                    borrados += 1
+                else:
+                    restantes.append(m)
+            if borrados:
+                self._cache["metas_ahorro"] = restantes
+                self._cache_dirty.add("metas_ahorro")
+                self._schedule_flush()
+                logger.info("Todas las metas eliminadas del usuario %d: %d", usuario_id, borrados)
+            return borrados
+
     # ----------------------------------------------------------
     # MONEDAS
     # ----------------------------------------------------------
@@ -1154,6 +1171,10 @@ def actualizar_meta_ahorro(meta_id: int, cantidad: float) -> bool:
 def eliminar_meta_ahorro(usuario_id: int, meta_id: Optional[int] = None,
                          nombre: Optional[str] = None) -> int:
     return _get_db().eliminar_meta_ahorro(usuario_id, meta_id, nombre)
+
+
+def eliminar_todas_metas_ahorro(usuario_id: int) -> int:
+    return _get_db().eliminar_todas_metas_ahorro(usuario_id)
 
 
 def contar_transacciones(usuario_id: int) -> Dict[str, Any]:

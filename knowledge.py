@@ -451,6 +451,21 @@ def _buscar_meta(usuario: Dict[str, Any], etiqueta: str) -> Optional[Dict[str, A
     return mejor
 
 
+def _procesar_eliminar_todas_metas(usuario: Dict[str, Any]) -> str:
+    """Elimina TODAS las metas de ahorro del usuario."""
+    try:
+        metas = database.obtener_metas_ahorro(usuario["id"])
+        if not metas:
+            return "🎯 No tienes metas de ahorro que eliminar."
+        borrados = database.eliminar_todas_metas_ahorro(usuario["id"])
+        if borrados:
+            return f"{formato.EMOJI_ELIMINAR} **Eliminaste todas tus metas de ahorro** ({borrados} eliminadas)."
+        return "❌ No pude eliminar las metas de ahorro."
+    except Exception as e:
+        logger.error("Error eliminando todas las metas de ahorro: %s", e)
+        return "❌ Ocurrió un error al eliminar las metas de ahorro."
+
+
 def _procesar_eliminar_meta(usuario: Dict[str, Any], nombre: str) -> str:
     """Elimina una meta de ahorro por su nombre (exacto -> contiene -> fuzzy)."""
     try:
