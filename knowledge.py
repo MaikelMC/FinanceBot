@@ -252,10 +252,10 @@ def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Opt
 
         if not transacciones:
             if tipo == "gasto":
-                return "📝 No tienes gastos registrados todavia."
+                return "📝 No tienes gastos registrados todavía."
             if tipo == "ingreso":
-                return "📝 No tienes ingresos registrados todavia."
-            return "📝 No tienes transacciones registradas todavia."
+                return "📝 No tienes ingresos registrados todavía."
+            return "📝 No tienes transacciones registradas todavía."
 
         titulo = "TUS TRANSACCIONES RECIENTES"
         if tipo == "gasto":
@@ -280,7 +280,7 @@ def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Opt
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error al obtener transacciones: %s", e)
-        return "Ocurrio un error al obtener tus transacciones."
+        return "Ocurrió un error al obtener tus transacciones."
 
 
 def _procesar_gastos(usuario: Dict[str, Any]) -> str:
@@ -314,7 +314,7 @@ def _procesar_presupuestos(usuario: Dict[str, Any]) -> str:
             gastado = p["cantidad_gastada"]
             restante = planeado - gastado
             progreso = (gastado / planeado * 100) if planeado > 0 else 0
-            barra = "█" * int(progreso / 10) + "░" * (10 - int(progreso / 10))
+            barra = _crear_barra_progreso(progreso)
 
             lineas.append(f"📌 **{cat}**")
             lineas.append(f"   Presupuesto: {simbolo}{planeado:.2f}{abrev}")
@@ -327,7 +327,7 @@ def _procesar_presupuestos(usuario: Dict[str, Any]) -> str:
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error al obtener presupuestos: %s", e)
-        return "Ocurrio un error al obtener tus presupuestos."
+        return "Ocurrió un error al obtener tus presupuestos."
 
 
 def _moneda_lookup_usuario(usuario: Dict[str, Any]) -> Dict[Any, Dict[str, Any]]:
@@ -649,7 +649,7 @@ def _procesar_metas_ahorro(usuario: Dict[str, Any]) -> str:
             actual = m.get("cantidad_actual", 0) or 0
             nombre = m.get("nombre", "Meta")
             progreso = (actual / objetivo * 100) if objetivo > 0 else 0
-            barra = "█" * int(progreso / 10) + "░" * (10 - int(progreso / 10))
+            barra = _crear_barra_progreso(progreso)
             restante = objetivo - actual
             lineas.append(f"📌 **{nombre}**")
             lineas.append(f"   ${actual:.2f} / ${objetivo:.2f} ({progreso:.0f}%)")
@@ -702,7 +702,7 @@ def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
         por_moneda = balance_mes.get("por_moneda", {})
 
         nombre_mes = {v: k for k, v in MESES_ES.items()}.get(hoy.month, str(hoy.month))
-        lineas = [f"📊 *RESUMEN DE {nombre_mes.upper()}*", "━━━━━━━━━━━━━━━━━"]
+        lineas = [f"📊 **RESUMEN DE {nombre_mes.upper()}**", "━━━━━━━━━━━━━━━━━"]
 
         # --- Monedas activas del mes (o fallback "Sin moneda") ---
         monedas_activas = [(abrev, d) for abrev, d in por_moneda.items()]
@@ -729,7 +729,7 @@ def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
             return f"{concepto} {' · '.join(partes)}"
 
         # --- Movimientos del mes (compacto por moneda) ---
-        lineas.append("\n💵 *MOVIMIENTOS DEL MES*")
+        lineas.append("\n💵 **MOVIMIENTOS DEL MES**")
         lineas.append(_linea_concepto("💰 Ingresos:", lambda d: d["ingresos"]))
         lineas.append(_linea_concepto("💸 Gastos:", lambda d: d["gastos"]))
         lineas.append(_linea_concepto("💵 Neto:", lambda d: d["ingresos"] - d["gastos"], con_signo=True))
@@ -746,7 +746,7 @@ def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
             por_cat_cur[abrev][cat] += float(t.get("cantidad", 0))
 
         if por_cat_cur:
-            lineas.append("\n🔥 *MAYORES GASTOS*")
+            lineas.append("\n🔥 **MAYORES GASTOS**")
             for abrev, cats in por_cat_cur.items():
                 total_cur = sum(cats.values())
                 if total_cur <= 0:
@@ -771,7 +771,7 @@ def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
             cat_m = mayor.get("categoria_nombre") or "Otros"
             fecha_m = (mayor.get("fecha") or "")[:10]
             lineas.append(
-                f"\n📌 *Mayor gasto:* {_emoji_categoria(cat_m)} {cat_m} — "
+                f"\n📌 **Mayor gasto:** {_emoji_categoria(cat_m)} {cat_m} — "
                 f"{simbolo_m}{monto_m:.2f}{abrev_m}"
                 + (f" (el {fecha_m})" if fecha_m else "")
             )
@@ -784,7 +784,7 @@ def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
                     for abrev, d in monedas_activas if d["gastos"] > 0
                 ]
                 if promedios:
-                    lineas.append("\n📈 *Promedio diario de gasto*")
+                    lineas.append("\n📈 **Promedio diario de gasto**")
                     lineas.append(f"   {' · '.join(promedios)} ({dias} día{'s' if dias != 1 else ''} del mes)")
         else:
             lineas.append("\n📝 Sin gastos registrados este mes.")
@@ -792,7 +792,7 @@ def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
         # --- Balance actual (todo el historial) ---
         balance_act = database.obtener_balance(usuario["id"])
         pa = balance_act.get("por_moneda", {})
-        lineas.append("\n💵 *BALANCE ACTUAL*")
+        lineas.append("\n💵 **BALANCE ACTUAL**")
         if pa and not (len(pa) == 1 and "Sin moneda" in pa):
             partes = []
             for abrev, d in pa.items():
@@ -2189,7 +2189,7 @@ def _generar_respuesta_no_entendido(mensaje: str, usuario: Dict[str, Any]) -> st
         return (
             f"💡 {nombre}, veo que mencionas un **monto** pero no pude procesar tu registro.\n\n"
             "¿Puedes intentar con este formato?\n"
-            "• `Gasté $50 en comida` —Registrar un gasto\n"
+            "• `Gasté $50 en comida` — Registrar un gasto\n"
             "• `Recibí $300 de salario` — Registrar un ingreso\n"
             "• `Pagué $20 de transporte` — Registrar un pago\n"
             "• `$100 en supermercado` — Formato corto\n\n"
@@ -2596,7 +2596,7 @@ def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> 
     return "\n".join(lineas)
 
 
-def _crear_barra_progreso(porcentaje: float, largo: int = 8) -> str:
+def _crear_barra_progreso(porcentaje: float, largo: int = 10) -> str:
     """Crea una barra de progreso visual."""
     llenos = int(porcentaje / 100 * largo)
     vacios = largo - llenos

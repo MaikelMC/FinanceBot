@@ -155,7 +155,7 @@ class AIResponder:
         if not cantidad or cantidad <= 0:
             return (
                 "❌ No pude entender el monto en tu mensaje.\n\n"
-                "Asegurate de incluir un número, por ejemplo:\n"
+                "Asegúrate de incluir un número, por ejemplo:\n"
                 "• `Gasté $50 en comida`\n"
                 "• `Recibí $300 de salario`"
             ), None

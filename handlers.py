@@ -54,7 +54,7 @@ def _formatear_notificacion(ultima_vista: Optional[str]) -> Optional[str]:
     lineas = []
     for ver, data in versiones_a_mostrar:
         emoji = data.get("emoji", "📢")
-        lineas.append(f"{emoji} *v{ver}* - {data['titulo']}")
+        lineas.append(f"{emoji} **v{ver}** - {data['titulo']}")
         for mejora in data.get("mejoras", []):
             lineas.append(f"  • {mejora}")
         lineas.append("")
@@ -71,12 +71,6 @@ def _crear_teclado_permanente():
         [BTN_PRESUPUESTOS, BTN_MONEDAS],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
-
-
-def _formatear_moneda_para_display(moneda: dict) -> str:
-    """Formatea una moneda para mostrar en el menú."""
-    default = " ⭐" if moneda.get("es_default") else ""
-    return f"{moneda['simbolo']} {moneda['nombre']} ({moneda['abreviatura']}){default}"
 
 
 def _crear_botones_monedasInlineKeyboard(monedas: list) -> InlineKeyboardMarkup:
@@ -214,7 +208,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📊 Tengo **{estadisticas.get('total', 0)} transacciones** registradas:\n"
             f"  💸 Gastos: {estadisticas.get('gastos', 0)}\n"
             f"  💰 Ingresos: {estadisticas.get('ingresos', 0)}\n\n"
-            f"🏦 *Qué puedo ayudarte hoy:*\n"
+            f"🏦 **Qué puedo ayudarte hoy:**\n"
             f"• Registrar un gasto o ingreso (ej: \"Gasté $50 en comida para el desayuno\")\n"
             f"• Configurar presupuestos por categoría\n"
             f"• Hacer un seguimiento de metas de ahorro e inversión\n"
@@ -642,12 +636,12 @@ def _crear_menu_notificaciones(prefs: dict):
     zona = config.DEFAULT_TIMEZONE
 
     texto = (
-        "🔔 *Configuración de notificaciones*\n"
+        "🔔 **Configuración de notificaciones**\n"
         "━━━━━━━━━━━━━━━━━\n"
         f"{'✅' if resumen else '❌'} Resumen diario: **{'Activado' if resumen else 'Desactivado'}**\n"
         f"🕐 Hora del resumen: **{hora}** (hora de Cuba)\n"
         "━━━━━━━━━━━━━━━━━\n"
-        f"⚙️ *Alertas de presupuesto:*\n"
+        f"⚙️ **Alertas de presupuesto:**\n"
         f"{'✅' if a80 else '⬜'} 80% · {'✅' if a100 else '⬜'} 100% · {'✅' if a125 else '⬜'} 125%\n\n"
         "_El resumen diario llega todos los días a las 21:30 hora de Cuba. "
         "Las alertas avisan cuando un presupuesto cruza el umbral._"
@@ -802,7 +796,7 @@ async def _manejar_boton_teclado(update: Update, context: ContextTypes.DEFAULT_T
                 gastado = p["cantidad_gastada"]
                 restante = planeado - gastado
                 progreso = (gastado / planeado * 100) if planeado > 0 else 0
-                barra = "█" * int(progreso / 10) + "░" * (10 - int(progreso / 10))
+                barra = knowledge._crear_barra_progreso(progreso)
                 lineas.append(f"📌 **{cat}**")
                 lineas.append(f"   {simbolo}{gastado:.2f}{abrev} / {simbolo}{planeado:.2f}{abrev} ({progreso:.0f}%)")
                 lineas.append(f"   Restante: {simbolo}{restante:.2f}{abrev}")
@@ -1302,7 +1296,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
             await _responder_editando(
                 query,
-                f"✅ Anuncio enviado a **{enviados}** usuarios." + (f"\n⚠️ {fallidos} no pudieron recibirllo." if fallidos else ""),
+                f"✅ Anuncio enviado a **{enviados}** usuarios." + (f"\n⚠️ {fallidos} no pudieron recibirlo." if fallidos else ""),
             )
 
         elif query.data == "anuncio_cancelar":

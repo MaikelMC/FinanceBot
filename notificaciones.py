@@ -71,17 +71,17 @@ def verificar_alertas_presupuesto(
         if pct_antes < umbral <= pct_despues:
             if umbral == 80:
                 lineas.append(
-                    f"⚠️ *Presupuesto '{label}'* al 80%: "
+                    f"⚠️ **Presupuesto '{label}'** al 80%: "
                     f"{simbolo}{gastado_despues:.2f}{abrev} de {simbolo}{planeado:.2f}{abrev}. ¡Cuidado!"
                 )
             elif umbral == 100:
                 lineas.append(
-                    f"🚨 *Presupuesto '{label}'* agotado: "
+                    f"🚨 **Presupuesto '{label}'** agotado: "
                     f"{simbolo}{gastado_despues:.2f}{abrev} de {simbolo}{planeado:.2f}{abrev}."
                 )
             else:
                 lineas.append(
-                    f"⛔ *Presupuesto '{label}'* excedido: "
+                    f"⛔ **Presupuesto '{label}'** excedido: "
                     f"{simbolo}{gastado_despues:.2f}{abrev} de {simbolo}{planeado:.2f}{abrev} "
                     f"({pct_despues:.0f}%)."
                 )
@@ -110,7 +110,7 @@ def formatear_resumen_diario(usuario: Dict[str, Any]) -> str:
         total_i = totales_por_moneda(ingresos)
 
         lineas = [
-            "📊 *RESUMEN DIARIO*",
+            "📊 **RESUMEN DIARIO**",
             f"📅 {date.today().strftime('%d/%m/%Y')}",
             "━━━━━━━━━━━━━━━━━",
         ]
@@ -140,7 +140,8 @@ def formatear_resumen_diario(usuario: Dict[str, Any]) -> str:
             for abrev, datos in por_moneda.items():
                 simbolo = datos.get("simbolo", "$")
                 neto = datos["ingresos"] - datos["gastos"]
-                lineas.append(f"💵 Balance actual ({abrev}): {simbolo}{neto:.2f}")
+                signo = "+" if neto >= 0 else "-"
+                lineas.append(f"💵 Balance actual: {signo}{simbolo}{abs(neto):.2f} ({abrev})")
         else:
             lineas.append("💵 Balance actual: $0.00")
 
