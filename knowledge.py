@@ -395,6 +395,62 @@ def _buscar_presupuesto(usuario: Dict[str, Any], etiqueta: str) -> Optional[Dict
     return mejor
 
 
+def _limpiar_etiqueta_meta(texto: str) -> str:
+    """Limpia una referencia a una meta de ahorro.
+
+    Quita la frase "meta de ahorro", monedas ("cup", "usd"...) y artículos
+    sobrantes. Ej: "cup para un regalo de mi novia" -> "regalo de mi novia".
+    """
+    if not texto:
+        return ""
+    t = texto.strip().strip(' .,;:')
+    t = re.sub(r'\b(?:meta\s+de\s+ahorros?|objetivo\s+de\s+ahorro|meta\s+de\s+objetivo|ahorro|meta)\b',
+               '', t, flags=re.IGNORECASE)
+    t = re.sub(r'\b(?:cup|usd|mlc|mex|eur|money|mn)\b', '', t, flags=re.IGNORECASE)
+    t = re.sub(r'^\s+', '', t)
+    while True:
+        t2 = re.sub(r'^(?:a\s+la|a\s+el|al|a|en|para|de\s+la|del|de|por|mi|mis|el|la|los|las|un|una|unos|unas)\s+',
+                    '', t, flags=re.IGNORECASE)
+        if t2 == t:
+            break
+        t = t2
+    t = re.sub(r'\s+', ' ', t).strip().strip(' .,;:')
+    return t
+
+
+def _buscar_meta(usuario: Dict[str, Any], etiqueta: str) -> Optional[Dict[str, Any]]:
+    """Busca una meta de ahorro por nombre (exacto -> contiene -> fuzzy)."""
+    if not etiqueta:
+        return None
+    metas = database.obtener_metas_ahorro(usuario["id"])
+    if not metas:
+        return None
+    norm = _normalizar_texto(etiqueta)
+
+    # 1) Exacto
+    for m in metas:
+        if _normalizar_texto(m.get("nombre") or "") == norm:
+            return m
+
+    # 2) Contención (uno dentro del otro)
+    for m in metas:
+        nc = _normalizar_texto(m.get("nombre") or "")
+        if nc and (norm in nc or nc in norm):
+            return m
+
+    # 3) Fuzzy (difflib)
+    from difflib import SequenceMatcher
+    mejor, mejor_ratio = None, 0.6
+    for m in metas:
+        nc = _normalizar_texto(m.get("nombre") or "")
+        if not nc:
+            continue
+        ratio = SequenceMatcher(None, nc, norm).ratio()
+        if ratio > mejor_ratio:
+            mejor, mejor_ratio = m, ratio
+    return mejor
+
+
 def _procesar_presupuesto_especifico(usuario: Dict[str, Any], etiqueta: str) -> str:
     """Muestra el restante/disponible de un presupuesto concreto."""
     try:

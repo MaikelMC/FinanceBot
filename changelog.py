@@ -4,9 +4,18 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.13.2"
+VERSION_ACTUAL = "2.13.3"
 
 CHANGELOG = {
+    "2.13.3": {
+        "titulo": "➕ Agregar dinero a metas de ahorro existentes",
+        "mejoras": [
+            "\"Agrega 900 cup a la meta de ahorro del regalo de mi novia\" ahora SUMA a la meta existente (antes creaba una meta nueva duplicada)",
+            "Las metas con nombres sucios (\"cup para un regalo de mi novia\") se limpian automáticamente",
+            "Si no encuentro la meta mencionada, te muestro tus metas actuales para que elijas la correcta"
+        ],
+        "emoji": "➕"
+    },
     "2.13.2": {
         "titulo": "🎯 Consulta y creación de metas de ahorro corregidas",
         "mejoras": [

@@ -138,6 +138,10 @@ class AIResponder:
         if intencion == "configurar_ahorro":
             return self._procesar_ahorro(resultado, usuario, mensaje), None
 
+        # --- AGREGAR A META DE AHORRO EXISTENTE ---
+        if intencion == "agregar_ahorro":
+            return self._procesar_agregar_ahorro(resultado, usuario, mensaje), None
+
         # --- MODIFICAR ---
         if intencion == "modificar":
             return self._procesar_modificacion(resultado, usuario, mensaje), None
@@ -701,6 +705,16 @@ class AIResponder:
                 or "meta general"
             )
 
+        # Limpieza: quitar monedas ("cup", "usd") y frases sobrantes de la etiqueta,
+        # ej: "cup para un regalo de mi novia" -> "regalo de mi novia".
+        try:
+            from knowledge import _limpiar_etiqueta_meta
+            limpia = _limpiar_etiqueta_meta(descripcion)
+            if limpia:
+                descripcion = limpia
+        except Exception:
+            pass
+
         if not cantidad or cantidad <= 0:
             try:
                 from knowledge import _generar_respuesta_no_entendido
@@ -714,6 +728,58 @@ class AIResponder:
         except Exception as e:
             logger.error("Error creando meta de ahorro: %s", e)
             return "❌ Ocurrió un error al crear la meta de ahorro."
+
+    def _procesar_agregar_ahorro(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
+        """Agrega dinero a una meta de ahorro EXISTENTE (no crea una nueva)."""
+        cantidad = resultado.get("cantidad")
+
+        if not cantidad or cantidad <= 0:
+            try:
+                from knowledge import _generar_respuesta_no_entendido
+                return _generar_respuesta_no_entendido(mensaje, usuario)
+            except Exception:
+                return "❌ No pude entender el monto a agregar. Usa: `Agrega 500 a mi meta de ahorro del carro`"
+
+        try:
+            from knowledge import _buscar_meta, _limpiar_etiqueta_meta
+            etiqueta = _limpiar_etiqueta_meta(resultado.get("descripcion") or "")
+            if not etiqueta:
+                etiqueta = (
+                    AIResponder._extraer_proposito_ahorro(mensaje)
+                    or AIResponder._extraer_tema_presupuesto(mensaje)
+                    or ""
+                )
+                etiqueta = _limpiar_etiqueta_meta(etiqueta)
+
+            meta = _buscar_meta(usuario, etiqueta) if etiqueta else None
+            if meta:
+                database.actualizar_meta_ahorro(meta["id"], cantidad)
+                objetivo = meta.get("objetivo", 0) or 0
+                nuevo = (meta.get("cantidad_actual", 0) or 0) + cantidad
+                progreso = (nuevo / objetivo * 100) if objetivo > 0 else 0
+                restante = max(objetivo - nuevo, 0)
+                nombre = meta.get("nombre") or etiqueta
+                return (
+                    f"{formato.EMOJI_OK} **Añadido {formato.fmt_moneda(cantidad)} a tu meta de ahorro** "
+                    f"_{nombre}_\n"
+                    f"{formato.fmt_moneda(nuevo)} / {formato.fmt_moneda(objetivo)} ({progreso:.0f}%)\n"
+                    f"Restante: **{formato.fmt_moneda(restante)}**"
+                )
+
+            # No existe una meta con ese nombre: informar con las metas actuales.
+            from knowledge import _procesar_metas_ahorro
+            if etiqueta:
+                return (
+                    f"❌ No encontré una meta de ahorro llamada **{etiqueta}**.\n\n"
+                    f"{_procesar_metas_ahorro(usuario)}"
+                )
+            return (
+                "❌ No pude identificar a qué meta de ahorro quieres agregar dinero.\n\n"
+                f"{_procesar_metas_ahorro(usuario)}"
+            )
+        except Exception as e:
+            logger.error("Error agregando a meta de ahorro: %s", e)
+            return "❌ Ocurrió un error al agregar dinero a la meta de ahorro."
 
     def _procesar_modificacion(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa una solicitud de modificación."""
