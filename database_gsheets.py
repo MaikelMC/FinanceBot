@@ -844,6 +844,31 @@ class GoogleSheetsDB:
                     return True
             return False
 
+    def eliminar_meta_ahorro(self, usuario_id: int, meta_id: Optional[int] = None,
+                             nombre: Optional[str] = None) -> int:
+        with LOCK:
+            metas = self._cache.get("metas_ahorro", [])
+            restantes = []
+            borrados = 0
+            for m in metas:
+                match = False
+                if int(m.get("usuario_id", 0)) == usuario_id:
+                    if meta_id is not None and int(m.get("id", 0)) == meta_id:
+                        match = True
+                    elif meta_id is None and nombre and str(nombre).strip():
+                        if str(m.get("nombre", "")).strip().lower() == str(nombre).strip().lower():
+                            match = True
+                if match:
+                    borrados += 1
+                else:
+                    restantes.append(m)
+            if borrados:
+                self._cache["metas_ahorro"] = restantes
+                self._cache_dirty.add("metas_ahorro")
+                self._schedule_flush()
+                logger.info("Metas eliminadas: %d", borrados)
+            return borrados
+
     # ----------------------------------------------------------
     # MONEDAS
     # ----------------------------------------------------------
@@ -1124,6 +1149,11 @@ def crear_meta_ahorro(usuario_id: int, nombre: str, objetivo: float, cantidad_ac
 
 def actualizar_meta_ahorro(meta_id: int, cantidad: float) -> bool:
     return _get_db().actualizar_meta_ahorro(meta_id, cantidad)
+
+
+def eliminar_meta_ahorro(usuario_id: int, meta_id: Optional[int] = None,
+                         nombre: Optional[str] = None) -> int:
+    return _get_db().eliminar_meta_ahorro(usuario_id, meta_id, nombre)
 
 
 def contar_transacciones(usuario_id: int) -> Dict[str, Any]:

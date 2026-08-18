@@ -4,9 +4,18 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.13.3"
+VERSION_ACTUAL = "2.13.4"
 
 CHANGELOG = {
+    "2.13.4": {
+        "titulo": "🗑️ Eliminación de metas de ahorro corregida",
+        "mejoras": [
+            "\"Elimina la meta de ahorro del regalo de mi novia\" ahora borra la META (antes se mezclaba con presupuestos o transacciones)",
+            "Búsqueda de la meta por nombre con coincidencias parciales y fuzzy; si no la encuentra, muestra tus metas actuales",
+            "Nueva función de eliminación en ambos backends (SQLite y Google Sheets)"
+        ],
+        "emoji": "🗑️"
+    },
     "2.13.3": {
         "titulo": "➕ Agregar dinero a metas de ahorro existentes",
         "mejoras": [

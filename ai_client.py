@@ -797,9 +797,20 @@ class AIResponder:
             return "❌ No pude procesar la modificación. ¿Podrás ser más específico?"
 
     def _procesar_eliminacion(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
-        """Procesa una solicitud de eliminación (transacción o presupuesto)."""
+        """Procesa una solicitud de eliminación (transacción, presupuesto o meta de ahorro)."""
         try:
             eliminar_objeto = resultado.get("eliminar_objeto")
+            # Meta de ahorro: SIEMPRE primero (antes que presupuesto/transacción)
+            if eliminar_objeto == "meta_ahorro" or re.search(r'\b(?:meta\s+de\s+ahorro|meta\s+de\s+ahorros|objetivo\s+de\s+ahorro|ahorro)\b', mensaje, re.IGNORECASE):
+                from knowledge import _procesar_eliminar_meta
+                nombre = (
+                    resultado.get("categoria")
+                    or resultado.get("referencia")
+                    or resultado.get("descripcion")
+                    or ""
+                )
+                return _procesar_eliminar_meta(usuario, nombre)
+
             if eliminar_objeto == "presupuesto" or re.search(r'\bpresupuesto\b', mensaje, re.IGNORECASE):
                 nombre = resultado.get("categoria") or resultado.get("referencia") or resultado.get("descripcion")
                 if not nombre:

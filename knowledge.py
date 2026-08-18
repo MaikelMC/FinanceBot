@@ -451,6 +451,29 @@ def _buscar_meta(usuario: Dict[str, Any], etiqueta: str) -> Optional[Dict[str, A
     return mejor
 
 
+def _procesar_eliminar_meta(usuario: Dict[str, Any], nombre: str) -> str:
+    """Elimina una meta de ahorro por su nombre (exacto -> contiene -> fuzzy)."""
+    try:
+        nombre = nombre.strip()
+        if not nombre:
+            return "❌ Dime el nombre de la meta de ahorro a eliminar. Ejemplo: `Elimina la meta de ahorro del carro`"
+
+        meta = _buscar_meta(usuario, nombre)
+        if not meta:
+            return (
+                f"❌ No encontré una meta de ahorro llamada **{nombre}**.\n\n"
+                f"{_procesar_metas_ahorro(usuario)}"
+            )
+
+        borrados = database.eliminar_meta_ahorro(usuario["id"], meta_id=meta["id"])
+        if borrados:
+            return f"{formato.EMOJI_ELIMINAR} **Meta de ahorro eliminada:** {meta.get('nombre') or nombre}"
+        return f"❌ No pude eliminar la meta de ahorro **{meta.get('nombre') or nombre}**."
+    except Exception as e:
+        logger.error("Error eliminando meta de ahorro: %s", e)
+        return "❌ Ocurrió un error al eliminar la meta de ahorro."
+
+
 def _procesar_presupuesto_especifico(usuario: Dict[str, Any], etiqueta: str) -> str:
     """Muestra el restante/disponible de un presupuesto concreto."""
     try:

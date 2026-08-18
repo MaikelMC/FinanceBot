@@ -169,6 +169,10 @@ _FAST_PATTERNS = [
     (re.compile(r'(?:cambia|modifica)\s+(?:el\s+)?(?:monto|cantidad|precio)\s+de\s+\$?([\d,.]+)\s+a\s+\$?([\d,.]+)', re.IGNORECASE),
      lambda m: {"intencion": "modificar", "accion_mod": "cambiar_monto", "valor_nuevo": _parse_float(m.group(2)), "confianza": 0.97}),
 
+    # --- ELIMINAR: meta de ahorro ---
+    (re.compile(r'(?:elimina|borra|quita|suprime|eliminar|borrar|quitar|suprimir)\s+(?:la\s+|el\s+|mi\s+|mis\s+)?(?:meta\s+de\s+ahorro|meta\s+de\s+ahorros|objetivo\s+de\s+ahorro|meta|ahorro)\s+(?:de\s+|del\s+|para\s+|en\s+)?(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "eliminar", "eliminar_objeto": "meta_ahorro", "categoria": m.group(1).strip(), "confianza": 0.97}),
+
     # --- ELIMINAR: presupuesto ---
     (re.compile(r'(?:elimina|borra|quita|suprime|eliminar|borrar|quitar|suprimir)\s+(?:el\s+|mi\s+|la\s+)?presupuesto\s+(?:de\s+|para\s+|en\s+)?(.+)', re.IGNORECASE),
      lambda m: {"intencion": "eliminar", "eliminar_objeto": "presupuesto", "categoria": m.group(1).strip(), "confianza": 0.97}),
@@ -223,7 +227,7 @@ REGLAS:
 - Para "configurar_presupuesto": el campo "nombre" es el nombre del presupuesto (puede diferir de la categoría). Debe ser una etiqueta CORTA y CONCRETA en español. NUNCA uses pronombres, demostrativos ni referencias ("ello", "eso", "esto", "este", "él", "ella", "lo", "comprarlo", etc.). Si el usuario describe el tema ANTES del monto y tras el monto solo aparece una referencia (ej: "quiero comprarme un cable nuevo para cargar mi teléfono, destinaré un presupuesto de 1000 cup para ello"), el nombre debe ser ESE TEMA, no el pronombre (ej: nombre: "cable de carga", categoria: "otros"). Si el usuario da una etiqueta propia concreta tras el monto (ej: "tengo un presupuesto de 1000 cup para barbería"), copia esa etiqueta en "nombre" (ej: "barbería"), aunque la categoría sea "otros".
 - Para "configurar_ahorro": el campo "descripcion" es el OBJETIVO de la meta, una etiqueta CORTA y CONCRETA en español (ej: "vacaciones", "un teléfono nuevo"). NUNCA uses pronombres ni referencias ("eso", "ello", "comprarlo", "lo"). Si tras el monto solo hay una referencia a un tema mencionado antes (ej: "quiero comprarme un teléfono nuevo, voy a ahorrar 5000 para eso"), usa ese tema como descripcion (ej: "teléfono"), no el pronombre.
 - Para "agregar_ahorro": el usuario quiere SUMAR/AÑADIR dinero a UNA META DE AHORRO QUE YA EXISTE (ej: "agrega 900 cup a la meta de ahorro del regalo de mi novia", "añade 500 a mi meta del carro", "suma 1000 a mi meta de vacaciones"). Usa "descripcion" para la etiqueta de ESA meta (la parte tras "meta de ahorro de/para", ej: "regalo de mi novia", "el carro") SIN incluir pronombres, monedas ni la frase "meta de ahorro". NO lo uses para crear una meta nueva.
-- Para "eliminar": si el usuario quiere borrar un PRESUPUESTO (ej: "elimina el presupuesto de comida"), usa eliminar_objeto: "presupuesto" y categoria: "comida". Para transacciones usa eliminar_objeto: "transaccion".
+- Para "eliminar": si el usuario quiere borrar un PRESUPUESTO (ej: "elimina el presupuesto de comida"), usa eliminar_objeto: "presupuesto" y categoria: "comida". Para transacciones usa eliminar_objeto: "transaccion". Para una META DE AHORRO (ej: "elimina la meta de ahorro del regalo de mi novia", "borra mi meta del carro"), usa eliminar_objeto: "meta_ahorro" y categoria: la etiqueta de la meta (ej: "regalo de mi novia"). NUNCA uses "presupuesto" ni "transaccion" para metas de ahorro.
 - La respuesta debe ser en español neutro, amigable, con emojis y sin regionalismos.
 - Cuando el usuario haga una PREGUNTA general o pida un consejo financiero (no una operación de registrar/consultar/configurar), respóndele DIRECTAMENTE y con sustancia en el campo "respuesta" usando intencion "general" o "ayuda_uso". No devuelvas un menú genérico de comandos.
 - Para intencion "consultar", usa el campo "subconsulta" para indicar QUÉ quiere ver el usuario:

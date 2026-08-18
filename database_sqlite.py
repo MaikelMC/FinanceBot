@@ -643,6 +643,35 @@ def actualizar_meta_ahorro(meta_id: int, cantidad: float) -> bool:
     return actualizado
 
 
+def eliminar_meta_ahorro(usuario_id: int, meta_id: Optional[int] = None,
+                         nombre: Optional[str] = None) -> int:
+    """Elimina una meta de ahorro por id o por nombre. Retorna cuántas se borraron."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    borrados = 0
+
+    if meta_id is not None:
+        cursor.execute(
+            "DELETE FROM metas_ahorro WHERE usuario_id = ? AND id = ?",
+            (usuario_id, meta_id)
+        )
+        borrados = cursor.rowcount
+
+    if borrados == 0 and nombre and str(nombre).strip():
+        cursor.execute(
+            """
+            DELETE FROM metas_ahorro
+            WHERE usuario_id = ? AND LOWER(TRIM(nombre)) = LOWER(TRIM(?))
+            """,
+            (usuario_id, nombre)
+        )
+        borrados = cursor.rowcount
+
+    conn.commit()
+    conn.close()
+    return borrados
+
+
 def contar_transacciones(usuario_id: int) -> Dict[str, Any]:
     """Retorna conteos de transacciones y categorías."""
     conn = get_connection()
