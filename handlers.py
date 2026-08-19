@@ -179,7 +179,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Quitar el teclado persistente y mostrar el menú principal inline
         await update.message.reply_text(
             "🧭 Te cambié el teclado: ahora navegas con botones.",
-            reply_markup=ReplyKeyboardRemove(remove_keyboard=True),
+            reply_markup=ReplyKeyboardRemove(),
         )
         await update.message.reply_text(
             mensaje, parse_mode="Markdown", reply_markup=_crear_teclado_principal()
