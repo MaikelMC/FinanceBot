@@ -39,6 +39,7 @@ CB_PRESUP_QUEDAN = "menu_presupuestos_quedan"
 CB_PRESUP_GASTOS_POR = "menu_presupuestos_gastos_por"
 CB_PRESUP_NUEVO = "menu_presupuestos_nuevo"
 CB_PRESUP_SEL = "menu_presupuesto_sel_"
+CB_PRESUP_GASTO = "menu_presupuesto_gasto_"
 
 CB_AHORROS_CREAR = "menu_ahorros_crear"
 CB_AHORROS_AGREGAR = "menu_ahorros_agregar"
@@ -318,6 +319,17 @@ def prompt_presupuesto_nuevo() -> Tuple[str, InlineKeyboardMarkup]:
     )
 
 
+def prompt_presupuesto_gasto(p: dict) -> Tuple[str, InlineKeyboardMarkup]:
+    nombre = p.get("nombre") or p.get("categoria_nombre") or "tu presupuesto"
+    return _prompt(
+        f"💸 **Restar gasto del presupuesto _{nombre}_**\n\n"
+        "Envíame el monto gastado, por ejemplo:\n"
+        f"`Gasté 50 cup del presupuesto de {nombre}`\n\n"
+        "También puedes escribir solo el monto: `50`",
+        CB_PRESUP,
+    )
+
+
 def prompt_ahorro_crear() -> Tuple[str, InlineKeyboardMarkup]:
     return _prompt(
         f"🎯 **Crea tu meta de ahorro**\n\n"
@@ -445,7 +457,23 @@ def _render(data: str, usuario: dict) -> Optional[Tuple[str, InlineKeyboardMarku
         except Exception as e:
             logger.error("Error en presupuesto específico: %s", e)
             texto = "❌ Ocurrió un error al consultar el presupuesto."
-        return _con_botones(texto, [], volver=CB_PRESUP)
+            pid = None
+        if pid is None:
+            return _con_botones(texto, [], volver=CB_PRESUP)
+        return _con_botones(
+            texto,
+            [[("💸 Restar gasto de este presupuesto", f"{CB_PRESUP_GASTO}{pid}")]],
+            volver=CB_PRESUP,
+        )
+    if data.startswith(CB_PRESUP_GASTO):
+        try:
+            pid = int(data[len(CB_PRESUP_GASTO):])
+            p = next((x for x in database.obtener_presupuestos(usuario["id"]) if x["id"] == pid), None)
+            if not p:
+                return menu_presupuestos_quedan(usuario)
+            return prompt_presupuesto_gasto(p)
+        except Exception:
+            return menu_presupuestos_quedan(usuario)
 
     # Ahorros
     if data == CB_AHORROS_CREAR:
@@ -565,6 +593,22 @@ async def procesar_callback(data: str, query, context, usuario: dict, usuario_id
         if render is None:
             return False
         texto, kb = render
+        # Contexto de flujo: al seleccionar un presupuesto o meta se guarda el
+        # elemento activo para que el próximo texto escrito se asocie a él.
+        if context is not None:
+            if data.startswith(CB_PRESUP_SEL) or data.startswith(CB_PRESUP_GASTO):
+                try:
+                    context.user_data["presupuesto_ctx"] = {"id": int(data.rsplit("_", 1)[1])}
+                except Exception:
+                    pass
+            elif data.startswith(CB_AHORRO_ADD):
+                try:
+                    context.user_data["meta_ctx"] = {"id": int(data[len(CB_AHORRO_ADD):])}
+                except Exception:
+                    pass
+            else:
+                context.user_data.pop("presupuesto_ctx", None)
+                context.user_data.pop("meta_ctx", None)
         await _editar(query, texto, kb)
         return True
     except Exception as e:

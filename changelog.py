@@ -4,9 +4,19 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.14.0"
+VERSION_ACTUAL = "2.14.2"
 
 CHANGELOG = {
+    "2.14.2": {
+        "titulo": "🎯 Los flujos de presupuestos y ahorros recuerdan lo que seleccionaste",
+        "mejoras": [
+            "En Presupuestos → Restante de un presupuesto, ahora puedes restar un gasto directamente: elige un presupuesto, toca 'Restar gasto de este presupuesto' y escribe el monto (ej: 'gasté 50 cup')",
+            "Si seleccionas un presupuesto y escribes un gasto, se registra asociado a ESE presupuesto (se descuenta de su categoría), ya no como un gasto general",
+            "En Ahorros → Agregar dinero a una meta, al elegir la meta puedes escribir solo el monto (ej: '500') y se suma a la meta seleccionada, sin necesidad de repetir su nombre",
+            "Escribe 'cancelar' en cualquier flujo para salir sin aplicar el cambio"
+        ],
+        "emoji": "🎯"
+    },
     "2.14.0": {
         "titulo": "🧭 Navegación guiada con botones",
         "mejoras": [

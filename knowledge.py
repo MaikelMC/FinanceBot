@@ -98,8 +98,14 @@ def _detectar_presupuesto_en_gasto(mensaje: str, usuario: Dict[str, Any]) -> Opt
 
 
 def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None,
-                    categoria_sugerida: Optional[str] = None) -> str:
-    """Procesa una transacción de gasto."""
+                    categoria_sugerida: Optional[str] = None,
+                    presupuesto: Optional[Dict[str, Any]] = None) -> str:
+    """Procesa una transacción de gasto.
+
+    Si se pasa `presupuesto` (flujo guiado del menú), el gasto se registra
+    directamente en la categoría de ese presupuesto, sin depender de la
+    detección por texto ("del presupuesto para X").
+    """
     cantidad = None
 
     cantidad = _parsear_cantidad(mensaje)
@@ -112,7 +118,8 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
     try:
         # Si el gasto hace referencia a un presupuesto ("del presupuesto para X"),
         # registrarlo en la categoría del presupuesto para descontarlo del mismo.
-        presupuesto = _detectar_presupuesto_en_gasto(mensaje, usuario)
+        if presupuesto is None:
+            presupuesto = _detectar_presupuesto_en_gasto(mensaje, usuario)
         # Reutilizar la moneda del presupuesto si el gasto se liga a él y no hay moneda aún
         if moneda_id is None and presupuesto and presupuesto.get("moneda_id"):
             for m in database.obtener_monedas(usuario["id"]):
@@ -449,6 +456,21 @@ def _buscar_meta(usuario: Dict[str, Any], etiqueta: str) -> Optional[Dict[str, A
         if ratio > mejor_ratio:
             mejor, mejor_ratio = m, ratio
     return mejor
+
+
+def _agregar_dinero_a_meta(meta: Dict[str, Any], cantidad: float) -> str:
+    """Suma dinero a una meta ya identificada y devuelve el mensaje de confirmación."""
+    database.actualizar_meta_ahorro(meta["id"], cantidad)
+    objetivo = meta.get("objetivo", 0) or 0
+    nuevo = (meta.get("cantidad_actual", 0) or 0) + cantidad
+    progreso = (nuevo / objetivo * 100) if objetivo > 0 else 0
+    restante = max(objetivo - nuevo, 0)
+    nombre = meta.get("nombre") or "tu meta"
+    return (
+        f"{formato.EMOJI_OK} **Añadido {formato.fmt_moneda(cantidad)} a tu meta de ahorro** _{nombre}_\n"
+        f"{formato.fmt_moneda(nuevo)} / {formato.fmt_moneda(objetivo)} ({progreso:.0f}%)\n"
+        f"Restante: **{formato.fmt_moneda(restante)}**"
+    )
 
 
 def _procesar_eliminar_todas_metas(usuario: Dict[str, Any]) -> str:

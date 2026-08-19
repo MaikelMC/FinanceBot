@@ -189,6 +189,83 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Ocurrió un error. Intenta de nuevo con /start.")
 
 
+async def _manejar_ctx_presupuesto(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                   mensaje: str, usuario: dict, usuario_id: int) -> bool:
+    """Procesa el texto escrito cuando hay un presupuesto activo en el flujo del menú.
+
+    El gasto se registra asociado al presupuesto seleccionado (resta de su
+    categoría). Retorna True si consumió el mensaje.
+    """
+    ctx = context.user_data.get("presupuesto_ctx") or {}
+    presupuesto = next(
+        (p for p in database.obtener_presupuestos(usuario_id) if p.get("id") == ctx.get("id")),
+        None,
+    )
+    if not presupuesto:
+        context.user_data.pop("presupuesto_ctx", None)
+        return False
+    msg = update.message or update.edited_message
+
+    if mensaje.strip().lower() in ("cancelar", "cancel", "no"):
+        context.user_data.pop("presupuesto_ctx", None)
+        await msg.reply_text("❌ Operación cancelada.", parse_mode="Markdown",
+                             reply_markup=_crear_teclado_principal())
+        return True
+
+    # Si no parece un gasto (sin monto o un ingreso/consulta), liberar el contexto.
+    if not knowledge._parsear_cantidad(mensaje):
+        context.user_data.pop("presupuesto_ctx", None)
+        return False
+    m = mensaje.lower()
+    if any(palabra in m for palabra in ("recib", "ingreso", "salario", "sueldo",
+                                        "cobr", "deposit", "cuánt", "cuant", "tengo",
+                                        "balance", "resumen", "hola", "gracias", "ayuda")):
+        context.user_data.pop("presupuesto_ctx", None)
+        return False
+
+    texto = knowledge._procesar_gasto(mensaje, usuario, presupuesto=presupuesto)
+    context.user_data.pop("presupuesto_ctx", None)
+    await msg.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
+    return True
+
+
+async def _manejar_ctx_meta(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                            mensaje: str, usuario: dict, usuario_id: int) -> bool:
+    """Procesa el texto escrito cuando hay una meta activa en el flujo del menú
+    ("Agregar dinero a una meta"). Suma el monto a esa meta.
+    """
+    ctx = context.user_data.get("meta_ctx") or {}
+    meta = next(
+        (mt for mt in database.obtener_metas_ahorro(usuario_id) if mt.get("id") == ctx.get("id")),
+        None,
+    )
+    if not meta:
+        context.user_data.pop("meta_ctx", None)
+        return False
+    msg = update.message or update.edited_message
+
+    if mensaje.strip().lower() in ("cancelar", "cancel", "no"):
+        context.user_data.pop("meta_ctx", None)
+        await msg.reply_text("❌ Operación cancelada.", parse_mode="Markdown",
+                             reply_markup=_crear_teclado_principal())
+        return True
+
+    cantidad = knowledge._parsear_cantidad(mensaje)
+    if not cantidad:
+        nombre = meta.get("nombre", "tu meta")
+        await msg.reply_text(
+            f"💵 No pude entender el monto a agregar a la meta **{nombre}**.\n"
+            "Ej: `agrega 500` o simplemente `500`",
+            parse_mode="Markdown",
+        )
+        return True
+
+    texto = knowledge._agregar_dinero_a_meta(meta, cantidad)
+    context.user_data.pop("meta_ctx", None)
+    await msg.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
+    return True
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja mensajes de texto en lenguaje natural."""
     user = update.effective_user
@@ -258,6 +335,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("agregando_moneda_paso"):
         await _manejar_flujo_moneda(update, context, mensaje, usuario)
         return
+
+    # --- Contexto de flujo del menú: presupuesto o meta seleccionada ---
+    if context.user_data.get("presupuesto_ctx"):
+        if await _manejar_ctx_presupuesto(update, context, mensaje, usuario, usuario_id):
+            return
+    if context.user_data.get("meta_ctx"):
+        if await _manejar_ctx_meta(update, context, mensaje, usuario, usuario_id):
+            return
 
     # Detectar múltiples transacciones en lenguaje natural
     if knowledge._esensaje_multi_transaccion(mensaje):
