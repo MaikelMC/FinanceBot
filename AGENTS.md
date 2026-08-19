@@ -90,6 +90,7 @@ python -c "import config, database, knowledge; config.validate_config(); databas
 **Navegación guiada (v2.14):**
 - `menus.py` = builders puros (sin IO de Telegram): `teclado_principal()` (7 botones) + `menu_*` por sección + dispatcher `procesar_callback(data, query, context, usuario, usuario_id) -> bool` que renderiza (texto, markup) y edita el mensaje del botón
 - `handlers.handle_callback_query` delega al inicio: `if query.data.startswith("menu_"): if await menus.procesar_callback(...): return`
+- Cada sección muestra su **contenido directamente** (balance del mes, presupuestos, metas, monedas, últimas transacciones) sin botón "Ver"; las acciones van debajo
 - Botones que necesitan datos (crear presupuesto/meta, agregar dinero, registrar gasto/ingreso) lanzan un prompt de lenguaje natural con ejemplo; el usuario escribe y la acción fluye por la IA
 - Sub-selecciones: `menu_presupuesto_sel_<id>`, `menu_ahorro_add_<id>`, `menu_ahorro_del_<id>` + confirmaciones `menu_ahorro_del_confirm_<id>`, `menu_ahorro_del_all_confirm`, `menu_delete_confirm/cancel`
 - Más opciones reusa callbacks existentes: `notif_*` (menú de notificaciones con botón Volver a `menu_mas`), `exp_*` (exportar), `menu_mas_resumen`, `menu_mas_borrar`

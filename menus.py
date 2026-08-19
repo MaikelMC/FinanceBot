@@ -32,17 +32,14 @@ CB_AYUDA = "menu_ayuda"
 CB_MAS = "menu_mas"
 
 # Sub-acciones
-CB_BALANCE_VER = "menu_balance_ver"
 CB_BALANCE_GASTOS = "menu_balance_gastos"
 CB_BALANCE_INGRESOS = "menu_balance_ingresos"
 
-CB_PRESUP_VER = "menu_presupuestos_ver"
 CB_PRESUP_QUEDAN = "menu_presupuestos_quedan"
 CB_PRESUP_GASTOS_POR = "menu_presupuestos_gastos_por"
 CB_PRESUP_NUEVO = "menu_presupuestos_nuevo"
 CB_PRESUP_SEL = "menu_presupuesto_sel_"
 
-CB_AHORROS_VER = "menu_ahorros_ver"
 CB_AHORROS_CREAR = "menu_ahorros_crear"
 CB_AHORROS_AGREGAR = "menu_ahorros_agregar"
 CB_AHORROS_ELIMINAR = "menu_ahorros_eliminar"
@@ -52,9 +49,6 @@ CB_AHORRO_DEL = "menu_ahorro_del_"
 CB_AHORRO_DEL_CONF = "menu_ahorro_del_confirm_"
 CB_AHORRO_DEL_ALL_CONF = "menu_ahorro_del_all_confirm"
 
-CB_MONEDAS_VER = "menu_monedas_ver"
-
-CB_TRANS_VER = "menu_transacciones_ver"
 CB_TRANS_GASTOS = "menu_transacciones_gastos"
 CB_TRANS_INGRESOS = "menu_transacciones_ingresos"
 CB_TRANS_GASTO = "menu_transacciones_gasto"
@@ -122,22 +116,21 @@ def menu_inicio() -> Tuple[str, InlineKeyboardMarkup]:
 # SECCIONES
 # ============================================================
 
-def menu_balance() -> Tuple[str, InlineKeyboardMarkup]:
+def menu_balance(usuario: dict) -> Tuple[str, InlineKeyboardMarkup]:
+    """Balance del mes + acciones (sin botón 'Ver': el contenido va directo)."""
     return _con_botones(
-        f"{formato.EMOJI_BALANCE} **Balance**\n{formato.SEPARADOR}\n¿Qué quieres ver?",
+        knowledge._procesar_balance(usuario),
         [
-            [("💰 Ver balance del mes", CB_BALANCE_VER)],
-            [("📉 Ver gastos", CB_BALANCE_GASTOS)],
-            [("📈 Ver ingresos", CB_BALANCE_INGRESOS)],
+            [("📉 Ver gastos", CB_BALANCE_GASTOS), ("📈 Ver ingresos", CB_BALANCE_INGRESOS)],
         ],
     )
 
 
-def menu_presupuestos() -> Tuple[str, InlineKeyboardMarkup]:
+def menu_presupuestos(usuario: dict) -> Tuple[str, InlineKeyboardMarkup]:
+    """Presupuestos actuales + acciones."""
     return _con_botones(
-        f"{formato.EMOJI_PRESUPUESTO} **Presupuestos**\n{formato.SEPARADOR}\n¿Qué quieres hacer?",
+        knowledge._procesar_presupuestos(usuario),
         [
-            [("📊 Ver mis presupuestos", CB_PRESUP_VER)],
             [("🔄 Restante de un presupuesto", CB_PRESUP_QUEDAN)],
             [("📉 Gastos por presupuestos", CB_PRESUP_GASTOS_POR)],
             [("➕ Crear presupuesto", CB_PRESUP_NUEVO)],
@@ -145,11 +138,11 @@ def menu_presupuestos() -> Tuple[str, InlineKeyboardMarkup]:
     )
 
 
-def menu_ahorros() -> Tuple[str, InlineKeyboardMarkup]:
+def menu_ahorros(usuario: dict) -> Tuple[str, InlineKeyboardMarkup]:
+    """Metas de ahorro actuales + acciones."""
     return _con_botones(
-        f"{formato.EMOJI_META} **Ahorros**\n{formato.SEPARADOR}\nGestiona tus metas de ahorro:",
+        knowledge._procesar_metas_ahorro(usuario),
         [
-            [("🎯 Ver mis metas", CB_AHORROS_VER)],
             [("➕ Crear meta", CB_AHORROS_CREAR)],
             [("💵 Agregar dinero a una meta", CB_AHORROS_AGREGAR)],
             [("🗑️ Eliminar una meta", CB_AHORROS_ELIMINAR)],
@@ -158,11 +151,22 @@ def menu_ahorros() -> Tuple[str, InlineKeyboardMarkup]:
     )
 
 
-def menu_monedas() -> Tuple[str, InlineKeyboardMarkup]:
+def _texto_monedas(usuario: dict) -> str:
+    monedas = database.obtener_monedas(usuario["id"])
+    if not monedas:
+        return f"💱 **Tus monedas:**\n\n📝 Aún no tienes monedas configuradas."
+    lineas = [f"{formato.EMOJI_MONEDA} **Tus monedas**", formato.SEPARADOR]
+    for m in monedas:
+        default = " ⭐ predeterminada" if m.get("es_default") else ""
+        lineas.append(f"  {m['simbolo']} {m['nombre']} ({m['abreviatura']}){default}")
+    return "\n".join(lineas)
+
+
+def menu_monedas(usuario: dict) -> Tuple[str, InlineKeyboardMarkup]:
+    """Monedas actuales + acciones."""
     return _con_botones(
-        f"{formato.EMOJI_MONEDA} **Monedas**\n{formato.SEPARADOR}\n¿Qué quieres hacer?",
+        _texto_monedas(usuario),
         [
-            [("💱 Ver monedas", CB_MONEDAS_VER)],
             [("➕ Agregar moneda", "moneda_agregar")],
             [("🗑️ Eliminar moneda", "monedaeliminar_menu")],
             [("⭐ Predeterminada", "moneda_default_menu")],
@@ -170,13 +174,12 @@ def menu_monedas() -> Tuple[str, InlineKeyboardMarkup]:
     )
 
 
-def menu_transacciones() -> Tuple[str, InlineKeyboardMarkup]:
+def menu_transacciones(usuario: dict) -> Tuple[str, InlineKeyboardMarkup]:
+    """Últimas transacciones + acciones."""
     return _con_botones(
-        f"📋 **Transacciones**\n{formato.SEPARADOR}\n¿Qué quieres hacer?",
+        knowledge._procesar_transacciones(usuario),
         [
-            [("📋 Últimas transacciones", CB_TRANS_VER)],
-            [("📉 Ver gastos", CB_TRANS_GASTOS)],
-            [("📈 Ver ingresos", CB_TRANS_INGRESOS)],
+            [("📉 Ver gastos", CB_TRANS_GASTOS), ("📈 Ver ingresos", CB_TRANS_INGRESOS)],
             [("➕ Registrar gasto", CB_TRANS_GASTO)],
             [("➕ Registrar ingreso", CB_TRANS_INGRESO)],
         ],
@@ -403,31 +406,27 @@ def _render(data: str, usuario: dict) -> Optional[Tuple[str, InlineKeyboardMarku
     if data == CB_INICIO:
         return menu_inicio()
     if data == CB_BALANCE:
-        return menu_balance()
+        return menu_balance(usuario)
     if data == CB_PRESUP:
-        return menu_presupuestos()
+        return menu_presupuestos(usuario)
     if data == CB_AHORROS:
-        return menu_ahorros()
+        return menu_ahorros(usuario)
     if data == CB_MONEDAS:
-        return menu_monedas()
+        return menu_monedas(usuario)
     if data == CB_TRANS:
-        return menu_transacciones()
+        return menu_transacciones(usuario)
     if data == CB_AYUDA:
         return menu_ayuda()
     if data == CB_MAS:
         return menu_mas()
 
     # Balance
-    if data == CB_BALANCE_VER:
-        return _con_botones(knowledge._procesar_balance(usuario), [], volver=CB_BALANCE)
     if data == CB_BALANCE_GASTOS:
         return _con_botones(knowledge._procesar_gastos(usuario), [], volver=CB_BALANCE)
     if data == CB_BALANCE_INGRESOS:
         return _con_botones(knowledge._procesar_ingresos(usuario), [], volver=CB_BALANCE)
 
     # Presupuestos
-    if data == CB_PRESUP_VER:
-        return _con_botones(knowledge._procesar_presupuestos(usuario), [], volver=CB_PRESUP)
     if data == CB_PRESUP_QUEDAN:
         return menu_presupuestos_quedan(usuario)
     if data == CB_PRESUP_GASTOS_POR:
@@ -449,8 +448,6 @@ def _render(data: str, usuario: dict) -> Optional[Tuple[str, InlineKeyboardMarku
         return _con_botones(texto, [], volver=CB_PRESUP)
 
     # Ahorros
-    if data == CB_AHORROS_VER:
-        return _con_botones(knowledge._procesar_metas_ahorro(usuario), [], volver=CB_AHORROS)
     if data == CB_AHORROS_CREAR:
         return prompt_ahorro_crear()
     if data == CB_AHORROS_AGREGAR:
@@ -488,22 +485,7 @@ def _render(data: str, usuario: dict) -> Optional[Tuple[str, InlineKeyboardMarku
         except Exception:
             return menu_ahorros_eliminar(usuario)
 
-    # Monedas
-    if data == CB_MONEDAS_VER:
-        monedas = database.obtener_monedas(usuario["id"])
-        if not monedas:
-            texto = f"💱 **Tus monedas:**\n\n📝 Aún no tienes monedas configuradas."
-        else:
-            lineas = [f"{formato.EMOJI_MONEDA} **Tus monedas**", formato.SEPARADOR]
-            for m in monedas:
-                default = " ⭐ predeterminada" if m.get("es_default") else ""
-                lineas.append(f"  {m['simbolo']} {m['nombre']} ({m['abreviatura']}){default}")
-            texto = "\n".join(lineas)
-        return _con_botones(texto, [], volver=CB_MONEDAS)
-
     # Transacciones
-    if data == CB_TRANS_VER:
-        return _con_botones(knowledge._procesar_transacciones(usuario), [], volver=CB_TRANS)
     if data == CB_TRANS_GASTOS:
         return _con_botones(knowledge._procesar_gastos(usuario), [], volver=CB_TRANS)
     if data == CB_TRANS_INGRESOS:

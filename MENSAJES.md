@@ -207,16 +207,17 @@ Confirmado: `🗑️ **Historial eliminado.** Se borraron **12** transacciones.`
 - Al terminar una acción por lenguaje natural, el bot muestra los **7 botones principales**.
 
 ### Secciones y acciones
+Cada sección muestra **su contenido directamente** al abrir (sin botón "Ver"): el balance del mes, tus presupuestos, tus metas, tus monedas y tus últimas transacciones aparecen en el mensaje junto con las acciones.
 
-**💰 Balance:** `Ver balance del mes` · `Ver gastos` · `Ver ingresos`.
+**💰 Balance:** balance del mes + `Ver gastos` · `Ver ingresos`.
 
-**📊 Presupuestos:** `Ver mis presupuestos` · `Restante de un presupuesto` (elige cuál) · `Gastos por presupuestos` · `Crear presupuesto` (prompt NL).
+**📊 Presupuestos:** presupuestos actuales + `Restante de un presupuesto` (elige cuál) · `Gastos por presupuestos` · `Crear presupuesto` (prompt NL).
 
-**🎯 Ahorros:** `Ver mis metas` · `Crear meta` (prompt NL) · `Agregar dinero a una meta` (elige cuál → prompt NL) · `Eliminar una meta` (elige cuál → confirmar) · `Eliminar todas las metas` (confirmar).
+**🎯 Ahorros:** metas actuales + `Crear meta` (prompt NL) · `Agregar dinero a una meta` (elige cuál → prompt NL) · `Eliminar una meta` (elige cuál → confirmar) · `Eliminar todas las metas` (confirmar).
 
-**💱 Monedas:** `Ver monedas` · `Agregar moneda` · `Eliminar moneda` · `Predeterminada`.
+**💱 Monedas:** monedas actuales + `Agregar moneda` · `Eliminar moneda` · `Predeterminada`.
 
-**📋 Transacciones:** `Últimas transacciones` · `Ver gastos` · `Ver ingresos` · `Registrar gasto` (prompt NL) · `Registrar ingreso` (prompt NL).
+**📋 Transacciones:** últimas transacciones + `Ver gastos` · `Ver ingresos` · `Registrar gasto` (prompt NL) · `Registrar ingreso` (prompt NL).
 
 **❓ Ayuda:** `Registrar gasto/ingreso` · `Ver balance` · `Crear presupuesto` · `Crear metas` · `Todos los comandos`.
 
