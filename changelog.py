@@ -4,9 +4,21 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.13.5"
+VERSION_ACTUAL = "2.14.0"
 
 CHANGELOG = {
+    "2.14.0": {
+        "titulo": "🧭 Navegación guiada con botones",
+        "mejoras": [
+            "Nuevo menú principal con 7 secciones: Balance, Presupuestos, Ahorros, Monedas, Transacciones, Ayuda y Más opciones",
+            "Cada sección tiene botones para sus acciones y un botón Volver; se navega tocando (el teclado de texto ya no se usa)",
+            "Consultas al instante: balance del mes, gastos, ingresos, presupuestos, restante, metas, monedas, resumen y últimas transacciones",
+            "Acciones con datos (crear presupuesto/meta, agregar dinero, registrar gasto/ingreso) te guían con un ejemplo para escribir en lenguaje natural",
+            "Más opciones agrupa Notificaciones, Exportar, Resumen del mes y Borrar historial",
+            "La IA sigue disponible: siempre puedes escribir directo, y al terminar verás el menú principal"
+        ],
+        "emoji": "🧭"
+    },
     "2.13.5": {
         "titulo": "🧹 Eliminar todas las metas de ahorro en un mensaje",
         "mejoras": [

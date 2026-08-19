@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Optional
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
@@ -20,16 +20,10 @@ import knowledge
 import ai_client
 import changelog
 import notificaciones
+import menus
 from config import IMAGES_DIR, ADMIN_USER_ID
 
 logger = logging.getLogger(__name__)
-
-# Textos exactos de los botones del teclado persistente
-BTN_BALANCE = "💰 Balance"
-BTN_TRANSACCIONES = "📋 Transacciones"
-BTN_PRESUPUESTOS = "📊 Presupuestos"
-BTN_MONEDAS = "💱 Monedas"
-TECLADO_BUTTONS = {BTN_BALANCE, BTN_TRANSACCIONES, BTN_PRESUPUESTOS, BTN_MONEDAS}
 
 # Monedas comunes para el botón de agregar moneda (auto-completar)
 MONEDAS_PRESET = {
@@ -58,40 +52,9 @@ def _formatear_notificacion(ultima_vista: Optional[str]) -> Optional[str]:
     return "\n".join(lineas)
 
 
-def _crear_teclado_permanente():
-    """Crea el teclado persistente con botones de acciones frecuentes."""
-    keyboard = [
-        [BTN_BALANCE, BTN_TRANSACCIONES],
-        [BTN_PRESUPUESTOS, BTN_MONEDAS],
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
-
-
-def _crear_botones_monedasInlineKeyboard(monedas: list) -> InlineKeyboardMarkup:
-    """Crea los InlineKeyboard para el menú de monedas."""
-    botones = []
-    for m in monedas:
-        label = f"{'⭐ ' if m.get('es_default') else ''}{m['nombre']} ({m['abreviatura']})"
-        botones.append([InlineKeyboardButton(label, callback_data=f"moneda_info_{m['id']}")])
-    botones.append([
-        InlineKeyboardButton("➕ Agregar", callback_data="moneda_agregar"),
-        InlineKeyboardButton("🗑️ Eliminar", callback_data="monedaeliminar_menu"),
-    ])
-    botones.append([
-        InlineKeyboardButton("⭐ Predeterminada", callback_data="moneda_default_menu"),
-])
-    return InlineKeyboardMarkup(botones)
-
-
-def _crear_botones_rapidos() -> InlineKeyboardMarkup:
-    """Crea el teclado inline con botones de acciones rápidas."""
-    botones = [
-        [
-            InlineKeyboardButton("💰 Consultar balance", callback_data="accion_balance"),
-            InlineKeyboardButton("📋 Ver transacciones", callback_data="accion_transacciones"),
-        ],
-    ]
-    return InlineKeyboardMarkup(botones)
+def _crear_teclado_principal() -> InlineKeyboardMarkup:
+    """Botones principales de navegación (menú principal inline)."""
+    return menus.teclado_principal()
 
 
 def _crear_botones_multi_transacciones(cantidad: int) -> InlineKeyboardMarkup:
@@ -209,11 +172,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Consultar: `¿Cuánto tengo?`\n"
             "• Presupuestar: `Mi presupuesto para comida es $500`\n"
             "• Metas: `Quiero ahorrar $5000 para vacaciones`\n\n"
-            "Usa /help para ver todos los comandos."
+            "Usa /help para ver todos los comandos.\n\n"
+            "👇 **Elige una opción abajo o escríbeme en lenguaje natural:**"
         )
 
-        botones = _crear_teclado_permanente()
-        await update.message.reply_text(mensaje, parse_mode="Markdown", reply_markup=botones)
+        # Quitar el teclado persistente y mostrar el menú principal inline
+        await update.message.reply_text(
+            "🧭 Te cambié el teclado: ahora navegas con botones.",
+            reply_markup=ReplyKeyboardRemove(remove_keyboard=True),
+        )
+        await update.message.reply_text(
+            mensaje, parse_mode="Markdown", reply_markup=_crear_teclado_principal()
+        )
     except Exception as e:
         logger.error("Error en /start: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error. Intenta de nuevo con /start.")
@@ -289,11 +259,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _manejar_flujo_moneda(update, context, mensaje, usuario)
         return
 
-    # --- Manejo de botones del teclado persistente ---
-    if mensaje in TECLADO_BUTTONS:
-        await _manejar_boton_teclado(update, context, mensaje, usuario)
-        return
-
     # Detectar múltiples transacciones en lenguaje natural
     if knowledge._esensaje_multi_transaccion(mensaje):
         transacciones = knowledge._parsear_multi_transaccion(mensaje, usuario)
@@ -311,8 +276,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Flujo normal: una sola transacción o consulta
     try:
         respuesta, pendiente = await ai_client.AIResponder().responder(mensaje, usuario)
-        botones = _crear_teclado_permanente()
-        reply_markup = botones
+        reply_markup = _crear_teclado_principal()
         if pendiente:
             context.user_data["transaccion_pendiente"] = pendiente
             botones_pendiente = _crear_botones_pendiente(pendiente, usuario_id)
@@ -322,7 +286,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Exportación por lenguaje natural: enviar el archivo directamente
         if pendiente and pendiente.get("accion") == "exportar":
             context.user_data.pop("transaccion_pendiente", None)
-            await msg.reply_text(respuesta, parse_mode="Markdown", reply_markup=_crear_teclado_permanente())
+            await msg.reply_text(respuesta, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
             await _enviar_exportacion(msg, context, usuario,
                                       pendiente.get("formato"), pendiente.get("periodo"))
             return
@@ -330,7 +294,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text(respuesta, parse_mode="Markdown", reply_markup=reply_markup)
     except Exception as e:
         logger.error("Error procesando mensaje de %s: %s", user.first_name, e)
-        botones = _crear_teclado_permanente()
         await msg.reply_text(
             "⚠️ Ups, algo salió mal al procesar tu mensaje.\n\n"
             "Intenta con estos comandos:\n"
@@ -339,7 +302,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• `¿Qué gasté hoy?`\n\n"
             "Si el problema persiste, escribe `/help`.",
             parse_mode="Markdown",
-            reply_markup=botones,
+            reply_markup=_crear_teclado_principal(),
         )
 
 
@@ -400,34 +363,8 @@ async def consultar_usuario(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def consultar_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja el comando /help."""
     try:
-        mensaje = (
-            "🤖 **Comandos disponibles:**\n\n"
-            "• `/start` - Iniciar/Reiniciar el bot\n"
-            "• `/user` - Ver información de usuario\n"
-            "• `/resumen` - Resumen del mes actual\n"
-            "• `/categorias` - Ver tus categorías financieras\n"
-            "• `/gastos` - Ver tus últimos gastos\n"
-            "• `/ingresos` - Ver tus últimos ingresos\n"
-            "• `/metas` - Ver tus metas de ahorro\n"
-            "• `/notificaciones` - Alertas de presupuesto y resumen diario (21:30 hora de Cuba)\n"
-            "• `/exportar` - Exporta tus datos a Excel/CSV (ej: `/exportar csv 2026-07`)\n"
-            "• `/help` - Ver esta ayuda\n"
-            "• `/delete` - Borrar todo el historial de transacciones\n\n"
-            "📝 **Ejemplos de lenguaje natural:**\n"
-            "• 'Gasté $50 en comida para el desayuno'\n"
-            "• 'Recibí $2000 de salario'\n"
-            "• 'Mi presupuesto para comida es $500 este mes'\n"
-            "• 'Quiero ahorrar $5000 para unas vacaciones'\n"
-            "• '¿Cuál es mi balance actual?'\n"
-            "• 'Exporta mis datos del mes'\n\n"
-            "✏️ **Modificar datos:**\n"
-            "• 'Cambia el gasto de $50 a ingreso'\n"
-            "• 'Modifica la descripción de mi último gasto'\n"
-            "• 'Cambia el monto de $100 a $150'\n"
-            "• 'Elimina la transacción de $30'\n"
-            "• 'Pasa ese gasto a la categoría transporte'"
-        )
-        await update.message.reply_text(mensaje, parse_mode="Markdown")
+        mensaje = menus.TEXTO_HELP
+        await update.message.reply_text(mensaje, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
     except Exception as e:
         logger.error("Error en /help: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al mostrar la ayuda.")
@@ -449,8 +386,7 @@ async def consultar_categorias(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         usuario = _obtener_usuario_contexto(update, context)
         texto = knowledge._procesar_categorias(usuario)
-        botones = _crear_teclado_permanente()
-        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
     except Exception as e:
         logger.error("Error en /categorias: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al obtener tus categorías.")
@@ -461,8 +397,7 @@ async def consultar_gastos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         usuario = _obtener_usuario_contexto(update, context)
         texto = knowledge._procesar_gastos(usuario)
-        botones = _crear_teclado_permanente()
-        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
     except Exception as e:
         logger.error("Error en /gastos: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al obtener tus gastos.")
@@ -473,8 +408,7 @@ async def consultar_ingresos(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         usuario = _obtener_usuario_contexto(update, context)
         texto = knowledge._procesar_ingresos(usuario)
-        botones = _crear_teclado_permanente()
-        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
     except Exception as e:
         logger.error("Error en /ingresos: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al obtener tus ingresos.")
@@ -485,8 +419,7 @@ async def consultar_metas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         usuario = _obtener_usuario_contexto(update, context)
         texto = knowledge._procesar_metas_ahorro(usuario)
-        botones = _crear_teclado_permanente()
-        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
     except Exception as e:
         logger.error("Error en /metas: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al obtener tus metas de ahorro.")
@@ -497,8 +430,7 @@ async def consultar_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         usuario = _obtener_usuario_contexto(update, context)
         texto = knowledge._procesar_resumen_mensual(usuario)
-        botones = _crear_teclado_permanente()
-        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
     except Exception as e:
         logger.error("Error en /resumen: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al generar tu resumen.")
@@ -565,7 +497,7 @@ async def _enviar_exportacion(msg, context: ContextTypes.DEFAULT_TYPE, usuario: 
         await context.bot.send_message(
             chat_id=msg.chat_id,
             text="❌ No pude generar tu exportación. Intenta de nuevo en un momento.",
-            reply_markup=_crear_teclado_permanente(),
+            reply_markup=_crear_teclado_principal(),
         )
     finally:
         for ruta in rutas:
@@ -656,7 +588,10 @@ def _crear_menu_notificaciones(prefs: dict):
             InlineKeyboardButton(f"{'✅' if a100 else '⬜'} 100%", callback_data="notif_alerta_100"),
             InlineKeyboardButton(f"{'✅' if a125 else '⬜'} 125%", callback_data="notif_alerta_125"),
         ],
-        [InlineKeyboardButton("❌ Cerrar", callback_data="notif_close")],
+        [
+            InlineKeyboardButton("🔙 Volver a Más opciones", callback_data="menu_mas"),
+            InlineKeyboardButton("❌ Cerrar", callback_data="notif_close"),
+        ],
     ])
     return texto, kb
 
@@ -667,7 +602,6 @@ async def configurar_notificaciones(update: Update, context: ContextTypes.DEFAUL
         usuario = _obtener_usuario_contexto(update, context)
         prefs = database.obtener_preferencias(usuario["id"])
         texto, kb = _crear_menu_notificaciones(prefs)
-        botones = _crear_teclado_permanente()
         await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=kb)
     except Exception as e:
         logger.error("Error en /notificaciones: %s", e)
@@ -726,127 +660,19 @@ async def anuncio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
-# BOTONES DEL TECLADO PERSISTENTE
-# ============================================================
-
-async def _manejar_boton_teclado(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                  mensaje: str, usuario: dict):
-    """Maneja los taps en los botones del teclado persistente."""
-    usuario_id = context.user_data["usuario_id"]
-    botones = _crear_teclado_permanente()
-
-    if mensaje == BTN_BALANCE:
-        balance = database.obtener_balance(usuario_id)
-        por_moneda = balance.get("por_moneda", {})
-
-        lineas = [f"{formato.EMOJI_BALANCE} **Balance de {formato.nombre_mes_actual()}**", formato.SEPARADOR]
-
-        if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
-            for abrev, datos in por_moneda.items():
-                simbolo = datos.get("simbolo", "$")
-                neto_m = datos["ingresos"] - datos["gastos"]
-                lineas.append("")
-                lineas.append(f"**{abrev}**")
-                lineas.append(
-                    f"{formato.EMOJI_INGRESO} {formato.fmt_moneda(datos['ingresos'], simbolo=simbolo)}   "
-                    f"{formato.EMOJI_GASTO} {formato.fmt_moneda(datos['gastos'], simbolo=simbolo)}   "
-                    f"→ **{formato.fmt_moneda(neto_m, simbolo=simbolo)}**"
-                )
-        else:
-            lineas.append(f"{formato.EMOJI_INGRESO} Ingresos: {formato.fmt_moneda(balance['ingresos'])}")
-            lineas.append(f"{formato.EMOJI_GASTO} Gastos: {formato.fmt_moneda(balance['gastos'])}")
-            lineas.append(f"Neto: **{formato.fmt_moneda(balance['neto'])}**")
-
-        lineas.append("")
-        lineas.append("¿Ver transacciones recientes o configurar un presupuesto?")
-        texto = "\n".join(lineas)
-        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
-
-    elif mensaje == BTN_TRANSACCIONES:
-        transacciones = database.obtener_transacciones(usuario_id, 5)
-        if not transacciones:
-            texto = "📝 No tienes transacciones registradas aún."
-        else:
-            lineas = [f"📝 **Tus últimas transacciones**", formato.SEPARADOR]
-            for t in transacciones:
-                icono = formato.EMOJI_INGRESO if t["tipo"] == "ingreso" else formato.EMOJI_GASTO
-                label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
-                fecha = t.get("fecha", "N/A")[:10]
-                desc = knowledge._limpiar_descripcion(t.get("descripcion", ""))
-                lineas.append(f"{icono} {formato.fmt_moneda(t['cantidad'])} - {label}: {desc} ({fecha})")
-            texto = "\n".join(lineas)
-        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
-
-    elif mensaje == BTN_PRESUPUESTOS:
-        presupuestos = database.obtener_presupuestos(usuario_id)
-        if not presupuestos:
-            texto = "📊 No tienes presupuestos configurados.\n\nUsa: `Mi presupuesto para comida es $500 este mes`"
-        else:
-            monedas_usuario = database.obtener_monedas(usuario_id)
-            moneda_lookup = {m["id"]: m for m in monedas_usuario}
-            lineas = [f"{formato.EMOJI_PRESUPUESTO} **Tus presupuestos**", formato.SEPARADOR]
-            for p in presupuestos:
-                cat = p.get("nombre") or p.get("categoria_nombre", "General")
-                moneda = moneda_lookup.get(p.get("moneda_id"))
-                abrev = moneda.get("abreviatura") if moneda else None
-                simbolo = moneda.get("simbolo", "$") if moneda else "$"
-                planeado = p["cantidad_planejada"]
-                gastado = p["cantidad_gastada"]
-                restante = planeado - gastado
-                progreso = (gastado / planeado * 100) if planeado > 0 else 0
-                periodo = p.get("periodo")
-                lineas.append("")
-                lineas.append(f"**{cat}**{f' · {periodo}' if periodo else ''}")
-                lineas.append(
-                    f"{formato.barra_progreso(progreso)} {progreso:.0f}% — "
-                    f"{formato.fmt_moneda(gastado, simbolo=simbolo)} de "
-                    f"{formato.fmt_moneda(planeado, abrev=abrev, simbolo=simbolo)}"
-                )
-                lineas.append(f"Restante: **{formato.fmt_moneda(restante, abrev=abrev, simbolo=simbolo)}**")
-            texto = "\n".join(lineas)
-        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=botones)
-
-    elif mensaje == BTN_MONEDAS:
-        await _mostrar_menu_monedas(update, context, usuario_id)
-
-
-# ============================================================
 # GESTIÓN DE MONEDAS
 # ============================================================
-
-async def _mostrar_menu_monedas(update: Update, context: ContextTypes.DEFAULT_TYPE, usuario_id: int):
-    """Muestra el menú de monedas con InlineKeyboard."""
-    monedas = database.obtener_monedas(usuario_id)
-    botones = _crear_teclado_permanente()
-
-    if not monedas:
-        texto = (
-            "💱 **Tus monedas:**\n\n"
-            "📝 Aún no tienes monedas configuradas.\n\n"
-            "Toca **➕ Agregar** para crear tu primera moneda."
-        )
-    else:
-        lineas = [f"{formato.EMOJI_MONEDA} **Tus monedas**", formato.SEPARADOR]
-        for m in monedas:
-            default = " ⭐ predeterminada" if m.get("es_default") else ""
-            lineas.append(f"  {m['simbolo']} {m['nombre']} ({m['abreviatura']}){default}")
-        texto = "\n".join(lineas)
-
-    kb_inline = _crear_botones_monedasInlineKeyboard(monedas)
-    await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=kb_inline)
-
 
 async def _manejar_flujo_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE,
                                  mensaje: str, usuario: dict):
     """Maneja el flujo conversacional de agregar moneda (3 pasos)."""
     paso = context.user_data.get("agregando_moneda_paso")
     datos = context.user_data.get("agregando_moneda_datos", {})
-    botones = _crear_teclado_permanente()
 
     if mensaje.lower() in ("cancelar", "❌ cancelar"):
         context.user_data.pop("agregando_moneda_paso", None)
         context.user_data.pop("agregando_moneda_datos", None)
-        await update.message.reply_text("❌ Agregación cancelada.", reply_markup=botones)
+        await update.message.reply_text("❌ Agregación cancelada.", reply_markup=_crear_teclado_principal())
         return
 
     if paso == 1:
@@ -855,7 +681,7 @@ async def _manejar_flujo_moneda(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data["agregando_moneda_datos"] = datos
         await update.message.reply_text(
             f"✅ Nombre: **{datos['nombre']}**\n\n¿Cuál es el símbolo? (ej: $, €, ₿, £)",
-            parse_mode="Markdown", reply_markup=botones,
+            parse_mode="Markdown",
         )
 
     elif paso == 2:
@@ -864,7 +690,7 @@ async def _manejar_flujo_moneda(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data["agregando_moneda_datos"] = datos
         await update.message.reply_text(
             f"✅ Símbolo: **{datos['simbolo']}**\n\n¿Cuál es la abreviatura? (ej: USD, EUR, CUP)",
-            parse_mode="Markdown", reply_markup=botones,
+            parse_mode="Markdown",
         )
 
     elif paso == 3:
@@ -883,7 +709,7 @@ async def _manejar_flujo_moneda(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(
             f"✅ **Moneda creada!**\n\n"
             f"  {moneda['simbolo']} {moneda['nombre']} ({moneda['abreviatura']}){default_text}",
-            parse_mode="Markdown", reply_markup=botones,
+            parse_mode="Markdown", reply_markup=_crear_teclado_principal(),
         )
 
 
@@ -903,13 +729,13 @@ async def _responder_editando(query, texto: str, reply_markup: Optional[InlineKe
             return
         try:
             await query.message.reply_text(texto, parse_mode="Markdown",
-                                           reply_markup=_crear_teclado_permanente())
+                                           reply_markup=_crear_teclado_principal())
         except Exception:
             pass
     except Exception:
         try:
             await query.message.reply_text(texto, parse_mode="Markdown",
-                                           reply_markup=_crear_teclado_permanente())
+                                           reply_markup=_crear_teclado_principal())
         except Exception:
             pass
 
@@ -925,7 +751,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             usuario = database.obtener_o_crear_usuario(user.id, user.first_name)
         usuario_id = usuario["id"]
 
-        botones = _crear_botones_rapidos()
+        # --- Navegación guiada por menús (botones inline) ---
+        if query.data.startswith("menu_"):
+            if await menus.procesar_callback(query.data, query, context, usuario, usuario_id):
+                return
+
+        botones = _crear_teclado_principal()
 
         if query.data == "accion_balance":
             balance = database.obtener_balance(usuario_id)
@@ -1093,7 +924,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text="❌ Operación cancelada.",
-                reply_markup=_crear_teclado_permanente(),
+                reply_markup=_crear_teclado_principal(),
             )
 
         elif query.data == "monedaeliminar_menu":
@@ -1348,5 +1179,5 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await context.bot.send_message(
             chat_id=query.message.chat_id,
             text="⚠️ Ocurrió un error al procesar tu solicitud. Intenta de nuevo.",
-            reply_markup=_crear_botones_rapidos(),
+            reply_markup=_crear_teclado_principal(),
         )

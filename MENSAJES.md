@@ -30,7 +30,7 @@ Referencia de **todos los mensajes de texto** que FinanzasBot envía al usuario,
 ## 1. Comandos
 
 ### `/start` — Bienvenida
-Aparece al iniciar el bot. Incluye el teclado persistente (💰 Balance / 📋 Transacciones / 📊 Presupuestos / 💱 Monedas).
+Aparece al iniciar el bot. Quita el teclado persistente y muestra el **menú principal** con 7 botones inline: 💰 Balance, 📊 Presupuestos, 🎯 Ahorros, 💱 Monedas, 📋 Transacciones, ❓ Ayuda y ⚙️ Más opciones.
 
 ```
 👋 Hola Ana, soy **FinanzasBot**.
@@ -46,7 +46,10 @@ Aparece al iniciar el bot. Incluye el teclado persistente (💰 Balance / 📋 T
 • Metas: `Quiero ahorrar $5000 para vacaciones`
 
 Usa /help para ver todos los comandos.
+
+👇 Elige una opción abajo o escríbeme en lenguaje natural:
 ```
+Con un aviso previo: `🧭 Te cambié el teclado: ahora navegas con botones.`
 
 Error: `⚠️ Ocurrió un error. Intenta de nuevo con /start.`
 
@@ -188,17 +191,40 @@ Confirmado: `🗑️ **Historial eliminado.** Se borraron **12** transacciones.`
 
 ## 2. Menús y botones
 
-### Teclado persistente (ReplyKeyboard)
-Dos filas de botones que acompañan casi todas las respuestas:
+### Menú principal (inline)
+7 botones que acompañan todas las respuestas:
 
 ```
-[💰 Balance] [📋 Transacciones]
-[📊 Presupuestos] [💱 Monedas]
+[💰 Balance] [📊 Presupuestos]
+[🎯 Ahorros] [💱 Monedas]
+[📋 Transacciones] [❓ Ayuda]
+[⚙️ Más opciones]
 ```
 
-### Respuestas al tocar los botones del teclado
+### Navegación por secciones
+- Cada sección abre un menú con sus acciones y cierra con `[🔙 Volver]` y `[🏠 Inicio]`.
+- Las consultas se responden al instante en el mismo mensaje; las acciones con datos lanzan un **prompt de lenguaje natural** con un ejemplo (ej: `` `Mi presupuesto para comida es $500` ``).
+- Al terminar una acción por lenguaje natural, el bot muestra los **7 botones principales**.
 
-**💰 Balance:** `💰 **Tu balance actual:**` + el bloque de balance (sección 4).
+### Secciones y acciones
+
+**💰 Balance:** `Ver balance del mes` · `Ver gastos` · `Ver ingresos`.
+
+**📊 Presupuestos:** `Ver mis presupuestos` · `Restante de un presupuesto` (elige cuál) · `Gastos por presupuestos` · `Crear presupuesto` (prompt NL).
+
+**🎯 Ahorros:** `Ver mis metas` · `Crear meta` (prompt NL) · `Agregar dinero a una meta` (elige cuál → prompt NL) · `Eliminar una meta` (elige cuál → confirmar) · `Eliminar todas las metas` (confirmar).
+
+**💱 Monedas:** `Ver monedas` · `Agregar moneda` · `Eliminar moneda` · `Predeterminada`.
+
+**📋 Transacciones:** `Últimas transacciones` · `Ver gastos` · `Ver ingresos` · `Registrar gasto` (prompt NL) · `Registrar ingreso` (prompt NL).
+
+**❓ Ayuda:** `Registrar gasto/ingreso` · `Ver balance` · `Crear presupuesto` · `Crear metas` · `Todos los comandos`.
+
+**⚙️ Más opciones:** `Notificaciones` · `Exportar` · `Resumen del mes` · `Borrar historial`.
+
+### Respuestas de las secciones de balance/presupuestos
+
+**💰 Balance:** `💰 **Balance de {mes}**` + el bloque de balance (sección 4).
 
 **📋 Transacciones:**
 - Vacío: `📝 No tienes transacciones registradas aún.`
@@ -208,8 +234,6 @@ Dos filas de botones que acompañan casi todas las respuestas:
 **📊 Presupuestos:**
 - Vacío: `📊 No tienes presupuestos configurados.` + salto + ``Usa: `Mi presupuesto para comida es $500 este mes` ``
 - Con datos: bloque de la sección 5.
-
-**💱 Monedas:** abre el menú de monedas.
 
 ### Menú de monedas
 Sin monedas:

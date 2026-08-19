@@ -17,6 +17,7 @@ python -m venv venv && venv\\Scripts\\activate && pip install python-telegram-bo
 **Main flow:**
 - `main.py:89` - Entry point, calls `run_bot()`
 - `handlers.py` - Intent detection (English) + command/callback handlers
+- `menus.py` - Navegación guiada por botones inline (v2.14): menú principal de 7 secciones + dispatcher de callbacks `menu_*` (builders puros, sin IO de Telegram)
 - `knowledge.py` - AI processing for Spanish messages
 - `ai_client.py` - AI client integration
 - `notificaciones.py` - Alertas de presupuesto (80/100/125%), resumen diario, sweep y catch-up
@@ -85,6 +86,15 @@ python -c "import config, database, knowledge; config.validate_config(); databas
 **User starts bot:**
 - Command `/start` creates user entry
 - Shows statistics and available features
+
+**Navegación guiada (v2.14):**
+- `menus.py` = builders puros (sin IO de Telegram): `teclado_principal()` (7 botones) + `menu_*` por sección + dispatcher `procesar_callback(data, query, context, usuario, usuario_id) -> bool` que renderiza (texto, markup) y edita el mensaje del botón
+- `handlers.handle_callback_query` delega al inicio: `if query.data.startswith("menu_"): if await menus.procesar_callback(...): return`
+- Botones que necesitan datos (crear presupuesto/meta, agregar dinero, registrar gasto/ingreso) lanzan un prompt de lenguaje natural con ejemplo; el usuario escribe y la acción fluye por la IA
+- Sub-selecciones: `menu_presupuesto_sel_<id>`, `menu_ahorro_add_<id>`, `menu_ahorro_del_<id>` + confirmaciones `menu_ahorro_del_confirm_<id>`, `menu_ahorro_del_all_confirm`, `menu_delete_confirm/cancel`
+- Más opciones reusa callbacks existentes: `notif_*` (menú de notificaciones con botón Volver a `menu_mas`), `exp_*` (exportar), `menu_mas_resumen`, `menu_mas_borrar`
+- Monedas reusa flujos existentes de handlers: `moneda_agregar`, `monedaeliminar_menu`, `moneda_default_menu`
+- El teclado persistente (ReplyKeyboard) fue eliminado (v2.14); `/start` envía `ReplyKeyboardRemove` + menú principal inline; al terminar cualquier acción NL se muestran los 7 botones principales
 
 **Register transaction (English):**
 - Detect intent with `handlers._detectar_intencion()`

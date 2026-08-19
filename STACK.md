@@ -53,7 +53,7 @@ Mensaje → handlers.handle_message()
 **Flujos paralelos en handlers.py:**
 - **Comandos** (`/start`, `/resumen`, `/gastos`, ...) → función directa.
 - **Botones inline** (callbacks) → `handle_callback_query` (edita el mensaje, nunca reenvía uno nuevo).
-- **Teclado persistente** (💰 Balance, 📋 Transacciones, 📊 Presupuestos, 💱 Monedas).
+- **Menú de navegación** (`menus.py`) → callbacks `menu_*` delegados a `menus.procesar_callback` (7 secciones: Balance, Presupuestos, Ahorros, Monedas, Transacciones, Ayuda, Más opciones).
 - **Multi-transacción** (ej: "$50 en comida y $30 en taxi") → preview con botones para editar/quitar/guardar.
 - **Flujo de moneda** (`_manejar_flujo_moneda`) y pendientes (`transaccion_pendiente`).
 
@@ -358,7 +358,7 @@ Menú registrado con `set_my_commands` (sugerencias al escribir `/`).
 
 Cualquier texto que no sea comando se procesa como lenguaje natural vía `handle_message`.
 
-**Teclado persistente:** 💰 Balance, 📋 Transacciones, 📊 Presupuestos, 💱 Monedas (`TECLADO_BUTTONS`).
+**Menú principal (inline, `menus.py`):** 7 secciones — 💰 Balance, 📊 Presupuestos, 🎯 Ahorros, 💱 Monedas, 📋 Transacciones, ❓ Ayuda, ⚙️ Más opciones. Callbacks `menu_*` delegados desde `handle_callback_query` a `menus.procesar_callback`, que edita el mensaje del botón.
 
 **Botones inline (callbacks):** elección de moneda (`elegir_moneda`, `elegir_moneda_presupuesto`), confirmación de tipo gasto/ingreso, presets de moneda, multi-transacción, cancelar pendientes. Todos **editan** el mensaje original (`_responder_editando`).
 

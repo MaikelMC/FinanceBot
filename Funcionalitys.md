@@ -95,7 +95,8 @@ Olvídate de formularios: escribe natural y listo.
 
 ## 🖱️ Botones que te facilitan la vida
 
-- **Teclado persistente** con accesos directos: 💰 Balance, 📋 Transacciones, 📊 Presupuestos y 💱 Monedas.
+- **Menú principal con 7 secciones:** 💰 Balance, 📊 Presupuestos, 🎯 Ahorros, 💱 Monedas, 📋 Transacciones, ❓ Ayuda y ⚙️ Más opciones.
+- **Navegación guiada:** cada sección tiene botones para sus acciones y un botón **Volver**; las consultas se responden al instante y las acciones con datos te piden escribir en lenguaje natural con un ejemplo.
 - **Botones inline** para elegir moneda, confirmar tipos y editar multi-transacciones — todo **sin reenviar mensajes**.
 - Cuando falta un dato, el bot te lo **pide con botones** para completar la acción en un toque.
 
