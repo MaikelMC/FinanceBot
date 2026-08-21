@@ -5,6 +5,7 @@ Maneja comandos y mensajes en lenguaje natural para gestión financiera.
 
 import logging
 import os
+from datetime import datetime
 from typing import Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
@@ -21,6 +22,7 @@ import ai_client
 import changelog
 import notificaciones
 import menus
+import metricas
 import validators
 from config import IMAGES_DIR, ADMIN_USER_ID
 
@@ -302,6 +304,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error("Error en catch-up de resumen diario: %s", e)
     # --- Fin catch-up ---
+
+    # --- Flujo de soporte: capturar el reporte del usuario ---
+    if context.user_data.get("esperando_soporte"):
+        context.user_data.pop("esperando_soporte", None)
+        if mensaje.strip().lower() in ("cancelar", "cancel", "no"):
+            await msg.reply_text("❌ Reporte cancelado.", reply_markup=_crear_teclado_principal())
+            return
+        await _enviar_ticket(context, msg, user, mensaje)
+        return
 
     # Verificar si el usuario está editando una transacción multi
     if "editando_multi_idx" in context.user_data:
@@ -700,6 +711,85 @@ async def configurar_notificaciones(update: Update, context: ContextTypes.DEFAUL
 # ============================================================
 # COMANDO /anuncio - Envío de anuncios a todos los usuarios
 # ============================================================
+
+async def ver_metricas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /metricas (solo admin): estado del bot en tiempo real."""
+    user = update.effective_user
+    if not ADMIN_USER_ID or user.id != ADMIN_USER_ID:
+        await update.message.reply_text("🔒 Este comando es solo para el administrador.")
+        return
+
+    try:
+        total_usuarios = database.contar_usuarios()
+    except Exception as e:
+        logger.error("Error contando usuarios para /metricas: %s", e)
+        total_usuarios = "?"
+    procesados, bloqueados = metricas.mensajes()
+    texto = (
+        "📊 **MÉTRICAS DEL BOT**\n"
+        f"⏱️ Uptime: {metricas.uptime_str()}\n"
+        f"🗄️ Backend: {config.DB_BACKEND} | Versión: v{changelog.VERSION_ACTUAL}\n"
+        "\n👥 Usuarios registrados: " + str(total_usuarios) +
+        f"\n🟢 Activos ahora (5 min): {metricas.activos(300)}" +
+        f"\n🕐 Activos última hora: {metricas.activos(3600)}" +
+        f"\n\n💬 Mensajes procesados: {procesados}" +
+        f"\n🚫 Bloqueados por flood: {bloqueados}" +
+        f"\n💸 Transacciones hoy: {metricas.transacciones_hoy()}" +
+        f"\n❌ Errores última hora: {metricas.errores_ultima_hora()}"
+    )
+    await update.message.reply_text(texto, parse_mode="Markdown")
+
+
+async def _enviar_ticket(context: ContextTypes.DEFAULT_TYPE, msg, user, texto: str) -> None:
+    """Envía un ticket de soporte al admin y confirma al usuario."""
+    tid = datetime.now().strftime("%Y%m%d-%H%M")
+    username = f"@{user.username}" if user.username else "sin username"
+    ticket = (
+        f"🎫 **TICKET DE SOPORTE** `{tid}`\n"
+        f"👤 De: {user.first_name or 'Usuario'} ({username} | id: `{user.id}`)\n"
+        f"💬 Reporte:\n{texto[:1500]}"
+    )
+    try:
+        await context.bot.send_message(ADMIN_USER_ID, ticket, parse_mode="Markdown")
+    except Exception as e:
+        logger.error("No se pudo enviar ticket de soporte al admin: %s", e)
+        await msg.reply_text(
+            "❌ No pude entregar tu reporte en este momento. Intenta más tarde."
+        )
+        return
+    await msg.reply_text(
+        "✅ **¡Reporte enviado!**\n"
+        "El administrador recibió tu ticket y te contactará si necesita más detalles.",
+        parse_mode="Markdown",
+        reply_markup=_crear_teclado_principal(),
+    )
+
+
+async def soporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /soporte: crea un ticket de reporte que llega al admin.
+
+    Uso: /soporte <texto>  o  /soporte (y luego escribir el reporte).
+    """
+    user = update.effective_user
+    msg = update.message
+    if not ADMIN_USER_ID:
+        await msg.reply_text("⚠️ El soporte no está disponible ahora. Intenta más tarde.")
+        return
+
+    texto_directo = " ".join(context.args).strip() if context.args else ""
+    if texto_directo:
+        await _enviar_ticket(context, msg, user, texto_directo)
+        return
+
+    context.user_data["esperando_soporte"] = True
+    await msg.reply_text(
+        "🎫 **Soporte**\n\n"
+        "Cuéntame qué ocurrió en tu próximo mensaje "
+        "(mientras más detalle, mejor).\n\n"
+        "Escribe *cancelar* para salir sin enviar nada.",
+        parse_mode="Markdown",
+    )
+
 
 async def anuncio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja el comando /anuncio para enviar mensajes a todos los usuarios."""

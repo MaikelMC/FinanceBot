@@ -4,9 +4,19 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.14.4"
+VERSION_ACTUAL = "2.14.5"
 
 CHANGELOG = {
+    "2.14.5": {
+        "titulo": "📊 Métricas para el admin y 🎫 soporte con tickets",
+        "mejoras": [
+            "Nuevo comando /soporte: cualquier usuario puede reportar un problema y el ticket llega directo al administrador",
+            "/metricas (solo administrador): usuarios registrados, activos ahora y última hora, mensajes procesados/bloqueados, transacciones del día, errores recientes y uptime",
+            "Los errores del sistema se cuentan automáticamente para las métricas",
+            "El bot registra su actividad en data/logs/finanzas.log con rotación automática"
+        ],
+        "emoji": "📊"
+    },
     "2.14.4": {
         "titulo": "🛡️ Validaciones más robustas de tus entradas",
         "mejoras": [

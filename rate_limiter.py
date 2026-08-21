@@ -19,6 +19,7 @@ from telegram import Update
 from telegram.ext import ApplicationHandlerStop, TypeHandler
 
 import config
+import metricas
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,7 @@ class RateLimitMiddleware(TypeHandler):
             return  # callbacks, ediciones no-texto, etc.: dejar pasar
 
         permitido, espera = self.limiter.verificar(update.effective_user.id, mensaje.text)
+        metricas.registrar_mensaje(update.effective_user.id, bloqueado=not permitido)
         if permitido:
             return
 

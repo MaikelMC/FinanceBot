@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional, List
 
 import database
 import formato
+import metricas
 import validators
 from telegram.helpers import escape_markdown
 
@@ -137,6 +138,7 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
         descripcion, _err_desc = validators.validar_descripcion(mensaje)
         database.agregar_transaccion(usuario["id"], categoria_id, "gasto", cantidad,
                                    descripcion or mensaje, moneda_id=moneda_id)
+        metricas.registrar_transaccion()
 
         simbolo = moneda.get("simbolo", "$") if moneda else "$"
         nombre_moneda = f" ({moneda['nombre']})" if moneda else ""
@@ -209,6 +211,7 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Di
         descripcion, _err_desc = validators.validar_descripcion(mensaje)
         database.agregar_transaccion(usuario["id"], categoria_id, "ingreso", cantidad,
                                    descripcion or mensaje, moneda_id=moneda_id)
+        metricas.registrar_transaccion()
 
         abrev = moneda.get("abreviatura", "") if moneda else ""
         return f"{formato.EMOJI_OK} Ingreso registrado: **{formato.fmt_moneda(cantidad, abrev=abrev)}** de **{categoria}**"
@@ -1538,6 +1541,7 @@ def _guardar_multi_transacciones(transacciones: List[Dict[str, Any]], usuario: D
                 cantidad_t, descripcion_t or "",
                 moneda_id=moneda_id
             )
+            metricas.registrar_transaccion()
             guardadas += 1
         except Exception as e:
             logger.error("Error guardando transacción: %s", e)

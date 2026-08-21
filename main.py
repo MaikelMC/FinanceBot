@@ -19,18 +19,22 @@ from telegram.ext import (
 
 import config
 import database
+import logging_config
+
+# Logging centralizado: archivo rotativo (data/logs/finanzas.log) + consola.
+# Debe ejecutarse ANTES de que los demás módulos emitan sus primeros logs.
+logging_config.configurar_logging()
+
 from handlers import start, handle_message, error_handler
 from handlers import consultar_usuario, consultar_comandos, handle_callback_query, eliminar_historial, anuncio
 from handlers import configurar_notificaciones
 from handlers import consultar_categorias, consultar_gastos, consultar_ingresos, consultar_metas, consultar_resumen
 from handlers import exportar_datos
+from handlers import ver_metricas, soporte
 import notificaciones
 import rate_limiter
+import metricas
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
 logger = logging.getLogger(__name__)
 
 COMANDOS_MENU = [
@@ -45,6 +49,7 @@ COMANDOS_MENU = [
     BotCommand("help", "Ver todos los comandos y ejemplos de uso"),
     BotCommand("user", "Ver tu información de usuario"),
     BotCommand("delete", "Borrar todo el historial de transacciones"),
+    BotCommand("soporte", "Reportar un problema al administrador"),
 ]
 
 
@@ -89,6 +94,8 @@ def _build_app():
     app.add_handler(CommandHandler("resumen", consultar_resumen))
     app.add_handler(CommandHandler("notificaciones", configurar_notificaciones))
     app.add_handler(CommandHandler("exportar", exportar_datos))
+    app.add_handler(CommandHandler("soporte", soporte))
+    app.add_handler(CommandHandler("metricas", ver_metricas))
 
     # === JOB DE RESÚMENES DIARIOS (sweep cada 60s) ===
     if app.job_queue is not None:
@@ -106,6 +113,14 @@ def _build_app():
             interval=max(int(limiter.window), 1),
             first=int(limiter.window),
             name="rate_limit_cleanup",
+        )
+
+        # === PODA DE ACTIVIDAD VIEJA EN MÉTRICAS (cada 30 min) ===
+        app.job_queue.run_repeating(
+            metricas.tarea_poda(),
+            interval=1800,
+            first=1800,
+            name="metricas_poda",
         )
     else:
         logger.warning("JobQueue no disponible (falta apscheduler). El resumen diario solo llegará por catch-up.")

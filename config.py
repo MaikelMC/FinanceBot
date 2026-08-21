@@ -55,6 +55,11 @@ HORA_RESUMEN_DEFAULT = os.getenv("HORA_RESUMEN_DEFAULT", "21:30")
 RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "30"))        # mensajes por ventana por usuario
 RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))  # ventana en segundos
 
+# Logging centralizado (ver logging_config.py)
+LOG_DIR = DATA_DIR / "logs"
+# Nivel mínimo que llega a archivo/consola: INFO (producción) o DEBUG (desarrollo)
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
 # Hora (UTC) en que GitHub Actions despierta el bot. Por ahora hay 2 wakes
 # (01:30 y 02:30 UTC) para cubrir el resumen de las 21:30 hora de Cuba en
 # horario de verano (UTC-4) e invierno (UTC-5).
