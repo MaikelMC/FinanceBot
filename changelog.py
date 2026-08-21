@@ -4,9 +4,19 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.14.2"
+VERSION_ACTUAL = "2.14.3"
 
 CHANGELOG = {
+    "2.14.3": {
+        "titulo": "🚦 Protección anti-flood del bot",
+        "mejoras": [
+            "Límite de 30 mensajes por minuto por usuario para evitar bloqueos de Telegram",
+            "Si excedes el límite, el bot avisa: 'Demasiadas solicitudes. Intenta de nuevo en N segundos'",
+            "/start y /help nunca se bloquean: los comandos críticos siempre funcionan",
+            "Los contadores se limpian automáticamente cada minuto"
+        ],
+        "emoji": "🚦"
+    },
     "2.14.2": {
         "titulo": "🎯 Los flujos de presupuestos y ahorros recuerdan lo que seleccionaste",
         "mejoras": [

@@ -51,6 +51,10 @@ WEBHOOK_PORT = int(os.getenv("PORT", 8000))
 DEFAULT_TIMEZONE = os.getenv("DEFAULT_TIMEZONE", "America/Havana")
 HORA_RESUMEN_DEFAULT = os.getenv("HORA_RESUMEN_DEFAULT", "21:30")
 
+# Rate limiting (anti-flood hacia Telegram): máx. mensajes por usuario en la ventana
+RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "30"))        # mensajes por ventana por usuario
+RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))  # ventana en segundos
+
 # Hora (UTC) en que GitHub Actions despierta el bot. Por ahora hay 2 wakes
 # (01:30 y 02:30 UTC) para cubrir el resumen de las 21:30 hora de Cuba en
 # horario de verano (UTC-4) e invierno (UTC-5).

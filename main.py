@@ -25,6 +25,7 @@ from handlers import configurar_notificaciones
 from handlers import consultar_categorias, consultar_gastos, consultar_ingresos, consultar_metas, consultar_resumen
 from handlers import exportar_datos
 import notificaciones
+import rate_limiter
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -67,6 +68,14 @@ def _build_app():
 
     app = ApplicationBuilder().token(config.TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
 
+    # === RATE LIMITING (anti-flood, corre antes que todos los handlers) ===
+    limiter = rate_limiter.RateLimiter()
+    app.add_handler(rate_limiter.RateLimitMiddleware(limiter), group=-1)
+    logger.info(
+        "Rate limiting activo: %d mensajes / %ds por usuario (exentos: %s).",
+        limiter.max_requests, int(limiter.window), ", ".join(rate_limiter.COMANDOS_EXENTOS),
+    )
+
     # === COMANDOS PRINCIPALES ===
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("user", consultar_usuario))
@@ -90,6 +99,14 @@ def _build_app():
             name="resumen_diario",
         )
         logger.info("Job de resumen diario programado (intervalo 60s).")
+
+        # === LIMPIEZA DE CONTADORES DE RATE LIMIT (cada minuto) ===
+        app.job_queue.run_repeating(
+            rate_limiter.tarea_limpieza(limiter),
+            interval=max(int(limiter.window), 1),
+            first=int(limiter.window),
+            name="rate_limit_cleanup",
+        )
     else:
         logger.warning("JobQueue no disponible (falta apscheduler). El resumen diario solo llegará por catch-up.")
 
