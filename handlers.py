@@ -151,6 +151,49 @@ def _completar_pendiente_presupuesto(pendiente: dict, moneda: dict, usuario: dic
     return respuesta
 
 
+def _texto_nuevo_usuario(user, total: int) -> str:
+    username = f"@{user.username}" if getattr(user, "username", None) else "sin @username"
+    nombre = escape_markdown(user.first_name or "amigo", version=1)
+    return (
+        f"🆕 **Nuevo usuario en el bot**\n"
+        f"👤 {nombre} ({username})\n"
+        f"🆔 id: `{user.id}`\n"
+        f"👥 Total registrados: {total}"
+    )
+
+
+async def _avisar_admin_nuevo_usuario(context: ContextTypes.DEFAULT_TYPE, user) -> None:
+    """Notifica al admin el registro de un usuario nuevo."""
+    if not ADMIN_USER_ID:
+        return
+    try:
+        total = database.contar_usuarios()
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=_texto_nuevo_usuario(user, total),
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.warning(f"No se pudo notificar nuevo usuario {user.id}: {e}")
+
+
+def _es_usuario_nuevo(user) -> bool:
+    try:
+        return database.obtener_usuario(user.id) is None
+    except Exception as e:
+        logger.warning(f"No se pudo verificar usuario existente {user.id}: {e}")
+        return False
+
+
+async def _registrar_usuario(context: ContextTypes.DEFAULT_TYPE, user):
+    """Obtiene o crea el usuario y avisa al admin si es la primera vez que usa el bot."""
+    es_nuevo = _es_usuario_nuevo(user)
+    usuario = database.obtener_o_crear_usuario(user.id, user.first_name or "amigo")
+    if es_nuevo:
+        await _avisar_admin_nuevo_usuario(context, user)
+    return usuario
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja el comando /start."""
     try:
@@ -158,7 +201,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nombre_mostrar = escape_markdown(user.first_name or "amigo", version=1)
 
         context.user_data["telegram_user_id"] = user.id
-        usuario = database.obtener_o_crear_usuario(user.id, user.first_name or "amigo")
+        usuario = await _registrar_usuario(context, user)
         context.user_data["usuario_id"] = usuario["id"]
 
         estadisticas = database.contar_transacciones(usuario["id"])
@@ -281,7 +324,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if "usuario_id" not in context.user_data:
         context.user_data["telegram_user_id"] = user.id
-        context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, user.first_name)["id"]
+        context.user_data["usuario_id"] = (await _registrar_usuario(context, user))["id"]
 
     usuario_id = context.user_data["usuario_id"]
     usuario = database.obtener_usuario(user.id) or {"id": usuario_id, "nombre": user.first_name}
@@ -420,7 +463,7 @@ async def consultar_usuario(update: Update, context: ContextTypes.DEFAULT_TYPE):
         usuario_id = context.user_data.get("usuario_id")
         if not usuario_id:
             context.user_data["telegram_user_id"] = user.id
-            context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, user.first_name)["id"]
+            context.user_data["usuario_id"] = (await _registrar_usuario(context, user))["id"]
             usuario_id = context.user_data["usuario_id"]
 
         balance = database.obtener_balance(usuario_id)
@@ -472,8 +515,13 @@ def _obtener_usuario_contexto(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Garantiza el usuario en context.user_data y lo retorna."""
     user = update.effective_user
     if "usuario_id" not in context.user_data:
+        es_nuevo = _es_usuario_nuevo(user)
         context.user_data["telegram_user_id"] = user.id
         context.user_data["usuario_id"] = database.obtener_o_crear_usuario(user.id, user.first_name or "amigo")["id"]
+        if es_nuevo:
+            app = getattr(context, "application", None)
+            if app is not None:
+                app.create_task(_avisar_admin_nuevo_usuario(context, user))
     usuario_id = context.user_data["usuario_id"]
     usuario = database.obtener_usuario(user.id) or {"id": usuario_id, "nombre": user.first_name or "amigo"}
     return usuario
@@ -923,9 +971,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
     try:
         user = update.effective_user
-        usuario = database.obtener_usuario(user.id)
-        if not usuario:
-            usuario = database.obtener_o_crear_usuario(user.id, user.first_name)
+        usuario = await _registrar_usuario(context, user)
         usuario_id = usuario["id"]
 
         # --- Navegación guiada por menús (botones inline) ---
