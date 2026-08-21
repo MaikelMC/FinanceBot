@@ -21,6 +21,7 @@ import ai_client
 import changelog
 import notificaciones
 import menus
+import validators
 from config import IMAGES_DIR, ADMIN_USER_ID
 
 logger = logging.getLogger(__name__)
@@ -213,7 +214,8 @@ async def _manejar_ctx_presupuesto(update: Update, context: ContextTypes.DEFAULT
         return True
 
     # Si no parece un gasto (sin monto o un ingreso/consulta), liberar el contexto.
-    if not knowledge._parsear_cantidad(mensaje):
+    monto_ctx, _err_monto = validators.validar_monto(mensaje)
+    if not monto_ctx:
         context.user_data.pop("presupuesto_ctx", None)
         return False
     m = mensaje.lower()
@@ -250,12 +252,12 @@ async def _manejar_ctx_meta(update: Update, context: ContextTypes.DEFAULT_TYPE,
                              reply_markup=_crear_teclado_principal())
         return True
 
-    cantidad = knowledge._parsear_cantidad(mensaje)
-    if not cantidad:
+    cantidad, err_monto = validators.validar_monto(mensaje)
+    if err_monto:
         nombre = meta.get("nombre", "tu meta")
         await msg.reply_text(
-            f"💵 No pude entender el monto a agregar a la meta **{nombre}**.\n"
-            "Ej: `agrega 500` o simplemente `500`",
+            f"💵 {err_monto}\n"
+            f"Ej: `agrega 500` o simplemente `500` para la meta **{nombre}**.",
             parse_mode="Markdown",
         )
         return True

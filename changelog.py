@@ -4,9 +4,19 @@ Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
 """
 
-VERSION_ACTUAL = "2.14.3"
+VERSION_ACTUAL = "2.14.4"
 
 CHANGELOG = {
+    "2.14.4": {
+        "titulo": "🛡️ Validaciones más robustas de tus entradas",
+        "mejoras": [
+            "Montos: solo se aceptan valores positivos; '-50', '0' o texto sin número muestran 'Monto inválido. Usa un formato como: $50 o 100.50'",
+            "Fechas: al cambiar la fecha de una transacción se valida que exista (rechaza 2024-02-30) y que no sea futura",
+            "Descripciones: se recortan automáticamente a 200 caracteres para evitar errores al guardar",
+            "La validación aplica en todos los caminos: lenguaje natural, botones del menú y respuestas de la IA"
+        ],
+        "emoji": "🛡️"
+    },
     "2.14.3": {
         "titulo": "🚦 Protección anti-flood del bot",
         "mejoras": [

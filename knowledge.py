@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional, List
 
 import database
 import formato
+import validators
 from telegram.helpers import escape_markdown
 
 logger = logging.getLogger(__name__)
@@ -106,12 +107,9 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
     directamente en la categoría de ese presupuesto, sin depender de la
     detección por texto ("del presupuesto para X").
     """
-    cantidad = None
-
-    cantidad = _parsear_cantidad(mensaje)
-
-    if not cantidad:
-        return "No pude entender la cantidad en tu gasto. ¿Podrías especificar el monto?"
+    cantidad, err_monto = validators.validar_monto(mensaje)
+    if err_monto:
+        return err_monto
 
     moneda_id = moneda["id"] if moneda else None
 
@@ -136,8 +134,9 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                 raise Exception(f"No se pudo crear/asociar la categoría '{categoria}'")
 
         gastado_antes = presupuesto.get("cantidad_gastada", 0) if presupuesto else 0
+        descripcion, _err_desc = validators.validar_descripcion(mensaje)
         database.agregar_transaccion(usuario["id"], categoria_id, "gasto", cantidad,
-                                   mensaje, moneda_id=moneda_id)
+                                   descripcion or mensaje, moneda_id=moneda_id)
 
         simbolo = moneda.get("simbolo", "$") if moneda else "$"
         nombre_moneda = f" ({moneda['nombre']})" if moneda else ""
@@ -196,12 +195,9 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
 def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None,
                       categoria_sugerida: Optional[str] = None) -> str:
     """Procesa una transacción de ingreso."""
-    cantidad = None
-
-    cantidad = _parsear_cantidad(mensaje)
-
-    if not cantidad:
-        return "No pude entender la cantidad en tu ingreso. ¿Podrías especificar el monto?"
+    cantidad, err_monto = validators.validar_monto(mensaje)
+    if err_monto:
+        return err_monto
 
     moneda_id = moneda["id"] if moneda else None
 
@@ -210,8 +206,9 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Di
         if categoria_id is None:
             raise Exception(f"No se pudo crear/asociar la categoría '{categoria}'")
 
+        descripcion, _err_desc = validators.validar_descripcion(mensaje)
         database.agregar_transaccion(usuario["id"], categoria_id, "ingreso", cantidad,
-                                   mensaje, moneda_id=moneda_id)
+                                   descripcion or mensaje, moneda_id=moneda_id)
 
         abrev = moneda.get("abreviatura", "") if moneda else ""
         return f"{formato.EMOJI_OK} Ingreso registrado: **{formato.fmt_moneda(cantidad, abrev=abrev)}** de **{categoria}**"
@@ -1530,10 +1527,15 @@ def _guardar_multi_transacciones(transacciones: List[Dict[str, Any]], usuario: D
             if categoria_id is None:
                 raise Exception(f"No se pudo crear/asociar la categoría '{categoria}'")
 
+            cantidad_t, err_t = validators.validar_monto_valor(t.get("cantidad"))
+            if err_t:
+                raise Exception(err_t)
+            descripcion_t, _ed = validators.validar_descripcion(t.get("descripcion"))
+
             moneda_id = t.get("moneda_id") or t.get("moneda", {}).get("id")
             database.agregar_transaccion(
                 usuario["id"], categoria_id, t["tipo"],
-                t["cantidad"], t["descripcion"],
+                cantidad_t, descripcion_t or "",
                 moneda_id=moneda_id
             )
             guardadas += 1
@@ -1997,6 +1999,11 @@ def _procesar_modificar_transaccion(mensaje: str, usuario: Dict[str, Any]) -> st
         nueva_fecha = mod["valor_nuevo"]
         if not nueva_fecha:
             return "❌ No pude entender la nueva fecha."
+
+        fecha_valida, err_fecha = validators.validar_fecha(nueva_fecha, permitir_futura=False)
+        if err_fecha:
+            return err_fecha
+        nueva_fecha = fecha_valida.isoformat()
 
         actualizada = database.actualizar_transaccion(
             usuario["id"], tid, fecha=nueva_fecha

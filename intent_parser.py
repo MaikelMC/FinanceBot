@@ -9,6 +9,7 @@ import re
 from typing import Any, Dict, Optional
 
 import config
+import validators
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,19 @@ _INTENT_CACHE: Dict[int, Dict[str, Any]] = {}
 def _parse_float(texto: str) -> Optional[float]:
     from knowledge import _parsear_cantidad
     return _parsear_cantidad(texto)
+
+
+def _parse_monto(texto: str) -> Optional[float]:
+    """Como _parse_float pero respetando el signo negativo capturado.
+
+    _parsear_cantidad ignora el "-", así que "-50" devolvería 50.0. Los
+    patrones del fast-path capturan el signo para que _resultado_valido
+    pueda rechazar montos negativos en lugar de convertirlos en positivos.
+    """
+    valor = _parse_float(texto)
+    if valor is not None and str(texto).strip().startswith("-"):
+        return -valor
+    return valor
 
 
 def _subconsulta_gasto_ingreso(texto: str) -> str:
@@ -50,36 +64,38 @@ _FAST_PATTERNS = [
     (re.compile(r'^\s*(?:exporta|exportar|descarga|descargar)\b.*', re.IGNORECASE),
      lambda m: _build_exportar(m.string)),
     # --- REGISTRO: gasto explícito ---
-    (re.compile(r'(?:gast[ée]?|compr[ée]?|pagu?[ée]?|cost[óo]|invert[ií])\s+\$?([\d,.]+)\s+(?:en\s+|para\s+)?(.+)', re.IGNORECASE),
-     lambda m: {"intencion": "registrar", "tipo": "gasto", "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.98}),
+    # (-?[\d,.]+) captura también el signo negativo para que _resultado_valido
+    # lo rechace; si el regex no lo capturara, "-50" se registraría como "50".
+    (re.compile(r'(?:gast[ée]?|compr[ée]?|pagu?[ée]?|cost[óo]|invert[ií])\s+\$?\s*(-?[\d,.]+)\s+(?:en\s+|para\s+)?(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "registrar", "tipo": "gasto", "cantidad": _parse_monto(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.98}),
 
     # --- REGISTRO: ingreso explícito ---
-    (re.compile(r'(?:recib[ií]|ingres[ée]?|cobr[ée]?|gan[ée]?)\s+\$?([\d,.]+)\s+(?:de\s+|como\s+)?(.+)', re.IGNORECASE),
-     lambda m: {"intencion": "registrar", "tipo": "ingreso", "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.98}),
+    (re.compile(r'(?:recib[ií]|ingres[ée]?|cobr[ée]?|gan[ée]?)\s+\$?\s*(-?[\d,.]+)\s+(?:de\s+|como\s+)?(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "registrar", "tipo": "ingreso", "cantidad": _parse_monto(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.98}),
 
     # --- CONFIGURAR: ahorro/meta ---
     # Va antes del formato corto para que "quiero ahorrar X para Y" no se interprete como registro
-    (re.compile(r'(?:quiero\s+)?ahorrar\s+\$?([\d,.]+)\s+(?:para\s+|de\s+)?(.+)', re.IGNORECASE),
-     lambda m: {"intencion": "configurar_ahorro", "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "confianza": 0.96}),
+    (re.compile(r'(?:quiero\s+)?ahorrar\s+\$?\s*(-?[\d,.]+)\s+(?:para\s+|de\s+)?(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "configurar_ahorro", "cantidad": _parse_monto(m.group(1)), "descripcion": m.group(2).strip(), "confianza": 0.96}),
 
     # --- CONFIGURAR: agregar dinero a una meta de ahorro existente ---
     # "agrega 900 cup a la meta de ahorro del regalo de mi novia", "suma 500 a mi meta del carro"
-    (re.compile(r'\b(?:a[ñn]ade|agrega|suma|m[ée]tele|pon(?:le)?)\s+\$?([\d.,]+)\s+([a-z]{2,8}\s+)?(?:a\s+|al\s+|a\s+la\s+)?(?:mi\s+|la\s+|el\s+)?(?:meta\s+de\s+ahorro|meta\s+de\s+ahorros|meta\s+de\s+objetivo|meta\s+|ahorro)\s+(?:de\s+|del\s+|para\s+|en\s+)?(.+)', re.IGNORECASE),
-     lambda m: {"intencion": "agregar_ahorro", "cantidad": _parse_float(m.group(1)), "moneda": (m.group(2) or "").strip().lower() or None, "descripcion": m.group(3).strip(), "confianza": 0.97}),
+    (re.compile(r'\b(?:a[ñn]ade|agrega|suma|m[ée]tele|pon(?:le)?)\s+\$?\s*(-?[\d.,]+)\s+([a-z]{2,8}\s+)?(?:a\s+|al\s+|a\s+la\s+)?(?:mi\s+|la\s+|el\s+)?(?:meta\s+de\s+ahorro|meta\s+de\s+ahorros|meta\s+de\s+objetivo|meta\s+|ahorro)\s+(?:de\s+|del\s+|para\s+|en\s+)?(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "agregar_ahorro", "cantidad": _parse_monto(m.group(1)), "moneda": (m.group(2) or "").strip().lower() or None, "descripcion": m.group(3).strip(), "confianza": 0.97}),
 
     # --- CONFIGURAR: presupuesto ---
     # Va antes del formato corto de registro para que "presupuesto de 1000 para X"
     # no se interprete como una transacción.
     # Formato: "presupuesto para X es/de $Y" (categoría antes del monto)
-    (re.compile(r'(?:mi\s+)?presupuesto\s+(?:para|de)\s+(.+?)\s+(?:es|de)\s+\$?([\d,.]+)', re.IGNORECASE),
-     lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(1).strip(), "nombre": m.group(1).strip(), "cantidad": _parse_float(m.group(2)), "modo_presupuesto": "reemplazar", "confianza": 0.98}),
+    (re.compile(r'(?:mi\s+)?presupuesto\s+(?:para|de)\s+(.+?)\s+(?:es|de)\s+\$?\s*(-?[\d,.]+)', re.IGNORECASE),
+     lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(1).strip(), "nombre": m.group(1).strip(), "cantidad": _parse_monto(m.group(2)), "modo_presupuesto": "reemplazar", "confianza": 0.98}),
     # Formato: "presupuesto de $Y [moneda] para/en X" (monto antes de la categoría)
-    (re.compile(r'\bpresupuesto\s+(?:de\s+)?\$?([\d.,]+)\s+(?:[a-z]{2,8}\s+)?(?:para|en|de)\s+(.+)', re.IGNORECASE),
-     lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(2).strip(), "nombre": m.group(2).strip(), "cantidad": _parse_float(m.group(1)), "modo_presupuesto": "reemplazar", "confianza": 0.98}),
+    (re.compile(r'\bpresupuesto\s+(?:de\s+)?\$?\s*(-?[\d.,]+)\s+(?:[a-z]{2,8}\s+)?(?:para|en|de)\s+(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(2).strip(), "nombre": m.group(2).strip(), "cantidad": _parse_monto(m.group(1)), "modo_presupuesto": "reemplazar", "confianza": 0.98}),
 
     # --- REGISTRO: formato corto $X en/para/de Y ---
-    (re.compile(r'\$?([\d,.]+)\s+(?:en\s+|para\s+|de\s+)(.+)', re.IGNORECASE),
-     lambda m: {"intencion": "registrar", "tipo": None, "cantidad": _parse_float(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.95}),
+    (re.compile(r'(?<![\w-])\$?\s*(-?[\d,.]+)\s+(?:en\s+|para\s+|de\s+)(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "registrar", "tipo": None, "cantidad": _parse_monto(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.95}),
 
     # --- CONSULTA: gastos por presupuestos (período) ---
     # "cuánto gasté ayer de mis presupuestos", "cuánto gasté de mis presupuestos esta semana"
@@ -166,8 +182,8 @@ _FAST_PATTERNS = [
      lambda m: {"intencion": "modificar", "accion_mod": "cambiar_tipo", "confianza": 0.96}),
 
     # --- MODIFICAR: cambiar monto "de $X a $Y" ---
-    (re.compile(r'(?:cambia|modifica)\s+(?:el\s+)?(?:monto|cantidad|precio)\s+de\s+\$?([\d,.]+)\s+a\s+\$?([\d,.]+)', re.IGNORECASE),
-     lambda m: {"intencion": "modificar", "accion_mod": "cambiar_monto", "valor_nuevo": _parse_float(m.group(2)), "confianza": 0.97}),
+    (re.compile(r'(?:cambia|modifica)\s+(?:el\s+)?(?:monto|cantidad|precio)\s+de\s+\$?\s*(-?[\d,.]+)\s+a\s+\$?\s*(-?[\d,.]+)', re.IGNORECASE),
+     lambda m: {"intencion": "modificar", "accion_mod": "cambiar_monto", "valor_nuevo": _parse_monto(m.group(2)), "confianza": 0.97}),
 
     # --- ELIMINAR: TODAS las metas de ahorro ---
     (re.compile(r'(?:elimina|borra|quita|suprime|eliminar|borrar|quitar|suprimir)\s+(?:todas\s+|todos\s+|todo\s+)?(?:mis\s+|las\s+)?(?:metas\s+de\s+ahorro|metas\s+de\s+ahorros|metas|ahorros|ahorro)\s*$', re.IGNORECASE),
@@ -186,8 +202,8 @@ _FAST_PATTERNS = [
      lambda m: {"intencion": "eliminar", "confianza": 0.97}),
 
     # --- ACTUALIZAR: añadir monto a presupuesto existente ---
-    (re.compile(r'(?:a[ñn]ade|agrega|suma|aumenta|incrementa)\s+\$?([\d,.]+)\s+(?:al|a|para|en)\s+presupuesto\s+(?:de|para)?\s*(.+)', re.IGNORECASE),
-     lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(2).strip() or "general", "cantidad": _parse_float(m.group(1)), "modo_presupuesto": "sumar", "confianza": 0.97}),
+    (re.compile(r'(?:a[ñn]ade|agrega|suma|aumenta|incrementa)\s+\$?\s*(-?[\d.,]+)\s+(?:al|a|para|en)\s+presupuesto\s+(?:de|para)?\s*(.+)', re.IGNORECASE),
+     lambda m: {"intencion": "configurar_presupuesto", "categoria": m.group(2).strip() or "general", "cantidad": _parse_monto(m.group(1)), "modo_presupuesto": "sumar", "confianza": 0.97}),
 
     # --- SALUDO ---
     (re.compile(r'^(?:hola|buenas|buen[oa]s?\s+(?:d[ií]as|tardes|noches)|hey|hi|qu[eé]\s+(?:tal|onda))$', re.IGNORECASE),
@@ -203,15 +219,37 @@ _FAST_PATTERNS = [
 ]
 
 
+def _resultado_valido(resultado: Dict[str, Any]) -> bool:
+    """Valida/normaliza cantidad y descripción del resultado del fast-path.
+
+    Si la cantidad es inválida (negativa, 0 o no numérica) se descarta el
+    patrón para que el mensaje fluya a la IA. La descripción se trunca a
+    DESCRIPCION_MAX.
+    """
+    cantidad = resultado.get("cantidad")
+    if cantidad is not None:
+        monto, err = validators.validar_monto_valor(cantidad)
+        if err:
+            return False
+        resultado["cantidad"] = monto
+    descripcion = resultado.get("descripcion")
+    if descripcion:
+        limpia, _e = validators.validar_descripcion(descripcion)
+        resultado["descripcion"] = limpia
+    return True
+
+
 def _fast_path(mensaje: str) -> Optional[Dict[str, Any]]:
     """Intenta resolver con regex rápido. Retorna dict o None."""
     for pattern, builder in _FAST_PATTERNS:
         match = pattern.search(mensaje.strip())
         if match:
             try:
-                return builder(match)
+                resultado = builder(match)
             except Exception:
                 continue
+            if resultado is not None and _resultado_valido(resultado):
+                return resultado
     return None
 
 
@@ -401,20 +439,15 @@ def _validar_resultado(datos: dict) -> dict:
 
     cantidad = datos.get("cantidad")
     if cantidad is not None:
-        if isinstance(cantidad, str):
-            from knowledge import _parsear_cantidad
-            cantidad_parsed = _parsear_cantidad(cantidad)
-            if cantidad_parsed is not None:
-                resultado["cantidad"] = cantidad_parsed
-        else:
-            try:
-                resultado["cantidad"] = float(cantidad)
-            except (ValueError, TypeError):
-                pass
+        monto, err = validators.validar_monto_valor(cantidad)
+        if not err:
+            resultado["cantidad"] = monto
 
     descripcion = datos.get("descripcion")
     if descripcion and isinstance(descripcion, str):
-        resultado["descripcion"] = descripcion.strip()
+        limpia, _ed = validators.validar_descripcion(descripcion)
+        if limpia:
+            resultado["descripcion"] = limpia
 
     categoria = datos.get("categoria")
     if categoria and isinstance(categoria, str):
