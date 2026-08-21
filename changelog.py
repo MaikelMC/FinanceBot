@@ -2,20 +2,26 @@
 changelog.py - Control de versiones y mejoras del bot
 Cuando actualices el bot, agrega una nueva entrada en CHANGELOG
 y actualiza VERSION_ACTUAL. Los usuarios verán las mejoras automáticamente.
+
+REGLA: las funcionalidades solo para el administrador (/metricas, logs,
+contadores internos, etc.) van en la clave opcional "admin_mejoras" y NUNCA
+se anuncian a los usuarios; el mensaje de notificación solo usa "mejoras".
 """
 
 VERSION_ACTUAL = "2.14.5"
 
 CHANGELOG = {
     "2.14.5": {
-        "titulo": "📊 Métricas para el admin y 🎫 soporte con tickets",
+        "titulo": "🎫 Reporta problemas con /soporte",
         "mejoras": [
-            "Nuevo comando /soporte: cualquier usuario puede reportar un problema y el ticket llega directo al administrador",
+            "Nuevo comando /soporte: cualquier usuario puede reportar un problema y el ticket llega directo al administrador"
+        ],
+        "admin_mejoras": [
             "/metricas (solo administrador): usuarios registrados, activos ahora y última hora, mensajes procesados/bloqueados, transacciones del día, errores recientes y uptime",
             "Los errores del sistema se cuentan automáticamente para las métricas",
             "El bot registra su actividad en data/logs/finanzas.log con rotación automática"
         ],
-        "emoji": "📊"
+        "emoji": "🎫"
     },
     "2.14.4": {
         "titulo": "🛡️ Validaciones más robustas de tus entradas",
