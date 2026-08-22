@@ -47,6 +47,11 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
 WEBHOOK_PORT = int(os.getenv("PORT", 8000))
 
+# Pruebas de rendimiento
+TELEGRAM_API_BASE = os.getenv("TELEGRAM_API_BASE", "")  # Bot API simulada (vacío = Telegram real)
+CONCURRENT_UPDATES = int(os.getenv("CONCURRENT_UPDATES", "0") or "0")
+BOT_STOP_FILE = os.getenv("BOT_STOP_FILE", "")  # si existe este archivo, el bot se apaga grácilmente
+
 # Notificaciones
 DEFAULT_TIMEZONE = os.getenv("DEFAULT_TIMEZONE", "America/Havana")
 HORA_RESUMEN_DEFAULT = os.getenv("HORA_RESUMEN_DEFAULT", "21:30")

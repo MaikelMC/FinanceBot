@@ -60,6 +60,26 @@ async def _post_init(application):
     logger.info("Menú de comandos registrado (%d comandos).", len(COMANDOS_MENU))
 
 
+async def _volcar_metricas():
+    """Escribe el snapshot de métricas en data/metricas_final.json."""
+    import json
+
+    ruta = config.DATA_DIR / "metricas_final.json"
+    ruta.write_text(
+        json.dumps(metricas.snapshot(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    logger.info("Métricas volcadas a %s", ruta)
+
+
+async def _post_shutdown(application):
+    """Vuelca el snapshot de métricas al apagar (pruebas/diagnóstico)."""
+    try:
+        await _volcar_metricas()
+    except Exception as e:
+        logger.warning("No se pudieron volcar las métricas: %s", e)
+
+
 def _build_app():
     """Construye y configura la aplicación del bot con todos los handlers."""
     config.validate_config()
@@ -71,7 +91,14 @@ def _build_app():
     database.crear_tablas()
     logger.info("Base de datos de finanzas inicializada.")
 
-    app = ApplicationBuilder().token(config.TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
+    builder = ApplicationBuilder().token(config.TELEGRAM_BOT_TOKEN)
+    if config.TELEGRAM_API_BASE:
+        logger.info("Bot API simulada en %s (modo pruebas).", config.TELEGRAM_API_BASE)
+        builder = builder.base_url(config.TELEGRAM_API_BASE)
+    if config.CONCURRENT_UPDATES > 0:
+        logger.info("Procesamiento concurrente de updates: %d", config.CONCURRENT_UPDATES)
+        builder = builder.concurrent_updates(config.CONCURRENT_UPDATES)
+    app = builder.post_init(_post_init).post_shutdown(_post_shutdown).build()
 
     # === RATE LIMITING (anti-flood, corre antes que todos los handlers) ===
     limiter = rate_limiter.RateLimiter()
@@ -106,6 +133,30 @@ def _build_app():
             name="resumen_diario",
         )
         logger.info("Job de resumen diario programado (intervalo 60s).")
+
+        if config.BOT_STOP_FILE:
+            from pathlib import Path
+
+            async def _vigilar_stop(context):
+                """Apagado externo: existe el archivo sentinel -> volcar métricas y detener."""
+                if Path(config.BOT_STOP_FILE).exists():
+                    if not context.application.bot_data.get("_stop_enviado"):
+                        context.application.bot_data["_stop_enviado"] = True
+                        logger.info("Archivo STOP detectado (%s): apagando...", config.BOT_STOP_FILE)
+                        try:
+                            await _volcar_metricas()
+                        except Exception as e:
+                            logger.warning("Volcado de métricas falló: %s", e)
+                        async def _secuencia():
+                            await context.application.stop()
+                            await context.application.updater.stop()
+                            await context.application.shutdown()
+                        import asyncio as _aio
+
+                        _aio.get_running_loop().create_task(_secuencia())
+
+            app.job_queue.run_repeating(_vigilar_stop, interval=2, first=2, name="stop_watcher")
+            logger.info("Apagado por archivo activo: %s", config.BOT_STOP_FILE)
 
         # === LIMPIEZA DE CONTADORES DE RATE LIMIT (cada minuto) ===
         app.job_queue.run_repeating(

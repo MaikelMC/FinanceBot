@@ -131,8 +131,8 @@ class RateLimitMiddleware(TypeHandler):
         super().__init__(Update, _callback_noop)
         self.limiter = limiter or RateLimiter()
 
-    async def check_update(self, update: object):
-        """Aplica a todo update con usuario; decide en handle_update."""
+    def check_update(self, update: object):
+        """Sincrono (PTB llama check_update sin await); decide en handle_update."""
         if isinstance(update, Update) and update.effective_user is not None:
             return True
         return None

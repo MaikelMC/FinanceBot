@@ -15,7 +15,7 @@ NO se persisten: al reiniciar el bot los contadores empiezan de cero
 import threading
 import time
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class Metricas:
@@ -131,6 +131,20 @@ def activos(segundos: int) -> int:
 
 def limpiar_actividad_vieja(segundos: int = 7200) -> None:
     _instancia.limpiar_actividad_vieja(segundos)
+
+
+def snapshot() -> dict:
+    """Estado completo de los contadores en un dict plano (para volcar a JSON)."""
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "uptime_segundos": round(time.time() - _instancia.inicio, 1),
+        "mensajes_procesados": _instancia.mensajes_procesados,
+        "mensajes_bloqueados": _instancia.mensajes_bloqueados,
+        "activos_5min": _instancia.activos(300),
+        "activos_1hora": _instancia.activos(3600),
+        "transacciones_hoy": _instancia.transacciones_hoy(),
+        "errores_ultima_hora": _instancia.errores_ultima_hora(),
+    }
 
 
 def transacciones_hoy() -> int:

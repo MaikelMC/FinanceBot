@@ -521,9 +521,31 @@ def _validar_resultado(datos: dict) -> dict:
 # LLAMADA A IA
 # ============================================================
 
+def _mock_respuesta(mensaje: str) -> Dict[str, Any]:
+    """Respuesta instantánea sin red para pruebas de carga (AI_PROVIDER=mock)."""
+    base = dict(_RESULTADO_VACIO)
+    low = mensaje.lower()
+    m = re.search(r"(\d+(?:[.,]\d+)?)", low)
+    cantidad = float(m.group(1).replace(",", ".")) if m else 10.0
+    if re.search(r"\b(gast[éeo]|compr[éeo]|pagu?[ée]|cost[óo])", low):
+        base.update(intencion="registrar", tipo="gasto", cantidad=cantidad,
+                    descripcion=mensaje[:60], confianza=0.9)
+    elif re.search(r"\b(recib[ií]|ingres[ée]|cobr[ée]|gan[ée])", low):
+        base.update(intencion="registrar", tipo="ingreso", cantidad=cantidad,
+                    descripcion=mensaje[:60], confianza=0.9)
+    elif re.search(r"(cu[aá]nto|balance|saldo|tengo)", low):
+        base.update(intencion="balance", confianza=0.9)
+    else:
+        base.update(intencion="general", respuesta="Mock: mensaje procesado.", confianza=1.0)
+    return base
+
+
 async def _call_ai(mensaje: str, usuario: Dict[str, Any]) -> Dict[str, Any]:
     """Llama a la IA (Mistral u Ollama) y retorna el JSON analizado."""
     logger.info("Enviando a IA para %s: %s", usuario.get("nombre", "?"), mensaje[:60])
+
+    if config.AI_PROVIDER == "mock":
+        return _mock_respuesta(mensaje)
 
     contexto = _construir_contexto_usuario(usuario)
     user_content = _construir_prompt_usuario(mensaje, contexto)
