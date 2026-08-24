@@ -1000,7 +1000,14 @@ async def _responder_editando(query, texto: str, reply_markup: Optional[InlineKe
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja los callbacks de los botones inline."""
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except BadRequest as e:
+        # Ignorar error si el callback es demasiado viejo (timeout expirado)
+        if "Query is too old" in str(e):
+            logger.warning("Callback query expirado: %s", e)
+        else:
+            raise
 
     try:
         user = update.effective_user
