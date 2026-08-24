@@ -6,6 +6,7 @@ Maneja la lógica de IA para preguntas en lenguaje natural relacionadas con fina
 import logging
 import re
 from collections import defaultdict
+from datetime import datetime
 from typing import Dict, Any, Optional, List
 
 import database
@@ -67,6 +68,112 @@ def _normalizar_texto(texto: str) -> str:
         c for c in unicodedata.normalize('NFD', texto)
         if unicodedata.category(c) != 'Mn'
     ).lower()
+
+
+# ============================================================
+# GASTOS HORMIGA (detección de pequeños gastos recurrentes)
+# ============================================================
+
+CATEGORIAS_HORMIGA_DEFAULT = {
+    "café": ["café", "cafe", "starbucks", "coffee", "capuchino"],
+    "snacks": ["snack", "galleta", "chocolate", "dulce", "golosina"],
+    "transporte": ["taxi", "uber", "didi", "cabify", "bici", "moto", "bus"],
+    "suscripciones": ["netflix", "spotify", "youtube premium", "amazon prime"],
+    "comida rápida": ["mcdonalds", "burger king", "pizza", "hamburguesa", "delivery"],
+}
+
+FACTORES_CONVERSION = {
+    "USD": 1.0, "EUR": 1.08, "CUP": 0.0417, "MLC": 1.0,
+    "MXN": 0.058, "COP": 0.00025, "ARS": 0.0011, "CLP": 0.0011,
+}
+
+
+def detectar_gasto_hormiga(usuario: Dict[str, Any], monto: float, descripcion: str,
+                           categoria: str, moneda: Optional[Dict[str, Any]] = None) -> bool:
+    """Detecta si una transacción es un gasto hormiga (pequeño y recurrente)."""
+    try:
+        config = database.obtener_config_gastos_hormiga(usuario["id"])
+        # 1) Por monto (umbral convertido a la moneda del gasto)
+        umbral = float(config.get("umbral_base", 5.0))
+        umbral_moneda = str(config.get("umbral_moneda", "USD")).upper()
+        moneda_abrev = (moneda.get("abreviatura", "USD") or "USD").upper() if moneda else "USD"
+        if moneda_abrev != umbral_moneda:
+            factor_moneda = FACTORES_CONVERSION.get(moneda_abrev, 1.0)
+            factor_umbral = FACTORES_CONVERSION.get(umbral_moneda, 1.0)
+            if factor_moneda > 0 and factor_umbral > 0:
+                umbral = (umbral * factor_umbral) / factor_moneda
+        if monto > umbral:
+            return False
+        # 2) Por categoría
+        categorias_activas = [c.strip().lower() for c in config.get("categorias_auto", "").split(",") if c.strip()]
+        if categoria and categoria.lower() in categorias_activas:
+            return True
+        descripcion_lower = (descripcion or "").lower()
+        for cat, keywords in CATEGORIAS_HORMIGA_DEFAULT.items():
+            if cat.lower() not in categorias_activas:
+                continue
+            if any(kw in descripcion_lower for kw in keywords):
+                return True
+        # 3) Por frecuencia (opcional, más costoso)
+        return _es_gasto_hormiga_por_frecuencia(usuario["id"], categoria, config)
+    except Exception as e:
+        logger.error("Error detectando gasto hormiga: %s", e)
+        return False
+
+
+def _es_gasto_hormiga_por_frecuencia(usuario_id: int, categoria: str, config: Dict[str, Any]) -> bool:
+    """Verifica si la categoría supera la frecuencia mínima en la última semana."""
+    try:
+        frecuencia_minima = int(config.get("frecuencia_minima", 3))
+        transacciones = database.obtener_transacciones(usuario_id, limite=100)
+        hoy = datetime.now()
+        count = 0
+        cat_lower = (categoria or "").lower()
+        for t in transacciones:
+            fecha_str = (t.get("fecha") or "")[:10]
+            if not fecha_str:
+                continue
+            try:
+                fecha_t = datetime.strptime(fecha_str, "%Y-%m-%d")
+            except ValueError:
+                continue
+            if (hoy - fecha_t).days > 7:
+                continue
+            cat_trans = (t.get("categoria_nombre") or "").lower()
+            desc_trans = (t.get("descripcion") or "").lower()
+            if cat_lower in cat_trans or cat_lower in desc_trans:
+                count += 1
+        return count >= frecuencia_minima
+    except Exception as e:
+        logger.error("Error en frecuencia de gasto hormiga: %s", e)
+        return False
+
+
+def _nota_gasto_hormiga(usuario: Dict[str, Any], cantidad: float, mensaje: str,
+                        categoria: str, moneda: Optional[Dict[str, Any]], transaccion_id: int) -> str:
+    """Si el gasto es hormiga, lo registra y retorna el mensaje de aviso."""
+    try:
+        config = database.obtener_config_gastos_hormiga(usuario["id"])
+        if not int(config.get("notificaciones_activas", 1)):
+            return ""
+        if not detectar_gasto_hormiga(usuario, cantidad, mensaje, categoria, moneda):
+            return ""
+        database.registrar_gasto_hormiga(
+            transaccion_id, usuario["id"], categoria or "otros", cantidad,
+            moneda["id"] if moneda else None,
+        )
+        return (
+            f"\n\n{formato.EMOJI_HORMIGA} ¡Gasto hormiga detectado! "
+            "Este pequeño gasto puede sumar mucho con el tiempo. "
+            "Revísalo con /gastos_hormiga."
+        )
+    except Exception as e:
+        logger.error("Error generando nota de gasto hormiga: %s", e)
+        return ""
+
+
+def _con_nota(texto: str, nota: str) -> str:
+    return texto + (nota if nota else "")
 
 
 def _detectar_presupuesto_en_gasto(mensaje: str, usuario: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -136,9 +243,10 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
 
         gastado_antes = presupuesto.get("cantidad_gastada", 0) if presupuesto else 0
         descripcion, _err_desc = validators.validar_descripcion(mensaje)
-        database.agregar_transaccion(usuario["id"], categoria_id, "gasto", cantidad,
-                                   descripcion or mensaje, moneda_id=moneda_id)
+        txn = database.agregar_transaccion(usuario["id"], categoria_id, "gasto", cantidad,
+                                    descripcion or mensaje, moneda_id=moneda_id)
         metricas.registrar_transaccion()
+        nota_hormiga = _nota_gasto_hormiga(usuario, cantidad, mensaje, categoria, moneda, txn.get("id"))
 
         simbolo = moneda.get("simbolo", "$") if moneda else "$"
         nombre_moneda = f" ({moneda['nombre']})" if moneda else ""
@@ -180,18 +288,124 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                         texto += "\n\n" + alerta
                 except Exception as e:
                     logger.error("Error generando alerta de presupuesto: %s", e)
-                return texto
+                return _con_nota(texto, nota_hormiga)
             abrev_b = moneda_b.get("abreviatura", "") if moneda_b else ""
-            return (
+            return _con_nota(
                 f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev_b)}** "
-                f"del presupuesto de **{presupuesto.get('nombre') or categoria}**"
+                f"del presupuesto de **{presupuesto.get('nombre') or categoria}**",
+                nota_hormiga,
             )
 
         abrev = moneda.get("abreviatura", "") if moneda else ""
-        return f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev)}** en **{categoria}**"
+        return _con_nota(
+            f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev)}** en **{categoria}**",
+            nota_hormiga,
+        )
     except Exception as e:
         logger.error("Error al procesar gasto: %s", e)
         return f"{formato.EMOJI_ERROR} Ocurrió un error al registrar tu gasto: **{formato.fmt_monto(cantidad)}**. Intenta de nuevo."
+
+
+def _procesar_gastos_hormiga(usuario: Dict[str, Any]) -> str:
+    """Reporte de gastos hormiga (últimos 30 días) con sugerencia de ahorro."""
+    try:
+        stats = database.obtener_estadisticas_gastos_hormiga(usuario["id"], dias=30)
+        gastos = database.obtener_gastos_hormiga(usuario["id"], dias=30)
+        if not gastos:
+            return (
+                f"{formato.EMOJI_HORMIGA} **Tus gastos hormiga**\n{formato.SEPARADOR}\n"
+                "📝 Aún no he detectado gastos hormiga. Cuando registres pequeños gastos "
+                "recurrentes (café, snacks, taxi...), los verás aquí."
+            )
+        total = stats.get("total", 0.0)
+        cantidad = stats.get("cantidad", 0)
+        lineas = [
+            f"{formato.EMOJI_HORMIGA} **Tus gastos hormiga** (últimos 30 días)",
+            formato.SEPARADOR,
+            f"{formato.EMOJI_GASTO} Total: **{formato.fmt_monto(total)}** · {cantidad} transacciones",
+            "",
+            f"{formato.EMOJI_INFO} **Por categoría:**",
+        ]
+        for cat in stats.get("por_categoria", []):
+            lineas.append(f"  • {cat['categoria']}: {formato.fmt_monto(cat['total'])} ({cat['cantidad']})")
+        if total > 0:
+            ahorro = round(total * 0.8, 2)
+            lineas.append("")
+            lineas.append(
+                f"{formato.EMOJI_AHORRO} Sugerencia: podrías ahorrar **{formato.fmt_monto(ahorro)}/mes** "
+                "reduciendo un 80% estos gastos."
+            )
+        lineas.append("")
+        lineas.append("Configura la detección con /config_hormiga.")
+        return "\n".join(lineas)
+    except Exception as e:
+        logger.error("Error en gastos hormiga: %s", e)
+        return "❌ Ocurrió un error al obtener tus gastos hormiga."
+
+
+def _texto_config_gastos_hormiga(usuario: Dict[str, Any], extra: Optional[str] = None) -> str:
+    config = database.obtener_config_gastos_hormiga(usuario["id"])
+    extra_line = f"\n{extra}\n" if extra else ""
+    notif = "Activadas" if int(config.get("notificaciones_activas", 1)) else "Desactivadas"
+    return (
+        f"{formato.EMOJI_HORMIGA} **Configuración de Gastos Hormiga**\n{formato.SEPARADOR}\n"
+        f"{extra_line}"
+        f"• Umbral: **{formato.fmt_monto(float(config.get('umbral_base', 5.0)))} {config.get('umbral_moneda', 'USD')}**\n"
+        f"• Frecuencia mínima: **{config.get('frecuencia_minima', 3)}** veces/semana\n"
+        f"• Categorías: `{config.get('categorias_auto', '')}`\n"
+        f"• Notificaciones: **{notif}**\n\n"
+        "Para cambiar:\n"
+        "`/config_hormiga umbral 10 eur`\n"
+        "`/config_hormiga categorías café,taxi,netflix`\n"
+        "`/config_hormiga frecuencia 4`\n"
+        "`/config_hormiga notificaciones off`"
+    )
+
+
+def _procesar_config_gastos_hormiga(usuario: Dict[str, Any], mensaje: str) -> str:
+    """Muestra o actualiza la configuración de detección de gastos hormiga."""
+    try:
+        mensaje = (mensaje or "").strip().lower()
+        if mensaje in ("", "mostrar", "ver", "show"):
+            return _texto_config_gastos_hormiga(usuario)
+
+        if "umbral" in mensaje:
+            m = re.search(r'(\d+(?:[.,]\d+)?)\s*([a-z]{2,4})?', mensaje)
+            if not m:
+                return "❌ Indica el umbral, ej: `/config_hormiga umbral 10 eur`"
+            umbral = float(_normalizar_separador_decimal(m.group(1)))
+            moneda = (m.group(2) or "USD").upper()
+            if moneda not in FACTORES_CONVERSION:
+                moneda = "USD"
+            database.guardar_config_gastos_hormiga(usuario["id"], {"umbral_base": umbral, "umbral_moneda": moneda})
+            return _texto_config_gastos_hormiga(usuario, f"Umbral actualizado a **{formato.fmt_monto(umbral)} {moneda}**.")
+
+        if "categor" in mensaje:
+            mm = re.search(r'categor(?:ias?|i|í|í)as?\s+(.+)', mensaje)
+            if not mm:
+                return "❌ Indica las categorías, ej: `/config_hormiga categorías café,taxi,netflix`"
+            database.guardar_config_gastos_hormiga(usuario["id"], {"categorias_auto": mm.group(1).strip()})
+            return _texto_config_gastos_hormiga(usuario, "Categorías automáticas actualizadas.")
+
+        if "frecuencia" in mensaje:
+            mf = re.search(r'(\d+)', mensaje)
+            if not mf:
+                return "❌ Indica la frecuencia, ej: `/config_hormiga frecuencia 4`"
+            freq = int(mf.group(1))
+            database.guardar_config_gastos_hormiga(usuario["id"], {"frecuencia_minima": freq})
+            return _texto_config_gastos_hormiga(usuario, f"Frecuencia mínima actualizada a **{freq}**.")
+
+        if "notif" in mensaje:
+            if any(p in mensaje for p in ("off", "desactiv", "0")):
+                database.guardar_config_gastos_hormiga(usuario["id"], {"notificaciones_activas": 0})
+                return _texto_config_gastos_hormiga(usuario, "Notificaciones de gastos hormiga **desactivadas**.")
+            database.guardar_config_gastos_hormiga(usuario["id"], {"notificaciones_activas": 1})
+            return _texto_config_gastos_hormiga(usuario, "Notificaciones de gastos hormiga **activadas**.")
+
+        return _texto_config_gastos_hormiga(usuario)
+    except Exception as e:
+        logger.error("Error en config gastos hormiga: %s", e)
+        return "❌ Ocurrió un error al configurar los gastos hormiga."
 
 
 def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None,

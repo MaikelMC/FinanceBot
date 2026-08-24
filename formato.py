@@ -21,6 +21,8 @@ EMOJI_OK = "✅"
 EMOJI_ERROR = "❌"
 EMOJI_INFO = "ℹ️"
 EMOJI_ELIMINAR = "🗑️"
+EMOJI_HORMIGA = "🐜"
+EMOJI_AHORRO = "🐷"
 
 
 def fmt_monto(valor: float) -> str:

@@ -30,6 +30,8 @@ CB_MONEDAS = "menu_monedas"
 CB_TRANS = "menu_transacciones"
 CB_AYUDA = "menu_ayuda"
 CB_MAS = "menu_mas"
+CB_GASTOS_HORMIGA = "menu_gastos_hormiga"
+CB_GASTOS_HORMIGA_CONFIG = "menu_gastos_hormiga_config"
 
 # Sub-acciones
 CB_BALANCE_GASTOS = "menu_balance_gastos"
@@ -92,12 +94,12 @@ def _con_botones(texto: str, filas, volver: str = CB_INICIO, inicio: bool = True
 # ============================================================
 
 def teclado_principal() -> InlineKeyboardMarkup:
-    """Los 7 botones principales."""
+    """Botones principales de navegación (menú principal inline)."""
     return _kb([
         [("💰 Balance", CB_BALANCE), ("📊 Presupuestos", CB_PRESUP)],
         [("🎯 Ahorros", CB_AHORROS), ("💱 Monedas", CB_MONEDAS)],
         [("📋 Transacciones", CB_TRANS), ("❓ Ayuda", CB_AYUDA)],
-        [("⚙️ Más opciones", CB_MAS)],
+        [("🐜 Gastos Hormiga", CB_GASTOS_HORMIGA), ("⚙️ Más opciones", CB_MAS)],
     ])
 
 
@@ -209,6 +211,17 @@ def menu_mas() -> Tuple[str, InlineKeyboardMarkup]:
             [("📅 Resumen del mes", CB_MAS_RESUMEN)],
             [("🗑️ Borrar historial", CB_MAS_BORRAR)],
         ],
+    )
+
+
+def menu_gastos_hormiga(usuario: dict) -> Tuple[str, InlineKeyboardMarkup]:
+    """Gastos hormiga (pequeños y recurrentes) + acciones."""
+    return _con_botones(
+        knowledge._procesar_gastos_hormiga(usuario),
+        [
+            [("⚙️ Configurar", CB_GASTOS_HORMIGA_CONFIG)],
+        ],
+        volver=CB_INICIO,
     )
 
 
@@ -380,6 +393,8 @@ TEXTO_HELP = (
     "• `/gastos` - Ver tus últimos gastos\n"
     "• `/ingresos` - Ver tus últimos ingresos\n"
     "• `/metas` - Ver tus metas de ahorro\n"
+    "• `/gastos_hormiga` - Ver tus gastos hormiga (pequeños y recurrentes)\n"
+    "• `/config_hormiga` - Configurar detección de gastos hormiga\n"
     "• `/notificaciones` - Alertas de presupuesto y resumen diario (21:30 hora de Cuba)\n"
     "• `/exportar` - Exporta tus datos a Excel/CSV (ej: `/exportar csv 2026-07`)\n"
     "• `/help` - Ver esta ayuda\n"
@@ -431,6 +446,10 @@ def _render(data: str, usuario: dict) -> Optional[Tuple[str, InlineKeyboardMarku
         return menu_ayuda()
     if data == CB_MAS:
         return menu_mas()
+    if data == CB_GASTOS_HORMIGA:
+        return menu_gastos_hormiga(usuario)
+    if data == CB_GASTOS_HORMIGA_CONFIG:
+        return _con_botones(knowledge._procesar_config_gastos_hormiga(usuario, "mostrar"), [], volver=CB_GASTOS_HORMIGA)
 
     # Balance
     if data == CB_BALANCE_GASTOS:

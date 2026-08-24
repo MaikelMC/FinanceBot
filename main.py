@@ -29,6 +29,7 @@ from handlers import start, handle_message, error_handler
 from handlers import consultar_usuario, consultar_comandos, handle_callback_query, eliminar_historial, anuncio
 from handlers import configurar_notificaciones
 from handlers import consultar_categorias, consultar_gastos, consultar_ingresos, consultar_metas, consultar_resumen
+from handlers import consultar_gastos_hormiga, configurar_gastos_hormiga
 from handlers import exportar_datos
 from handlers import ver_metricas, soporte
 import notificaciones
@@ -44,6 +45,8 @@ COMANDOS_MENU = [
     BotCommand("gastos", "Ver tus últimos gastos"),
     BotCommand("ingresos", "Ver tus últimos ingresos"),
     BotCommand("metas", "Ver tus metas de ahorro"),
+    BotCommand("gastos_hormiga", "Ver tus gastos hormiga (pequeños y recurrentes)"),
+    BotCommand("config_hormiga", "Configurar detección de gastos hormiga"),
     BotCommand("notificaciones", "Alertas de presupuesto y resumen diario"),
     BotCommand("exportar", "Exporta tus datos a Excel/CSV"),
     BotCommand("help", "Ver todos los comandos y ejemplos de uso"),
@@ -118,6 +121,8 @@ def _build_app():
     app.add_handler(CommandHandler("gastos", consultar_gastos))
     app.add_handler(CommandHandler("ingresos", consultar_ingresos))
     app.add_handler(CommandHandler("metas", consultar_metas))
+    app.add_handler(CommandHandler("gastos_hormiga", consultar_gastos_hormiga))
+    app.add_handler(CommandHandler("config_hormiga", configurar_gastos_hormiga))
     app.add_handler(CommandHandler("resumen", consultar_resumen))
     app.add_handler(CommandHandler("notificaciones", configurar_notificaciones))
     app.add_handler(CommandHandler("exportar", exportar_datos))

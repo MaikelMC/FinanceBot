@@ -35,11 +35,13 @@ SHEET_NAMES = {
     "metas_ahorro": "metas_ahorro",
     "notificaciones": "notificaciones",
     "monedas": "monedas",
+    "config_gastos_hormiga": "config_gastos_hormiga",
+    "gastos_hormiga": "gastos_hormiga",
 }
 
 # Columnas de cada hoja (deben coincidir con las claves de los dicts devueltos)
 SHEET_COLUMNS = {
-    "usuarios": ["id", "telegram_user_id", "nombre", "created_at", "updated_at"],
+    "usuarios": ["id", "telegram_user_id", "nombre", "teclado_migrado", "created_at", "updated_at"],
     "categorias": ["id", "usuario_id", "nombre", "tipo", "descripcion", "icono_color", "created_at"],
     "transacciones": ["id", "usuario_id", "categoria_id", "tipo", "cantidad", "descripcion", "moneda_id", "fecha", "created_at"],
     "presupuestos": ["id", "usuario_id", "categoria_id", "nombre", "moneda_id", "cantidad_planejada", "cantidad_gastada", "periodo", "fecha_inicio", "fecha_fin", "created_at"],
@@ -47,13 +49,15 @@ SHEET_COLUMNS = {
     "notificaciones": ["id", "usuario_id", "version", "enviada_en"],
     "monedas": ["id", "usuario_id", "nombre", "simbolo", "abreviatura", "es_default", "created_at"],
     "preferencias_notificaciones": ["id", "usuario_id", "alerta_80", "alerta_100", "alerta_125", "resumen_diario", "hora_resumen", "zona_horaria", "ultimo_resumen", "created_at"],
+    "config_gastos_hormiga": ["id", "usuario_id", "umbral_base", "umbral_moneda", "frecuencia_minima", "categorias_auto", "notificaciones_activas", "created_at", "updated_at"],
+    "gastos_hormiga": ["id", "transaccion_id", "usuario_id", "categoria", "monto", "moneda_id", "fecha", "detectado_en", "es_recurrente"],
 }
 
 # Columnas de fecha: pueden venir como seriales de fecha de Excel (días desde
 # 1899-12-30) cuando Google las interpretó como fecha al escribir.
 DATE_COLUMNS = {
     "created_at", "updated_at", "fecha",
-    "fecha_inicio", "fecha_fin", "fecha_meta", "enviada_en",
+    "fecha_inicio", "fecha_fin", "fecha_meta", "enviada_en", "detectado_en",
 }
 
 LOCK = threading.Lock()
@@ -227,7 +231,8 @@ class GoogleSheetsDB:
                 row[col] = r[i] if (i is not None and i < len(r)) else ""
             # Castear campos numéricos para evitar strings en la caché
             for num_col in ("cantidad", "cantidad_planejada",
-                            "cantidad_gastada", "cantidad_actual", "objetivo"):
+                            "cantidad_gastada", "cantidad_actual", "objetivo",
+                            "umbral_base", "frecuencia_minima", "monto"):
                 if num_col in row:
                     row[num_col] = self._parse_number_locale_aware(row[num_col])
             # Castear moneda_id a int o None
@@ -399,6 +404,8 @@ class GoogleSheetsDB:
             "transacciones": ["cantidad"],
             "presupuestos": ["cantidad_planejada", "cantidad_gastada"],
             "metas_ahorro": ["objetivo", "cantidad_actual"],
+            "gastos_hormiga": ["monto"],
+            "config_gastos_hormiga": ["umbral_base", "frecuencia_minima"],
         }
         return numeric_map.get(sheet_name, [])
 
@@ -419,6 +426,7 @@ class GoogleSheetsDB:
                 "id": uid,
                 "telegram_user_id": telegram_user_id,
                 "nombre": nombre,
+                "teclado_migrado": 0,
                 "created_at": now,
                 "updated_at": now,
             }
@@ -434,6 +442,18 @@ class GoogleSheetsDB:
             if str(u.get("telegram_user_id", "")) == str(telegram_user_id):
                 return dict(u)
         return None
+
+    def marcar_teclado_migrado(self, usuario_id: int) -> None:
+        """Marca que al usuario ya se le mostró el aviso de migración de teclado."""
+        with LOCK:
+            users = self._cache.get("usuarios", [])
+            for u in users:
+                if int(u.get("id", 0)) == int(usuario_id):
+                    u["teclado_migrado"] = 1
+                    u["updated_at"] = self._now()
+                    self._cache_dirty.add("usuarios")
+                    self._schedule_flush()
+                    return
 
     # ----------------------------------------------------------
     # CATEGORÍAS
@@ -958,6 +978,191 @@ class GoogleSheetsDB:
             return actualizada
 
     # ----------------------------------------------------------
+    # GASTOS HORMIGA
+    # ----------------------------------------------------------
+
+    DEFAULT_HORMIGA = {
+        "umbral_base": 5.0,
+        "umbral_moneda": "USD",
+        "frecuencia_minima": 3,
+        "categorias_auto": "café,snacks,transporte,suscripciones,comida rápida",
+        "notificaciones_activas": 1,
+    }
+
+    def _coerce_config_hastos_hormiga(self, c: Dict[str, Any]) -> Dict[str, Any]:
+        c = dict(c)
+        try:
+            c["umbral_base"] = float(c.get("umbral_base", 5.0))
+        except (TypeError, ValueError):
+            c["umbral_base"] = 5.0
+        try:
+            c["frecuencia_minima"] = int(c.get("frecuencia_minima", 3))
+        except (TypeError, ValueError):
+            c["frecuencia_minima"] = 3
+        c["notificaciones_activas"] = bool(int(c.get("notificaciones_activas", 1)))
+        return c
+
+    def obtener_config_gastos_hormiga(self, usuario_id: int) -> Dict[str, Any]:
+        """Obtiene config con valores por defecto si no existe (y la persiste)."""
+        with LOCK:
+            cfgs = self._cache.get("config_gastos_hormiga", [])
+            for c in cfgs:
+                if int(c.get("usuario_id", 0)) == usuario_id:
+                    return self._coerce_config_hastos_hormiga(c)
+            now = self._now()
+            cid = self._next_id("config_gastos_hormiga")
+            nueva = {
+                "id": cid,
+                "usuario_id": usuario_id,
+                "umbral_base": self.DEFAULT_HORMIGA["umbral_base"],
+                "umbral_moneda": self.DEFAULT_HORMIGA["umbral_moneda"],
+                "frecuencia_minima": self.DEFAULT_HORMIGA["frecuencia_minima"],
+                "categorias_auto": self.DEFAULT_HORMIGA["categorias_auto"],
+                "notificaciones_activas": self.DEFAULT_HORMIGA["notificaciones_activas"],
+                "created_at": now,
+                "updated_at": now,
+            }
+            cfgs.append(nueva)
+            self._cache_dirty.add("config_gastos_hormiga")
+            self._schedule_flush()
+            return self._coerce_config_hastos_hormiga(nueva)
+
+    def guardar_config_gastos_hormiga(self, usuario_id: int, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Guarda configuración personalizada (upsert)."""
+        with LOCK:
+            cfgs = self._cache.get("config_gastos_hormiga", [])
+            existente = next((c for c in cfgs if int(c.get("usuario_id", 0)) == usuario_id), None)
+            now = self._now()
+            if existente:
+                if "umbral_base" in config and config["umbral_base"] is not None:
+                    try:
+                        existente["umbral_base"] = round(float(config["umbral_base"]), 2)
+                    except (TypeError, ValueError):
+                        pass
+                if "umbral_moneda" in config and config["umbral_moneda"] is not None:
+                    existente["umbral_moneda"] = str(config["umbral_moneda"]).upper()
+                if "frecuencia_minima" in config and config["frecuencia_minima"] is not None:
+                    try:
+                        existente["frecuencia_minima"] = int(config["frecuencia_minima"])
+                    except (TypeError, ValueError):
+                        pass
+                if "categorias_auto" in config and config["categorias_auto"] is not None:
+                    existente["categorias_auto"] = str(config["categorias_auto"])
+                if "notificaciones_activas" in config and config["notificaciones_activas"] is not None:
+                    existente["notificaciones_activas"] = 1 if config["notificaciones_activas"] else 0
+                existente["updated_at"] = now
+            else:
+                cid = self._next_id("config_gastos_hormiga")
+                nueva = {
+                    "id": cid,
+                    "usuario_id": usuario_id,
+                    "umbral_base": round(float(config.get("umbral_base", self.DEFAULT_HORMIGA["umbral_base"])), 2),
+                    "umbral_moneda": str(config.get("umbral_moneda", self.DEFAULT_HORMIGA["umbral_moneda"])).upper(),
+                    "frecuencia_minima": int(config.get("frecuencia_minima", self.DEFAULT_HORMIGA["frecuencia_minima"])),
+                    "categorias_auto": str(config.get("categorias_auto", self.DEFAULT_HORMIGA["categorias_auto"])),
+                    "notificaciones_activas": 1 if config.get("notificaciones_activas", self.DEFAULT_HORMIGA["notificaciones_activas"]) else 0,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                cfgs.append(nueva)
+            self._cache_dirty.add("config_gastos_hormiga")
+            self._schedule_flush()
+            return self.obtener_config_gastos_hormiga(usuario_id)
+
+    def registrar_gasto_hormiga(self, transaccion_id: int, usuario_id: int, categoria: str,
+                                monto: float, moneda_id: Optional[int] = None) -> Dict[str, Any]:
+        """Registra un gasto como hormiga."""
+        with LOCK:
+            try:
+                monto = round(float(monto), 2)
+            except (TypeError, ValueError):
+                monto = 0.0
+            gh = self._cache.get("gastos_hormiga", [])
+            gid = self._next_id("gastos_hormiga")
+            now = self._now()
+            nuevo = {
+                "id": gid,
+                "transaccion_id": transaccion_id,
+                "usuario_id": usuario_id,
+                "categoria": categoria,
+                "monto": monto,
+                "moneda_id": moneda_id if moneda_id is not None else "",
+                "fecha": now[:10],
+                "detectado_en": now,
+                "es_recurrente": 1,
+            }
+            gh.append(nuevo)
+            self._cache_dirty.add("gastos_hormiga")
+            self._schedule_flush()
+            return dict(nuevo)
+
+    def obtener_gastos_hormiga(self, usuario_id: int, dias: int = 30) -> List[Dict[str, Any]]:
+        """Obtiene gastos hormiga con JOIN manual a transacciones y monedas."""
+        gh = self._cache.get("gastos_hormiga", [])
+        trans = self._cache.get("transacciones", [])
+        monedas = self._cache.get("monedas", [])
+        txn_lookup = {int(t["id"]): t for t in trans}
+        moneda_lookup = {int(m["id"]): m for m in monedas}
+        hoy = datetime.now()
+        resultado = []
+        for g in gh:
+            if int(g.get("usuario_id", 0)) != usuario_id:
+                continue
+            row = dict(g)
+            try:
+                row["monto"] = float(row.get("monto", 0))
+            except (TypeError, ValueError):
+                row["monto"] = 0.0
+            fecha_g = row.get("fecha", "")
+            if fecha_g:
+                try:
+                    if (hoy - datetime.strptime(str(fecha_g)[:10], "%Y-%m-%d")).days > dias:
+                        continue
+                except ValueError:
+                    pass
+            tid = g.get("transaccion_id")
+            try:
+                txn = txn_lookup.get(int(tid)) if tid not in (None, "") else None
+            except (TypeError, ValueError):
+                txn = None
+            if txn:
+                row["transaccion_descripcion"] = txn.get("descripcion", "")
+                row["transaccion_fecha"] = txn.get("fecha", "")
+            mid = g.get("moneda_id")
+            if mid not in (None, ""):
+                m = moneda_lookup.get(int(mid)) if str(mid).isdigit() else None
+                if m:
+                    row["moneda_simbolo"] = m.get("simbolo", "$")
+                    row["moneda_abreviatura"] = m.get("abreviatura", "")
+            resultado.append(row)
+        resultado.sort(key=lambda x: str(x.get("detectado_en", "")), reverse=True)
+        return resultado
+
+    def obtener_estadisticas_gastos_hormiga(self, usuario_id: int, dias: int = 30) -> Dict[str, Any]:
+        """Estadísticas agregadas por categoría de gastos hormiga."""
+        gastos = self.obtener_gastos_hormiga(usuario_id, dias)
+        por_categoria: Dict[str, Dict[str, float]] = {}
+        total = 0.0
+        cantidad = 0
+        for g in gastos:
+            cat = g.get("categoria", "Otros") or "Otros"
+            monto = float(g.get("monto", 0))
+            if cat not in por_categoria:
+                por_categoria[cat] = {"total": 0.0, "cantidad": 0}
+            por_categoria[cat]["total"] += monto
+            por_categoria[cat]["cantidad"] += 1
+            total += monto
+            cantidad += 1
+        return {
+            "total": round(total, 2),
+            "cantidad": cantidad,
+            "por_categoria": [
+                {"categoria": k, **v}
+                for k, v in sorted(por_categoria.items(), key=lambda x: x[1]["total"], reverse=True)
+            ],
+        }
+
+    # ----------------------------------------------------------
     # NOTIFICACIONES
     # ----------------------------------------------------------
 
@@ -1106,6 +1311,10 @@ def obtener_o_crear_usuario(telegram_user_id: int, nombre: str) -> Dict[str, Any
 
 def obtener_usuario(telegram_user_id: int) -> Optional[Dict[str, Any]]:
     return _get_db().obtener_usuario(telegram_user_id)
+
+
+def marcar_teclado_migrado(usuario_id: int) -> None:
+    _get_db().marcar_teclado_migrado(usuario_id)
 
 
 def crear_categoria(usuario_id: int, nombre: str, tipo: str, descripcion: str = "", icono_color: str = "") -> Dict[str, Any]:
@@ -1323,3 +1532,24 @@ def eliminar_moneda(usuario_id: int, moneda_id: int) -> bool:
 
 def establecer_moneda_default(usuario_id: int, moneda_id: int) -> bool:
     return _get_db().establecer_moneda_default(usuario_id, moneda_id)
+
+
+def obtener_config_gastos_hormiga(usuario_id: int) -> Dict[str, Any]:
+    return _get_db().obtener_config_gastos_hormiga(usuario_id)
+
+
+def guardar_config_gastos_hormiga(usuario_id: int, config: Dict[str, Any]) -> Dict[str, Any]:
+    return _get_db().guardar_config_gastos_hormiga(usuario_id, config)
+
+
+def registrar_gasto_hormiga(transaccion_id: int, usuario_id: int, categoria: str,
+                            monto: float, moneda_id: Optional[int] = None) -> Dict[str, Any]:
+    return _get_db().registrar_gasto_hormiga(transaccion_id, usuario_id, categoria, monto, moneda_id)
+
+
+def obtener_gastos_hormiga(usuario_id: int, dias: int = 30) -> List[Dict[str, Any]]:
+    return _get_db().obtener_gastos_hormiga(usuario_id, dias)
+
+
+def obtener_estadisticas_gastos_hormiga(usuario_id: int, dias: int = 30) -> Dict[str, Any]:
+    return _get_db().obtener_estadisticas_gastos_hormiga(usuario_id, dias)

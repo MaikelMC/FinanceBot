@@ -143,6 +143,36 @@ def crear_tablas():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS config_gastos_hormiga (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            umbral_base REAL DEFAULT 5.0,
+            umbral_moneda TEXT DEFAULT 'USD',
+            frecuencia_minima INTEGER DEFAULT 3,
+            categorias_auto TEXT DEFAULT 'café,snacks,transporte,suscripciones,comida rápida',
+            notificaciones_activas INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS gastos_hormiga (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaccion_id INTEGER,
+            usuario_id INTEGER NOT NULL,
+            categoria TEXT,
+            monto REAL NOT NULL,
+            moneda_id INTEGER,
+            fecha TEXT,
+            detectado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            es_recurrente INTEGER DEFAULT 1,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
+        )
+    """)
+
     conn.commit()
 
     # Migración: agregar moneda_id si no existe
@@ -151,6 +181,16 @@ def crear_tablas():
         cols = [row[1] for row in cursor.fetchall()]
         if "moneda_id" not in cols:
             cursor.execute("ALTER TABLE transacciones ADD COLUMN moneda_id INTEGER")
+            conn.commit()
+    except Exception:
+        pass
+
+    # Migración: agregar teclado_migrado si no existe (aviso único de migración)
+    try:
+        cursor.execute("PRAGMA table_info(usuarios)")
+        cols = [row[1] for row in cursor.fetchall()]
+        if "teclado_migrado" not in cols:
+            cursor.execute("ALTER TABLE usuarios ADD COLUMN teclado_migrado INTEGER DEFAULT 0")
             conn.commit()
     except Exception:
         pass
@@ -189,6 +229,21 @@ def obtener_usuario(telegram_user_id: int) -> Optional[Dict[str, Any]]:
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def marcar_teclado_migrado(usuario_id: int) -> None:
+    """Marca que al usuario ya se le mostró el aviso de migración de teclado."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE usuarios SET teclado_migrado = 1, updated_at = ? WHERE id = ?",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), usuario_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning("No se pudo marcar teclado_migrado para usuario %s: %s", usuario_id, e)
 
 
 def crear_categoria(usuario_id: int, nombre: str, tipo: str, descripcion: str = "", icono_color: str = "") -> Dict[str, Any]:
@@ -1016,3 +1071,179 @@ def guardar_preferencias(usuario_id: int, **kwargs) -> Dict[str, Any]:
         conn.commit()
     conn.close()
     return obtener_preferencias(usuario_id)
+
+
+# ----------------------------------------------------------
+# GASTOS HORMIGA
+# ----------------------------------------------------------
+
+DEFAULT_HORMIGA = {
+    "umbral_base": 5.0,
+    "umbral_moneda": "USD",
+    "frecuencia_minima": 3,
+    "categorias_auto": "café,snacks,transporte,suscripciones,comida rápida",
+    "notificaciones_activas": 1,
+}
+
+
+def obtener_config_gastos_hormiga(usuario_id: int) -> Dict[str, Any]:
+    """Obtiene la configuración de gastos hormiga. Si no existe, crea una con valores por defecto."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM config_gastos_hormiga WHERE usuario_id = ?", (usuario_id,))
+    row = cursor.fetchone()
+    if row:
+        cfg = dict(row)
+        cfg["notificaciones_activas"] = bool(int(cfg.get("notificaciones_activas", 1)))
+        conn.close()
+        return cfg
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute(
+        """
+        INSERT INTO config_gastos_hormiga
+            (usuario_id, umbral_base, umbral_moneda, frecuencia_minima, categorias_auto,
+             notificaciones_activas, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (usuario_id, DEFAULT_HORMIGA["umbral_base"], DEFAULT_HORMIGA["umbral_moneda"],
+         DEFAULT_HORMIGA["frecuencia_minima"], DEFAULT_HORMIGA["categorias_auto"],
+         DEFAULT_HORMIGA["notificaciones_activas"], now, now)
+    )
+    cfg_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    cfg = {"id": cfg_id, "usuario_id": usuario_id, **DEFAULT_HORMIGA}
+    cfg["notificaciones_activas"] = bool(DEFAULT_HORMIGA["notificaciones_activas"])
+    return cfg
+
+
+def guardar_config_gastos_hormiga(usuario_id: int, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Actualiza la configuración de gastos hormiga (upsert)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM config_gastos_hormiga WHERE usuario_id = ?", (usuario_id,))
+    existente = cursor.fetchone()
+
+    campos = {
+        "umbral_base": float,
+        "umbral_moneda": str,
+        "frecuencia_minima": int,
+        "categorias_auto": str,
+        "notificaciones_activas": int,
+    }
+    valores = {k: campos[k](config[k]) for k in campos if k in config and config[k] is not None}
+    if "umbral_moneda" in valores:
+        valores["umbral_moneda"] = str(valores["umbral_moneda"]).upper()
+    if "notificaciones_activas" in valores:
+        valores["notificaciones_activas"] = 1 if valores["notificaciones_activas"] else 0
+    valores["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if existente:
+        sets = ", ".join(f"{k} = ?" for k in valores)
+        cursor.execute(
+            f"UPDATE config_gastos_hormiga SET {sets} WHERE usuario_id = ?",
+            list(valores.values()) + [usuario_id]
+        )
+    else:
+        cols = ["usuario_id"] + list(valores.keys())
+        placeholders = ", ".join(["?"] * len(cols))
+        cursor.execute(
+            f"INSERT INTO config_gastos_hormiga ({', '.join(cols)}) VALUES ({placeholders})",
+            [usuario_id] + list(valores.values())
+        )
+    conn.commit()
+    conn.close()
+    return obtener_config_gastos_hormiga(usuario_id)
+
+
+def registrar_gasto_hormiga(transaccion_id: int, usuario_id: int, categoria: str,
+                            monto: float, moneda_id: Optional[int] = None) -> Dict[str, Any]:
+    """Registra un gasto detectado como hormiga."""
+    try:
+        monto = round(float(monto), 2)
+    except (TypeError, ValueError):
+        monto = 0.0
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO gastos_hormiga
+            (transaccion_id, usuario_id, categoria, monto, moneda_id, fecha, detectado_en, es_recurrente)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (transaccion_id, usuario_id, categoria, monto, moneda_id, now[:10], now, 1)
+    )
+    gh_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {
+        "id": gh_id, "transaccion_id": transaccion_id, "usuario_id": usuario_id,
+        "categoria": categoria, "monto": monto, "moneda_id": moneda_id,
+        "fecha": now[:10], "detectado_en": now, "es_recurrente": 1,
+    }
+
+
+def obtener_gastos_hormiga(usuario_id: int, dias: int = 30) -> List[Dict[str, Any]]:
+    """Obtiene los gastos hormiga del usuario con JOIN manual a transacciones y monedas."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM gastos_hormiga WHERE usuario_id = ?", (usuario_id,))
+    rows = cursor.fetchall()
+    transacciones = {t["id"]: t for t in obtener_transacciones(usuario_id, limite=1000)}
+    monedas = {m["id"]: m for m in obtener_monedas(usuario_id)}
+    conn.close()
+
+    resultado = []
+    hoy = datetime.now()
+    for g in rows:
+        row = dict(g)
+        try:
+            row["monto"] = float(row.get("monto", 0))
+        except (TypeError, ValueError):
+            row["monto"] = 0.0
+        row["notificaciones_activas"] = bool(int(row.get("es_recurrente", 1)))
+        fecha_g = row.get("fecha", "")
+        if fecha_g:
+            try:
+                if (hoy - datetime.strptime(str(fecha_g)[:10], "%Y-%m-%d")).days > dias:
+                    continue
+            except ValueError:
+                pass
+        txn = transacciones.get(int(row.get("transaccion_id") or 0))
+        if txn:
+            row["transaccion_descripcion"] = txn.get("descripcion", "")
+            row["transaccion_fecha"] = txn.get("fecha", "")
+        mid = row.get("moneda_id")
+        if mid and mid in monedas:
+            row["moneda_simbolo"] = monedas[mid].get("simbolo", "$")
+            row["moneda_abreviatura"] = monedas[mid].get("abreviatura", "")
+        resultado.append(row)
+    resultado.sort(key=lambda x: str(x.get("detectado_en", "")), reverse=True)
+    return resultado
+
+
+def obtener_estadisticas_gastos_hormiga(usuario_id: int, dias: int = 30) -> Dict[str, Any]:
+    """Estadísticas agregadas por categoría de gastos hormiga."""
+    gastos = obtener_gastos_hormiga(usuario_id, dias)
+    por_categoria: Dict[str, Dict[str, float]] = {}
+    total = 0.0
+    cantidad = 0
+    for g in gastos:
+        cat = g.get("categoria", "Otros") or "Otros"
+        monto = float(g.get("monto", 0))
+        if cat not in por_categoria:
+            por_categoria[cat] = {"total": 0.0, "cantidad": 0}
+        por_categoria[cat]["total"] += monto
+        por_categoria[cat]["cantidad"] += 1
+        total += monto
+        cantidad += 1
+    return {
+        "total": round(total, 2),
+        "cantidad": cantidad,
+        "por_categoria": [
+            {"categoria": k, **v}
+            for k, v in sorted(por_categoria.items(), key=lambda x: x[1]["total"], reverse=True)
+        ],
+    }

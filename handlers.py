@@ -201,6 +201,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nombre_mostrar = escape_markdown(user.first_name or "amigo", version=1)
 
         context.user_data["telegram_user_id"] = user.id
+        es_nuevo = _es_usuario_nuevo(user)
         usuario = await _registrar_usuario(context, user)
         context.user_data["usuario_id"] = usuario["id"]
 
@@ -222,11 +223,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "👇 **Elige una opción abajo o escríbeme en lenguaje natural:**"
         )
 
-        # Quitar el teclado persistente y mostrar el menú principal inline
-        await update.message.reply_text(
-            "🧭 Te cambié el teclado: ahora navegas con botones.",
-            reply_markup=ReplyKeyboardRemove(),
-        )
+        # El aviso de migración de teclado se muestra UNA sola vez: solo a
+        # usuarios que ya usaban el bot antes de los botones inline. Los nuevos
+        # y los ya migrados no lo ven nunca más.
+        migrado = bool(int(usuario.get("teclado_migrado", 0) or 0))
+        if not es_nuevo and not migrado:
+            await update.message.reply_text(
+                "🧭 Te cambié el teclado: ahora navegas con botones.",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+            database.marcar_teclado_migrado(usuario["id"])
+        elif es_nuevo:
+            database.marcar_teclado_migrado(usuario["id"])
+
         await update.message.reply_text(
             mensaje, parse_mode="Markdown", reply_markup=_crear_teclado_principal()
         )
@@ -580,6 +589,30 @@ async def consultar_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error("Error en /resumen: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al generar tu resumen.")
+
+
+async def consultar_gastos_hormiga(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja el comando /gastos_hormiga."""
+    try:
+        usuario = _obtener_usuario_contexto(update, context)
+        texto = knowledge._procesar_gastos_hormiga(usuario)
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
+    except Exception as e:
+        logger.error("Error en /gastos_hormiga: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error al obtener tus gastos hormiga.")
+
+
+async def configurar_gastos_hormiga(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja el comando /config_hormiga."""
+    try:
+        usuario = _obtener_usuario_contexto(update, context)
+        args = context.args or []
+        mensaje = " ".join(args) if args else "mostrar"
+        texto = knowledge._procesar_config_gastos_hormiga(usuario, mensaje)
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
+    except Exception as e:
+        logger.error("Error en /config_hormiga: %s", e)
+        await update.message.reply_text("⚠️ Ocurrió un error al configurar los gastos hormiga.")
 
 
 def _parsear_args_exportacion(args: list) -> tuple:
