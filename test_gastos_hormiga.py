@@ -26,11 +26,13 @@ import database
 import database_sqlite
 import knowledge
 import formato
+from database_gsheets import GoogleSheetsDB, SHEET_COLUMNS
 
 # Nota: el backend Google Sheets no se prueba en mutaciones porque _schedule_flush
 # intenta escribir a Google (red) y cuelga en entorno sin conectividad. El backend
 # SQLite cubre toda la lógica; el espejo gsheets usa el mismo patrón de caché en
-# memoria que las pruebas de parseo de test_parsing_bugs.py.
+# memoria que las pruebas de parseo de test_parsing_bugs.py. La clase de LECTURA
+# abajo sí es offline: obtener_* solo lee la caché y no dispara flush.
 
 # Base SQLite temporal aislada de la real (data/finanzas.db)
 _TMP_DIR = tempfile.mkdtemp(prefix="finbot_hormiga_")
@@ -187,6 +189,43 @@ class TestReporteYConfig(unittest.TestCase):
         knowledge._procesar_config_gastos_hormiga(self.usuario, "notificaciones off")
         cfg = database.obtener_config_gastos_hormiga(self.usuario["id"])
         self.assertFalse(bool(int(cfg["notificaciones_activas"])))
+
+
+class TestGastosHormigaGSheetsLectura(unittest.TestCase):
+    """Valida el parseo de LECTURA gsheets (offline, sin flush de red): monto
+    numérico (incluido locale latino), fecha YYYY-MM-DD intacta, moneda_id
+    vacío y agregación de estadísticas. Cubre las consideraciones 1 y 2."""
+
+    def setUp(self):
+        self.db = GoogleSheetsDB()
+        self.uid = 930_500_001
+        raw = [SHEET_COLUMNS["gastos_hormiga"]]
+        # monto como texto "3.50" y "2,00" (latino) para probar el parseo numérico
+        raw.append([1, 10, self.uid, "café", "3.50", "", "2026-08-24", "2026-08-24 19:34:21", 1])
+        raw.append([2, 11, self.uid, "café", "2,00", "", "2026-08-25", "2026-08-25 10:00:00", 1])
+        raw.append([3, 12, 999, "snacks", 1.25, "", "2026-08-26", "2026-08-26 08:00:00", 1])
+        filas = self.db._filas_desde_valores("gastos_hormiga", raw)
+        self.db._cache["gastos_hormiga"] = filas
+
+    def test_monto_numerico_y_fecha(self):
+        gastos = self.db.obtener_gastos_hormiga(self.uid, dias=30)
+        cafe = [g for g in gastos if g["categoria"] == "café"]
+        self.assertEqual(len(cafe), 2)
+        total_cafe = sum(g["monto"] for g in cafe)
+        self.assertAlmostEqual(total_cafe, 5.50, places=2)
+        for g in gastos:
+            # fecha se conserva como texto YYYY-MM-DD (no serial de Excel)
+            self.assertTrue(str(g["fecha"]).startswith("2026-08-"))
+
+    def test_moneda_id_vacio_sin_enriquecer(self):
+        gastos = self.db.obtener_gastos_hormiga(self.uid, dias=30)
+        for g in gastos:
+            self.assertNotIn("moneda_simbolo", g)  # moneda_id vacío -> sin enriquecer
+
+    def test_estadisticas(self):
+        stats = self.db.obtener_estadisticas_gastos_hormiga(self.uid, dias=30)
+        self.assertAlmostEqual(stats["total"], 5.50, places=2)
+        self.assertEqual(stats["cantidad"], 2)
 
 
 if __name__ == "__main__":
