@@ -8,6 +8,7 @@ import re
 from collections import defaultdict
 from datetime import datetime
 from typing import Dict, Any, Optional, List
+import time
 
 import database
 import formato
@@ -88,11 +89,31 @@ FACTORES_CONVERSION = {
 }
 
 
+# Caché en memoria de la config de gastos hormiga: la detección corre en el
+# hot-path de cada gasto registrado, así que evitamos golpear la BD/Sheets
+# en cada llamada. Se invalida al editar la config y por TTL de seguridad.
+_config_hormiga_cache = {}   # usuario_id -> (timestamp, config)
+_CACHE_TTL = 60              # segundos
+
+
+def _obtener_config_hormiga_cacheada(usuario_id):
+    entry = _config_hormiga_cache.get(usuario_id)
+    if entry and (time.time() - entry[0]) < _CACHE_TTL:
+        return entry[1]
+    cfg = database.obtener_config_gastos_hormiga(usuario_id)
+    _config_hormiga_cache[usuario_id] = (time.time(), cfg)
+    return cfg
+
+
+def _invalidar_cache_hormiga(usuario_id):
+    _config_hormiga_cache.pop(usuario_id, None)
+
+
 def detectar_gasto_hormiga(usuario: Dict[str, Any], monto: float, descripcion: str,
                            categoria: str, moneda: Optional[Dict[str, Any]] = None) -> bool:
     """Detecta si una transacción es un gasto hormiga (pequeño y recurrente)."""
     try:
-        config = database.obtener_config_gastos_hormiga(usuario["id"])
+        config = _obtener_config_hormiga_cacheada(usuario["id"])
         # 1) Por monto (umbral convertido a la moneda del gasto)
         umbral = float(config.get("umbral_base", 5.0))
         umbral_moneda = str(config.get("umbral_moneda", "USD")).upper()
@@ -153,7 +174,7 @@ def _nota_gasto_hormiga(usuario: Dict[str, Any], cantidad: float, mensaje: str,
                         categoria: str, moneda: Optional[Dict[str, Any]], transaccion_id: int) -> str:
     """Si el gasto es hormiga, lo registra y retorna el mensaje de aviso."""
     try:
-        config = database.obtener_config_gastos_hormiga(usuario["id"])
+        config = _obtener_config_hormiga_cacheada(usuario["id"])
         if not int(config.get("notificaciones_activas", 1)):
             return ""
         if not detectar_gasto_hormiga(usuario, cantidad, mensaje, categoria, moneda):
@@ -378,6 +399,7 @@ def _procesar_config_gastos_hormiga(usuario: Dict[str, Any], mensaje: str) -> st
             if moneda not in FACTORES_CONVERSION:
                 moneda = "USD"
             database.guardar_config_gastos_hormiga(usuario["id"], {"umbral_base": umbral, "umbral_moneda": moneda})
+            _invalidar_cache_hormiga(usuario["id"])
             return _texto_config_gastos_hormiga(usuario, f"Umbral actualizado a **{formato.fmt_monto(umbral)} {moneda}**.")
 
         if "categor" in mensaje:
@@ -385,6 +407,7 @@ def _procesar_config_gastos_hormiga(usuario: Dict[str, Any], mensaje: str) -> st
             if not mm:
                 return "❌ Indica las categorías, ej: `/config_hormiga categorías café,taxi,netflix`"
             database.guardar_config_gastos_hormiga(usuario["id"], {"categorias_auto": mm.group(1).strip()})
+            _invalidar_cache_hormiga(usuario["id"])
             return _texto_config_gastos_hormiga(usuario, "Categorías automáticas actualizadas.")
 
         if "frecuencia" in mensaje:
@@ -393,13 +416,16 @@ def _procesar_config_gastos_hormiga(usuario: Dict[str, Any], mensaje: str) -> st
                 return "❌ Indica la frecuencia, ej: `/config_hormiga frecuencia 4`"
             freq = int(mf.group(1))
             database.guardar_config_gastos_hormiga(usuario["id"], {"frecuencia_minima": freq})
+            _invalidar_cache_hormiga(usuario["id"])
             return _texto_config_gastos_hormiga(usuario, f"Frecuencia mínima actualizada a **{freq}**.")
 
         if "notif" in mensaje:
             if any(p in mensaje for p in ("off", "desactiv", "0")):
                 database.guardar_config_gastos_hormiga(usuario["id"], {"notificaciones_activas": 0})
+                _invalidar_cache_hormiga(usuario["id"])
                 return _texto_config_gastos_hormiga(usuario, "Notificaciones de gastos hormiga **desactivadas**.")
             database.guardar_config_gastos_hormiga(usuario["id"], {"notificaciones_activas": 1})
+            _invalidar_cache_hormiga(usuario["id"])
             return _texto_config_gastos_hormiga(usuario, "Notificaciones de gastos hormiga **activadas**.")
 
         return _texto_config_gastos_hormiga(usuario)

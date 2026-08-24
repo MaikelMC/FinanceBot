@@ -228,5 +228,45 @@ class TestGastosHormigaGSheetsLectura(unittest.TestCase):
         self.assertEqual(stats["cantidad"], 2)
 
 
+class TestCacheConfigHormiga(unittest.TestCase):
+    """La detección corre en el hot-path de cada gasto, así que la config
+    debe cachearse por usuario y soportar invalidación al editarse."""
+
+    UID = 940_001
+
+    @classmethod
+    def setUpClass(cls):
+        database.guardar_config_gastos_hormiga(
+            cls.UID, {"umbral_base": 5.0, "umbral_moneda": "USD"}
+        )
+
+    def test_cache_devuelve_misma_instancia(self):
+        knowledge._invalidar_cache_hormiga(self.UID)
+        c1 = knowledge._obtener_config_hormiga_cacheada(self.UID)
+        c2 = knowledge._obtener_config_hormiga_cacheada(self.UID)
+        self.assertIs(c1, c2)
+
+    def test_invalidar_refleja_cambio_en_bd(self):
+        knowledge._invalidar_cache_hormiga(self.UID)
+        knowledge._obtener_config_hormiga_cacheada(self.UID)
+        # cambio en BD sin invalidar -> la caché (TTL) sigue viva
+        database.guardar_config_gastos_hormiga(self.UID, {"umbral_base": 99.0})
+        stale = knowledge._obtener_config_hormiga_cacheada(self.UID)
+        self.assertEqual(stale.get("umbral_base"), 5.0)
+        # tras invalidar, la próxima lectura refleja el cambio
+        knowledge._invalidar_cache_hormiga(self.UID)
+        fresh = knowledge._obtener_config_hormiga_cacheada(self.UID)
+        self.assertEqual(fresh.get("umbral_base"), 99.0)
+
+    def test_hot_path_usa_cache(self):
+        knowledge._invalidar_cache_hormiga(self.UID)
+        usuario = {"id": self.UID, "nombre": "Cache"}
+        # primera llamada cachea; la segunda (mismo gasto) reusa sin reconsultar
+        r1 = knowledge.detectar_gasto_hormiga(usuario, 1.0, "café", "café")
+        r2 = knowledge.detectar_gasto_hormiga(usuario, 1.0, "café", "café")
+        self.assertTrue(r1)
+        self.assertTrue(r2)
+
+
 if __name__ == "__main__":
     unittest.main()
