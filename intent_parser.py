@@ -68,6 +68,10 @@ _FAST_PATTERNS = [
     # lo rechace; si el regex no lo capturara, "-50" se registraría como "50".
     (re.compile(r'(?:gast[ée]?|compr[ée]?|pagu?[ée]?|cost[óo]|invert[ií])\s+\$?\s*(-?[\d,.]+)\s+(?:en\s+|para\s+)?(.+)', re.IGNORECASE),
      lambda m: {"intencion": "registrar", "tipo": "gasto", "cantidad": _parse_monto(m.group(1)), "descripcion": m.group(2).strip(), "categoria": None, "confianza": 0.98}),
+    # --- REGISTRO: gasto con formato "compré X de 500 cup" ---
+    (re.compile(r'(?:gast[ée]?|compr[ée]?|pagu?[ée]?|cost[óo]|invert[ií])\s+(.+?)\s+de\s+\$?\s*(-?[\d,.]+)\s*([a-z]{2,8})?\b', re.IGNORECASE),
+     lambda m: {"intencion": "registrar", "tipo": "gasto", "cantidad": _parse_monto(m.group(2)), "descripcion": m.group(1).strip(), "moneda": (m.group(3) or "").strip().lower() or None, "categoria": None, "confianza": 0.98}),
+
 
     # --- REGISTRO: ingreso explícito ---
     (re.compile(r'(?:recib[ií]|ingres[ée]?|cobr[ée]?|gan[ée]?)\s+\$?\s*(-?[\d,.]+)\s+(?:de\s+|como\s+)?(.+)', re.IGNORECASE),
