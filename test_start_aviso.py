@@ -26,6 +26,8 @@ database_sqlite.DB_PATH = _DB_FILE
 
 
 def setUpModule():
+    config.DB_PATH = _DB_FILE
+    database_sqlite.DB_PATH = _DB_FILE
     database.crear_tablas()
 
 

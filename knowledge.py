@@ -265,7 +265,8 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
         gastado_antes = presupuesto.get("cantidad_gastada", 0) if presupuesto else 0
         descripcion, _err_desc = validators.validar_descripcion(mensaje)
         txn = database.agregar_transaccion(usuario["id"], categoria_id, "gasto", cantidad,
-                                    descripcion or mensaje, moneda_id=moneda_id)
+                                    descripcion or mensaje, moneda_id=moneda_id,
+                                    es_presupuesto=(presupuesto is not None))
         metricas.registrar_transaccion()
         nota_hormiga = _nota_gasto_hormiga(usuario, cantidad, mensaje, categoria, moneda, txn.get("id"))
 
@@ -474,17 +475,24 @@ def _procesar_balance(usuario: Dict[str, Any]) -> str:
         if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
             for abrev, datos in por_moneda.items():
                 neto_m = datos["ingresos"] - datos["gastos"]
+                sim = datos.get("simbolo", "$")
                 lineas.append("")
                 lineas.append(f"**{abrev}**")
                 lineas.append(
-                    f"{formato.EMOJI_INGRESO} {formato.fmt_moneda(datos['ingresos'])}   "
-                    f"{formato.EMOJI_GASTO} {formato.fmt_moneda(datos['gastos'])}   "
-                    f"→ **{formato.fmt_moneda(neto_m)}**"
+                    f"{formato.EMOJI_INGRESO} {formato.fmt_moneda(datos['ingresos'], simbolo=sim)}   "
+                    f"{formato.EMOJI_GASTO} {formato.fmt_moneda(datos['gastos'], simbolo=sim)}   "
+                    f"→ **{formato.fmt_moneda(neto_m, simbolo=sim)}**"
+                )
+                lineas.append(
+                    f"🔒 Reservado: {formato.fmt_moneda(datos['reservado'], simbolo=sim)}   "
+                    f"💸 Disponible: {formato.fmt_moneda(datos['disponible'], simbolo=sim)}"
                 )
         else:
             lineas.append(f"{formato.EMOJI_INGRESO} Ingresos: ${formato.fmt_monto(balance['ingresos'])}")
             lineas.append(f"{formato.EMOJI_GASTO} Gastos: ${formato.fmt_monto(balance['gastos'])}")
             lineas.append(f"Neto: **${formato.fmt_monto(balance['neto'])}**")
+            lineas.append(f"🔒 Reservado en presupuestos: ${formato.fmt_monto(balance['reservado'])}")
+            lineas.append(f"💸 Disponible libre: **${formato.fmt_monto(balance['disponible'])}**")
 
         lineas.append("")
         lineas.append("¿Ver transacciones recientes o configurar un presupuesto?")

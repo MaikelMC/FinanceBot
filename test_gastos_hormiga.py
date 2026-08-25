@@ -44,6 +44,8 @@ _COUNTER = [0]
 
 
 def setUpModule():
+    config.DB_PATH = _DB_FILE
+    database_sqlite.DB_PATH = _DB_FILE
     database.crear_tablas()
 
 

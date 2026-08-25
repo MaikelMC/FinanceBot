@@ -55,6 +55,7 @@ def crear_tablas():
             cantidad REAL NOT NULL,
             descripcion TEXT,
             moneda_id INTEGER,
+            es_presupuesto INTEGER DEFAULT 0,
             fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (usuario_id) REFERENCES usuarios (id),
@@ -87,6 +88,10 @@ def crear_tablas():
         pass
     try:
         cursor.execute("ALTER TABLE presupuestos ADD COLUMN moneda_id INTEGER")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE transacciones ADD COLUMN es_presupuesto INTEGER DEFAULT 0")
     except Exception:
         pass
 
@@ -290,8 +295,12 @@ def obtener_categorias(usuario_id: int, tipo: Optional[str] = None) -> List[Dict
     return [dict(r) for r in rows]
 
 
-def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "", moneda_id: Optional[int] = None) -> Dict[str, Any]:
-    """Agrega una nueva transacción para un usuario."""
+def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "", moneda_id: Optional[int] = None, es_presupuesto: bool = False) -> Dict[str, Any]:
+    """Agrega una nueva transacción para un usuario.
+
+    es_presupuesto=True si el gasto se imputa a un presupuesto (reserva dinero).
+    El flag queda en True cuando el gasto efectivamente cargó un presupuesto.
+    """
     # Validar monto
     try:
         cantidad = round(float(cantidad), 2)
@@ -315,12 +324,14 @@ def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad:
     conn = get_connection()
     cursor = conn.cursor()
 
+    flag_presupuesto = 1 if es_presupuesto else 0
+
     cursor.execute(
         """
-        INSERT INTO transacciones (usuario_id, categoria_id, tipo, cantidad, descripcion, moneda_id)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO transacciones (usuario_id, categoria_id, tipo, cantidad, descripcion, moneda_id, es_presupuesto)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (usuario_id, categoria_id, tipo, cantidad, descripcion, moneda_id)
+        (usuario_id, categoria_id, tipo, cantidad, descripcion, moneda_id, flag_presupuesto)
     )
     transaccion_id = cursor.lastrowid
 
@@ -334,6 +345,7 @@ def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad:
                 "UPDATE presupuestos SET cantidad_gastada = ? WHERE id = ?",
                 (nueva_cantidad_gastada, presupuesto['id'])
             )
+            flag_presupuesto = 1
 
     conn.commit()
     conn.close()
@@ -344,7 +356,8 @@ def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad:
         "categoria_id": categoria_id,
         "tipo": tipo,
         "cantidad": cantidad,
-        "descripcion": descripcion
+        "descripcion": descripcion,
+        "es_presupuesto": bool(flag_presupuesto)
     }
 
 
@@ -355,7 +368,7 @@ def obtener_transacciones(usuario_id: int, limite: int = 50, tipo: Optional[str]
     cursor = conn.cursor()
 
     query = """
-        SELECT t.id, t.tipo, t.cantidad, t.descripcion, t.fecha, t.moneda_id,
+        SELECT t.id, t.tipo, t.cantidad, t.descripcion, t.fecha, t.moneda_id, t.categoria_id, t.es_presupuesto,
                c.nombre as categoria_nombre, c.tipo as categoria_tipo, c.descripcion as categoria_descripcion
         FROM transacciones t
         LEFT JOIN categorias c ON t.categoria_id = c.id
@@ -416,9 +429,12 @@ def inicio_mes_actual() -> str:
 def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:
     """Obtiene el balance financiero de un usuario, agrupado por moneda.
 
-    Por defecto muestra el balance del mes en curso (se "resetea" cada mes,
-    sin borrar el historial). Pasa fecha_inicio explícito (p. ej. '0000-01-01')
-    para consultar todo el historial o un período pasado.
+    El dinero comprometido en presupuestos se "reserva" del disponible:
+      disponible = neto - reservado
+      reservado   = Σ presupuestos planeados - Σ presupuestos gastados   (por moneda)
+
+    Se mantienen 'gastos' (todos los gastos) y 'neto' (ingresos - gastos)
+    para no romper la validación de presupuestos (v2.11) ni notificaciones.
     """
     if fecha_inicio is None:
         fecha_inicio = inicio_mes_actual()
@@ -427,7 +443,7 @@ def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict
     cursor = conn.cursor()
 
     query = """
-        SELECT tipo, SUM(cantidad) as total, moneda_id
+        SELECT tipo, es_presupuesto, SUM(cantidad) as total, moneda_id
         FROM transacciones
         WHERE usuario_id = ?
     """
@@ -437,7 +453,7 @@ def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict
         query += " AND fecha >= ?"
         params.append(fecha_inicio)
 
-    query += " GROUP BY tipo, moneda_id"
+    query += " GROUP BY tipo, es_presupuesto, moneda_id"
 
     cursor.execute(query, params)
     balances = cursor.fetchall()
@@ -449,12 +465,20 @@ def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict
 
     conn.close()
 
-    ingresos = 0.0
-    gastos = 0.0
     por_moneda = {}
 
+    def _entrada(key, simbolo, nombre):
+        if key not in por_moneda:
+            por_moneda[key] = {
+                "ingresos": 0.0, "gastos": 0.0, "gastos_fuera": 0.0, "gastos_en": 0.0,
+                "presupuestos_planeados": 0.0, "presupuestos_gastados": 0.0,
+                "reservado": 0.0, "disponible": 0.0,
+                "simbolo": simbolo, "nombre": nombre,
+            }
+        return por_moneda[key]
+
     for row in balances:
-        cant = row['total'] or 0.0
+        cant = float(row['total'] or 0.0)
         mid = row['moneda_id']
 
         # Agrupar por moneda — fallback a default si moneda_id vacio
@@ -472,28 +496,72 @@ def obtener_balance(usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict
             simbolo = "$"
             nombre = key
 
-        if key not in por_moneda:
-            por_moneda[key] = {"ingresos": 0.0, "gastos": 0.0, "simbolo": simbolo, "nombre": nombre}
+        d = _entrada(key, simbolo, nombre)
         if row['tipo'] == 'ingreso':
-            por_moneda[key]["ingresos"] += cant
+            d["ingresos"] += cant
         elif row['tipo'] == 'gasto':
-            por_moneda[key]["gastos"] += cant
+            d["gastos"] += cant  # total (se mantiene para v2.11 / notificaciones)
+            if int(row['es_presupuesto'] or 0):
+                d["gastos_en"] += cant
+            else:
+                d["gastos_fuera"] += cant
+
+    # Comprometer presupuestos por moneda (reserva de dinero)
+    presus = obtener_presupuestos(usuario_id)
+    for p in presus:
+        mid = p.get("moneda_id")
+        if mid and mid in moneda_lookup:
+            m = moneda_lookup[mid]
+            key = m["abreviatura"]
+            simbolo = m.get("simbolo", "$")
+            nombre = m.get("nombre", key)
+        elif moneda_default:
+            key = moneda_default["abreviatura"]
+            simbolo = moneda_default.get("simbolo", "$")
+            nombre = moneda_default.get("nombre", key)
+        else:
+            key = "Sin moneda"
+            simbolo = "$"
+            nombre = key
+        d = _entrada(key, simbolo, nombre)
+        d["presupuestos_planeados"] += float(p.get("cantidad_planejada", 0) or 0.0)
+        d["presupuestos_gastados"] += float(p.get("cantidad_gastada", 0) or 0.0)
+
+    # Reservado y disponible por moneda
+    for key, d in por_moneda.items():
+        d["reservado"] = round(d["presupuestos_planeados"] - d["presupuestos_gastados"], 2)
+        d["disponible"] = round(d["ingresos"] - d["gastos"] - d["reservado"], 2)
+        d["neto"] = round(d["ingresos"] - d["gastos"], 2)
 
     # Flat totals solo desde la moneda default (evita mezclar monedas)
+    ingresos = gastos = 0.0
+    gastos_fuera = gastos_en = 0.0
+    p_plan = p_gast = reservado = disponible = 0.0
     if moneda_default:
         key = moneda_default["abreviatura"]
         if key in por_moneda:
-            ingresos = por_moneda[key]["ingresos"]
-            gastos = por_moneda[key]["gastos"]
+            d = por_moneda[key]
+            ingresos, gastos = d["ingresos"], d["gastos"]
+            gastos_fuera, gastos_en = d["gastos_fuera"], d["gastos_en"]
+            p_plan, p_gast = d["presupuestos_planeados"], d["presupuestos_gastados"]
+            reservado, disponible = d["reservado"], d["disponible"]
     elif len(por_moneda) == 1:
-        key = list(por_moneda.keys())[0]
-        ingresos = por_moneda[key]["ingresos"]
-        gastos = por_moneda[key]["gastos"]
+        d = next(iter(por_moneda.values()))
+        ingresos, gastos = d["ingresos"], d["gastos"]
+        gastos_fuera, gastos_en = d["gastos_fuera"], d["gastos_en"]
+        p_plan, p_gast = d["presupuestos_planeados"], d["presupuestos_gastados"]
+        reservado, disponible = d["reservado"], d["disponible"]
 
     return {
         "ingresos": round(ingresos, 2),
         "gastos": round(gastos, 2),
+        "gastos_fuera": round(gastos_fuera, 2),
+        "gastos_en": round(gastos_en, 2),
+        "presupuestos_planeados": round(p_plan, 2),
+        "presupuestos_gastados": round(p_gast, 2),
+        "reservado": round(reservado, 2),
         "neto": round(ingresos - gastos, 2),
+        "disponible": round(disponible, 2),
         "por_moneda": por_moneda,
     }
 

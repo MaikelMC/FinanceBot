@@ -43,7 +43,7 @@ SHEET_NAMES = {
 SHEET_COLUMNS = {
     "usuarios": ["id", "telegram_user_id", "nombre", "teclado_migrado", "created_at", "updated_at"],
     "categorias": ["id", "usuario_id", "nombre", "tipo", "descripcion", "icono_color", "created_at"],
-    "transacciones": ["id", "usuario_id", "categoria_id", "tipo", "cantidad", "descripcion", "moneda_id", "fecha", "created_at"],
+    "transacciones": ["id", "usuario_id", "categoria_id", "tipo", "cantidad", "descripcion", "moneda_id", "es_presupuesto", "fecha", "created_at"],
     "presupuestos": ["id", "usuario_id", "categoria_id", "nombre", "moneda_id", "cantidad_planejada", "cantidad_gastada", "periodo", "fecha_inicio", "fecha_fin", "created_at"],
     "metas_ahorro": ["id", "usuario_id", "nombre", "objetivo", "cantidad_actual", "fecha_inicio", "fecha_meta", "created_at"],
     "notificaciones": ["id", "usuario_id", "version", "enviada_en"],
@@ -494,7 +494,7 @@ class GoogleSheetsDB:
     # TRANSACCIONES
     # ----------------------------------------------------------
 
-    def agregar_transaccion(self, usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "", moneda_id: Optional[int] = None) -> Dict[str, Any]:
+    def agregar_transaccion(self, usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "", moneda_id: Optional[int] = None, es_presupuesto: bool = False) -> Dict[str, Any]:
         with LOCK:
             # Validar y normalizar cantidad
             try:
@@ -515,6 +515,7 @@ class GoogleSheetsDB:
             trans = self._cache.get("transacciones", [])
             tid = self._next_id("transacciones")
             now = self._now()
+            flag_presupuesto = 1 if es_presupuesto else 0
             nueva = {
                 "id": tid,
                 "usuario_id": usuario_id,
@@ -523,6 +524,7 @@ class GoogleSheetsDB:
                 "cantidad": cantidad,
                 "descripcion": descripcion,
                 "moneda_id": moneda_id or "",
+                "es_presupuesto": flag_presupuesto,
                 "fecha": now,
                 "created_at": now,
             }
@@ -532,7 +534,9 @@ class GoogleSheetsDB:
             # Si es gasto, actualizar presupuesto correspondiente
             if tipo == "gasto" and categoria_id:
                 self._actualizar_gasto_presupuesto(usuario_id, categoria_id, cantidad)
+                flag_presupuesto = 1
 
+            nueva["es_presupuesto"] = flag_presupuesto
             self._schedule_flush()
             logger.info("Transacción registrada: %s $%.2f (usuario %d)", tipo, cantidad, usuario_id)
             return dict(nueva)
@@ -629,6 +633,9 @@ class GoogleSheetsDB:
         return resultado
 
     def obtener_balance(self, usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:
+        """Balance agrupado por moneda. El dinero en presupuestos se reserva:
+        disponible = neto - reservado ; reservado = Σplaneado - Σgastado (por moneda).
+        Se mantienen 'gastos' (todos) y 'neto' para no romper validación v2.11."""
         if fecha_inicio is None:
             fecha_inicio = inicio_mes_actual()
         trans = self._cache.get("transacciones", [])
@@ -636,9 +643,17 @@ class GoogleSheetsDB:
         moneda_lookup = {str(m["id"]): m for m in monedas}
         moneda_default = next((m for m in monedas if m.get("es_default")), None)
 
-        ingresos = 0.0
-        gastos = 0.0
         por_moneda: Dict[str, Dict[str, float]] = {}
+
+        def _entrada(key, simbolo, nombre):
+            if key not in por_moneda:
+                por_moneda[key] = {
+                    "ingresos": 0.0, "gastos": 0.0, "gastos_fuera": 0.0, "gastos_en": 0.0,
+                    "presupuestos_planeados": 0.0, "presupuestos_gastados": 0.0,
+                    "reservado": 0.0, "disponible": 0.0,
+                    "simbolo": simbolo, "nombre": nombre,
+                }
+            return por_moneda[key]
 
         for t in trans:
             if int(t.get("usuario_id", 0)) != usuario_id:
@@ -655,40 +670,82 @@ class GoogleSheetsDB:
             if mid and mid in moneda_lookup:
                 m = moneda_lookup[mid]
                 key = m["abreviatura"]
+                simbolo = m.get("simbolo", "$")
+                nombre = m.get("nombre", key)
             elif moneda_default:
                 key = moneda_default["abreviatura"]
-                mid = str(moneda_default["id"])
+                simbolo = moneda_default.get("simbolo", "$")
+                nombre = moneda_default.get("nombre", key)
             else:
                 key = "Sin moneda"
+                simbolo = "$"
+                nombre = key
 
-            if key not in por_moneda:
-                por_moneda[key] = {"ingresos": 0.0, "gastos": 0.0, "simbolo": "", "nombre": ""}
-            if mid in moneda_lookup:
-                por_moneda[key]["simbolo"] = moneda_lookup[mid].get("simbolo", "$")
-                por_moneda[key]["nombre"] = moneda_lookup[mid].get("nombre", key)
-            elif moneda_default:
-                por_moneda[key]["simbolo"] = moneda_default.get("simbolo", "$")
-                por_moneda[key]["nombre"] = moneda_default.get("nombre", key)
+            d = _entrada(key, simbolo, nombre)
             if t.get("tipo") == "ingreso":
-                por_moneda[key]["ingresos"] += cant
+                d["ingresos"] += cant
             elif t.get("tipo") == "gasto":
-                por_moneda[key]["gastos"] += cant
+                d["gastos"] += cant
+                if int(t.get("es_presupuesto") or 0):
+                    d["gastos_en"] += cant
+                else:
+                    d["gastos_fuera"] += cant
+
+        # Comprometer presupuestos por moneda (reserva de dinero)
+        presus = self.obtener_presupuestos(usuario_id)
+        for p in presus:
+            mid = p.get("moneda_id")
+            if mid and str(mid) in moneda_lookup:
+                m = moneda_lookup[str(mid)]
+                key = m["abreviatura"]
+                simbolo = m.get("simbolo", "$")
+                nombre = m.get("nombre", key)
+            elif moneda_default:
+                key = moneda_default["abreviatura"]
+                simbolo = moneda_default.get("simbolo", "$")
+                nombre = moneda_default.get("nombre", key)
+            else:
+                key = "Sin moneda"
+                simbolo = "$"
+                nombre = key
+            d = _entrada(key, simbolo, nombre)
+            d["presupuestos_planeados"] += float(p.get("cantidad_planejada", 0) or 0.0)
+            d["presupuestos_gastados"] += float(p.get("cantidad_gastada", 0) or 0.0)
+
+        for key, d in por_moneda.items():
+            d["reservado"] = round(d["presupuestos_planeados"] - d["presupuestos_gastados"], 2)
+            d["disponible"] = round(d["ingresos"] - d["gastos"] - d["reservado"], 2)
+            d["neto"] = round(d["ingresos"] - d["gastos"], 2)
 
         # Flat totals solo desde la moneda default (evita mezclar monedas)
+        ingresos = gastos = 0.0
+        gastos_fuera = gastos_en = 0.0
+        p_plan = p_gast = reservado = disponible = 0.0
         if moneda_default:
             key = moneda_default["abreviatura"]
             if key in por_moneda:
-                ingresos = por_moneda[key]["ingresos"]
-                gastos = por_moneda[key]["gastos"]
+                d = por_moneda[key]
+                ingresos, gastos = d["ingresos"], d["gastos"]
+                gastos_fuera, gastos_en = d["gastos_fuera"], d["gastos_en"]
+                p_plan, p_gast = d["presupuestos_planeados"], d["presupuestos_gastados"]
+                reservado, disponible = d["reservado"], d["disponible"]
         elif len(por_moneda) == 1:
-            key = list(por_moneda.keys())[0]
-            ingresos = por_moneda[key]["ingresos"]
-            gastos = por_moneda[key]["gastos"]
+            d = next(iter(por_moneda.values()))
+            ingresos, gastos = d["ingresos"], d["gastos"]
+            gastos_fuera, gastos_en = d["gastos_fuera"], d["gastos_en"]
+            p_plan, p_gast = d["presupuestos_planeados"], d["presupuestos_gastados"]
+            reservado, disponible = d["reservado"], d["disponible"]
 
         return {
             "ingresos": round(ingresos, 2),
             "gastos": round(gastos, 2),
+            "gastos_fuera": round(gastos_fuera, 2),
+            "gastos_en": round(gastos_en, 2),
+            "presupuestos_planeados": round(p_plan, 2),
+            "presupuestos_gastados": round(p_gast, 2),
+            "reservado": round(reservado, 2),
             "neto": round(ingresos - gastos, 2),
+            "disponible": round(disponible, 2),
             "por_moneda": por_moneda,
         }
 
@@ -1325,8 +1382,8 @@ def obtener_categorias(usuario_id: int, tipo: Optional[str] = None) -> List[Dict
     return _get_db().obtener_categorias(usuario_id, tipo)
 
 
-def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "", moneda_id: Optional[int] = None) -> Dict[str, Any]:
-    return _get_db().agregar_transaccion(usuario_id, categoria_id, tipo, cantidad, descripcion, moneda_id)
+def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad: float, descripcion: str = "", moneda_id: Optional[int] = None, es_presupuesto: bool = False) -> Dict[str, Any]:
+    return _get_db().agregar_transaccion(usuario_id, categoria_id, tipo, cantidad, descripcion, moneda_id, es_presupuesto)
 
 
 def obtener_transacciones(usuario_id: int, limite: int = 50, tipo: Optional[str] = None) -> List[Dict[str, Any]]:
