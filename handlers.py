@@ -343,17 +343,27 @@ async def _manejar_ctx_meta(update: Update, context: ContextTypes.DEFAULT_TYPE,
 async def _responder_seguro(msg, texto: str, reply_markup: Optional[InlineKeyboardMarkup] = None):
     """Envía una respuesta al usuario de forma resiliente.
 
-    Intenta con ``parse_mode="Markdown"``; si Telegram rechaza el texto
-    (caracteres que rompen el formato, respuesta generada por la IA, etc.),
-    reintenta sin formato para no perder el mensaje ni disparar el error
-    genérico del handler."""
+    Estrategia de 3 niveles para evitar que el usuario vea ``**`` o errores
+    crudos:
+    1. ``parse_mode="Markdown"`` (formato habitual del bot).
+    2. Si Telegram lo rechaza (Markdown inválido), convierte a HTML con
+       ``md_a_html`` y reintenta (el ``**`` se renderiza en negrita).
+    3. Si todo falla, texto plano.
+    """
     try:
         await msg.reply_text(texto, parse_mode="Markdown", reply_markup=reply_markup)
+        return
     except Exception:
-        try:
-            await msg.reply_text(texto, reply_markup=reply_markup)
-        except Exception:
-            logger.error("No se pudo enviar la respuesta al usuario")
+        pass
+    try:
+        await msg.reply_text(md_a_html(texto), parse_mode="HTML", reply_markup=reply_markup)
+        return
+    except Exception:
+        pass
+    try:
+        await msg.reply_text(texto, reply_markup=reply_markup)
+    except Exception:
+        logger.error("No se pudo enviar la respuesta al usuario")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
