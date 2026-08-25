@@ -588,21 +588,25 @@ def _render(data: str, usuario: dict) -> Optional[Tuple[str, InlineKeyboardMarku
 async def _enviar_fallback(texto: str, kb: InlineKeyboardMarkup, context, chat_id) -> None:
     """Si el mensaje original no se puede editar (callback expirado, mensaje
     borrado, etc.), enviamos la respuesta como un mensaje NUEVO al chat en vez
-    de tragar la excepción (lo que dejaba al usuario sin respuesta)."""
+    de tragar la excepción (lo que dejaba al usuario sin respuesta).
+
+    Intenta con formato HTML; si falla el parseo, reintenta sin formato para
+    garantizar siempre una respuesta al usuario.
+    """
     try:
         if chat_id is not None and context is not None:
             await context.bot.send_message(
-                chat_id=chat_id, text=texto, parse_mode="Markdown", reply_markup=kb
+                chat_id=chat_id, text=formato.md_a_html(texto), parse_mode="HTML", reply_markup=kb
             )
             return
     except Exception as e:
-        logger.error("Fallback send_message falló: %s", e)
+        logger.error("Fallback HTML falló: %s", e)
     try:
         if chat_id is not None:
-            # Último recurso sin markup si el bot API rechaza el teclado.
-            await context.bot.send_message(chat_id=chat_id, text=texto, parse_mode="Markdown")
+            # Último recurso: texto plano, sin parse_mode, para no fallar nunca.
+            await context.bot.send_message(chat_id=chat_id, text=texto)
     except Exception as e:
-        logger.error("Fallback send_message sin markup falló: %s", e)
+        logger.error("Fallback plano falló: %s", e)
 
 
 async def _editar(query, texto: str, kb: InlineKeyboardMarkup, context=None) -> None:
@@ -610,12 +614,13 @@ async def _editar(query, texto: str, kb: InlineKeyboardMarkup, context=None) -> 
 
     Si el mensaje ya no es editable (callback expirado / mensaje borrado),
     envía un mensaje nuevo al chat para no dejar al usuario sin respuesta.
+    Usa HTML (no Markdown V1) para evitar 'Can't parse entities' con '**'.
     """
     if kb is None:
         kb = InlineKeyboardMarkup([])
     chat_id = getattr(query.message, "chat_id", None) if query.message else None
     try:
-        await query.edit_message_text(texto, parse_mode="Markdown", reply_markup=kb)
+        await query.edit_message_text(formato.md_a_html(texto), parse_mode="HTML", reply_markup=kb)
     except BadRequest as e:
         if "not modified" in str(e).lower():
             return

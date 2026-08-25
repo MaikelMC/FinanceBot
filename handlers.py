@@ -17,6 +17,7 @@ import config
 import database
 import exportador
 import formato
+from formato import md_a_html
 import knowledge
 import ai_client
 import changelog
@@ -596,7 +597,7 @@ async def consultar_gastos_hormiga(update: Update, context: ContextTypes.DEFAULT
     try:
         usuario = _obtener_usuario_contexto(update, context)
         texto = knowledge._procesar_gastos_hormiga(usuario)
-        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
+        await update.message.reply_text(md_a_html(texto), parse_mode="HTML", reply_markup=_crear_teclado_principal())
     except Exception as e:
         logger.error("Error en /gastos_hormiga: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al obtener tus gastos hormiga.")
@@ -609,7 +610,7 @@ async def configurar_gastos_hormiga(update: Update, context: ContextTypes.DEFAUL
         args = context.args or []
         mensaje = " ".join(args) if args else "mostrar"
         texto = knowledge._procesar_config_gastos_hormiga(usuario, mensaje)
-        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
+        await update.message.reply_text(md_a_html(texto), parse_mode="HTML", reply_markup=_crear_teclado_principal())
     except Exception as e:
         logger.error("Error en /config_hormiga: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al configurar los gastos hormiga.")
@@ -1046,8 +1047,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             mensaje = "\n".join(lineas)
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text=mensaje,
-                parse_mode="Markdown",
+                text=md_a_html(mensaje),
+                parse_mode="HTML",
                 reply_markup=botones,
             )
 
@@ -1073,8 +1074,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     mensaje += f"{tipo_icono} {formato.fmt_moneda(t['cantidad'])} - {tipo_label}: {desc} ({fecha})\n"
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text=mensaje,
-                parse_mode="Markdown",
+                text=md_a_html(mensaje),
+                parse_mode="HTML",
                 reply_markup=botones,
             )
 

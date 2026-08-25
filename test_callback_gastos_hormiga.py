@@ -79,7 +79,13 @@ class TestCallbackGastosHormiga(unittest.TestCase):
 
         if editado:
             args, kwargs = upd.callback_query.edit_message_text.call_args
-            print("EDIT text:", args[0][:120] if args else kwargs.get("text", "")[:120])
+            texto_enviado = args[0] if args else kwargs.get("text", "")
+            print("EDIT text:", texto_enviado[:120])
+            print("EDIT parse_mode:", kwargs.get("parse_mode"))
+            self.assertEqual(kwargs.get("parse_mode"), "HTML")
+            # El markdown ** debe haberse convertido a <b>
+            self.assertIn("<b>", texto_enviado)
+            self.assertNotIn("**", texto_enviado)
         if enviado:
             for c in ctx.bot.send_message.call_args_list:
                 a, k = c

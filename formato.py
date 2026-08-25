@@ -5,6 +5,7 @@ Sistema de diseño definido en `REDISENO MENSAJES.md`: emojis semánticos
 de 3 niveles (título -> separador -> cuerpo).
 """
 
+import re
 from typing import List, Optional
 
 SEPARADOR = "┈┈┈┈┈┈┈┈┈┈"
@@ -43,6 +44,23 @@ def fmt_moneda(valor: float, abrev: Optional[str] = None, signo: bool = False, s
 def header(emoji: str, titulo: str) -> str:
     """Título de sección: un único emoji + negrita (Title Case)."""
     return f"{emoji} **{titulo}**"
+
+
+def md_a_html(texto: str) -> str:
+    """Convierte el markdown simplificado del bot (**negrita**, `código`) a
+    HTML de Telegram, escapando <, > y &.
+
+    Telegram con parse_mode='Markdown' (V1) NO entiende '**' y cualquier '*'
+    desbalanceado lanza 'Can't parse entities' y el mensaje no se entrega.
+    HTML es mucho más tolerante (un '*' suelto se muestra literal) y soporta
+    <b> y <code>, así que migramos a este formato para evitar ese error.
+    """
+    if not texto:
+        return ""
+    t = texto.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
+    t = re.sub(r"`(.+?)`", r"<code>\1</code>", t)
+    return t
 
 
 NOMBRES_MESES = {
