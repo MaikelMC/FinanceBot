@@ -1002,12 +1002,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     try:
         await query.answer()
-    except BadRequest as e:
-        # Ignorar error si el callback es demasiado viejo (timeout expirado)
-        if "Query is too old" in str(e):
-            logger.warning("Callback query expirado: %s", e)
-        else:
-            raise
+    except Exception as e:
+        # Cualquier fallo al responder el callback (timeout de red, rate limit,
+        # "Query is too old" u otro) NO debe matar el handler: el usuario debe
+        # recibir igualmente la respuesta del menú (vía edit/send_message).
+        logger.warning("query.answer() falló (se continúa el procesamiento): %s", e)
 
     try:
         user = update.effective_user
