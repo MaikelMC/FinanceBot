@@ -341,6 +341,13 @@ def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad:
         presupuesto = cursor.fetchone()
         if presupuesto:
             nueva_cantidad_gastada = presupuesto['cantidad_gastada'] + cantidad
+            # Tope: un presupuesto nunca se pasa de lo planeado. El exceso
+            # (saldo faltante) NO se imputa al presupuesto y se descuenta del
+            # balance disponible (neto baja por el gasto, reservado baja solo
+            # hasta agotar el presupuesto).
+            tope = presupuesto['cantidad_planejada']
+            if nueva_cantidad_gastada > tope:
+                nueva_cantidad_gastada = tope
             cursor.execute(
                 "UPDATE presupuestos SET cantidad_gastada = ? WHERE id = ?",
                 (nueva_cantidad_gastada, presupuesto['id'])

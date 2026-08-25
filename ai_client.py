@@ -266,7 +266,7 @@ class AIResponder:
             categoria_sugerida = resultado.get("categoria_sugerida")
 
             if tipo == "gasto":
-                return _procesar_gasto(mensaje, usuario, moneda=moneda_obj, categoria_sugerida=categoria_sugerida), None
+                return _procesar_gasto(mensaje, usuario, moneda=moneda_obj, categoria_sugerida=categoria_sugerida)
             elif tipo == "ingreso":
                 return _procesar_ingreso(mensaje, usuario, moneda=moneda_obj, categoria_sugerida=categoria_sugerida), None
             else:

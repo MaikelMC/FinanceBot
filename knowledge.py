@@ -7,7 +7,7 @@ import logging
 import re
 from collections import defaultdict
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import time
 
 import database
@@ -229,8 +229,13 @@ def _detectar_presupuesto_en_gasto(mensaje: str, usuario: Dict[str, Any]) -> Opt
 
 def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None,
                     categoria_sugerida: Optional[str] = None,
-                    presupuesto: Optional[Dict[str, Any]] = None) -> str:
+                    presupuesto: Optional[Dict[str, Any]] = None,
+                    forzar: bool = False) -> Tuple[str, Optional[dict]]:
     """Procesa una transacción de gasto.
+
+    Retorna (texto, pendiente). ``pendiente`` es None salvo cuando el gasto
+    excede el disponible de un presupuesto y el usuario debe confirmar
+    (acción ``confirmar_gasto_excedido``).
 
     Si se pasa `presupuesto` (flujo guiado del menú), el gasto se registra
     directamente en la categoría de ese presupuesto, sin depender de la
@@ -238,7 +243,7 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
     """
     cantidad, err_monto = validators.validar_monto(mensaje)
     if err_monto:
-        return err_monto
+        return err_monto, None
 
     moneda_id = moneda["id"] if moneda else None
 
@@ -254,6 +259,42 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                     moneda = m
                     moneda_id = m["id"]
                     break
+
+        # --- Alerta si el gasto excede el disponible del presupuesto ---
+        # El exceso (saldo faltante) NO se imputa al presupuesto y se descuenta
+        # del balance disponible; por eso pedimos confirmación.
+        if presupuesto and not forzar:
+            gastado_actual = float(presupuesto.get("cantidad_gastada", 0) or 0)
+            planeado = float(presupuesto.get("cantidad_planejada", 0) or 0)
+            disponible = round(planeado - gastado_actual, 2)
+            if cantidad > disponible:
+                faltante = round(cantidad - disponible, 2)
+                label = presupuesto.get("nombre") or presupuesto.get("categoria_nombre") or "tu presupuesto"
+                moneda_b = None
+                if presupuesto.get("moneda_id"):
+                    for m in database.obtener_monedas(usuario["id"]):
+                        if m["id"] == presupuesto["moneda_id"]:
+                            moneda_b = m
+                            break
+                abrev_b = moneda_b.get("abreviatura", "") if moneda_b else ""
+                texto_alerta = (
+                    f"{formato.EMOJI_PRESUPUESTO} **Vas a exceder el presupuesto de {label}**\n"
+                    f"{formato.SEPARADOR}\n"
+                    f"💰 Disponible en el presupuesto: **{formato.fmt_moneda(disponible, abrev=abrev_b)}**\n"
+                    f"📉 Este gasto: **{formato.fmt_moneda(cantidad, abrev=abrev_b)}**\n"
+                    f"📊 Te pasarías por: **{formato.fmt_moneda(faltante, abrev=abrev_b)}**\n\n"
+                    f"Si continúas, el saldo faltante (**{formato.fmt_moneda(faltante, abrev=abrev_b)}**) "
+                    f"se descontará de tu **balance disponible** y el presupuesto quedará **completado** ✅.\n\n"
+                    f"¿Deseas continuar con la transacción?"
+                )
+                pendiente = {
+                    "accion": "confirmar_gasto_excedido",
+                    "mensaje": mensaje,
+                    "presupuesto_id": presupuesto.get("id"),
+                    "moneda_id": moneda_id,
+                }
+                return texto_alerta, pendiente
+
         if presupuesto:
             categoria_id = presupuesto["categoria_id"]
             categoria = presupuesto.get("categoria_nombre") or presupuesto.get("nombre") or "otros"
@@ -262,16 +303,13 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
             if categoria_id is None:
                 raise Exception(f"No se pudo crear/asociar la categoría '{categoria}'")
 
-        gastado_antes = presupuesto.get("cantidad_gastada", 0) if presupuesto else 0
+        gastado_antes = float(presupuesto.get("cantidad_gastada", 0)) if presupuesto else 0
         descripcion, _err_desc = validators.validar_descripcion(mensaje)
         txn = database.agregar_transaccion(usuario["id"], categoria_id, "gasto", cantidad,
                                     descripcion or mensaje, moneda_id=moneda_id,
                                     es_presupuesto=(presupuesto is not None))
         metricas.registrar_transaccion()
         nota_hormiga = _nota_gasto_hormiga(usuario, cantidad, mensaje, categoria, moneda, txn.get("id"))
-
-        simbolo = moneda.get("simbolo", "$") if moneda else "$"
-        nombre_moneda = f" ({moneda['nombre']})" if moneda else ""
 
         if presupuesto:
             updated = next(
@@ -280,8 +318,8 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
             )
             if updated:
                 label = presupuesto.get("nombre") or categoria
-                planeado = updated.get("cantidad_planejada", 0)
-                gastado = updated.get("cantidad_gastada", 0)
+                planeado = float(updated.get("cantidad_planejada", 0))
+                gastado = float(updated.get("cantidad_gastada", 0))
                 restante = max(planeado - gastado, 0)
                 pct = (gastado / planeado * 100) if planeado > 0 else 0
                 moneda_b = None
@@ -292,13 +330,22 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                             break
                 s_b = moneda_b.get("simbolo", "$") if moneda_b else "$"
                 abrev_b = moneda_b.get("abreviatura", "") if moneda_b else ""
-                texto = (
-                    f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev_b)}** "
-                    f"del presupuesto de **{label}**\n"
-                    f"{formato.EMOJI_PRESUPUESTO} **{label}**: {formato.fmt_moneda(planeado, abrev=abrev_b)} planeado, "
-                    f"{formato.fmt_moneda(gastado, abrev=abrev_b)} usado (**{pct:.0f}%**). "
-                    f"Te quedan **{formato.fmt_moneda(restante, abrev=abrev_b)}**."
-                )
+                if gastado >= planeado:
+                    texto = (
+                        f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev_b)}** "
+                        f"del presupuesto de **{label}**\n"
+                        f"{formato.EMOJI_PRESUPUESTO} **{label}**: {formato.fmt_moneda(planeado, abrev=abrev_b)} planeado, "
+                        f"{formato.fmt_moneda(gastado, abrev=abrev_b)} usado (**{pct:.0f}%**). "
+                        f"✅ **Presupuesto completado.**"
+                    )
+                else:
+                    texto = (
+                        f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev_b)}** "
+                        f"del presupuesto de **{label}**\n"
+                        f"{formato.EMOJI_PRESUPUESTO} **{label}**: {formato.fmt_moneda(planeado, abrev=abrev_b)} planeado, "
+                        f"{formato.fmt_moneda(gastado, abrev=abrev_b)} usado (**{pct:.0f}%**). "
+                        f"Te quedan **{formato.fmt_moneda(restante, abrev=abrev_b)}**."
+                    )
                 try:
                     from notificaciones import verificar_alertas_presupuesto
                     prefs = database.obtener_preferencias(usuario["id"])
@@ -310,22 +357,22 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                         texto += "\n\n" + alerta
                 except Exception as e:
                     logger.error("Error generando alerta de presupuesto: %s", e)
-                return _con_nota(texto, nota_hormiga)
+                return _con_nota(texto, nota_hormiga), None
             abrev_b = moneda_b.get("abreviatura", "") if moneda_b else ""
             return _con_nota(
                 f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev_b)}** "
                 f"del presupuesto de **{presupuesto.get('nombre') or categoria}**",
                 nota_hormiga,
-            )
+            ), None
 
         abrev = moneda.get("abreviatura", "") if moneda else ""
         return _con_nota(
             f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev)}** en **{categoria}**",
             nota_hormiga,
-        )
+        ), None
     except Exception as e:
         logger.error("Error al procesar gasto: %s", e)
-        return f"{formato.EMOJI_ERROR} Ocurrió un error al registrar tu gasto: **{formato.fmt_monto(cantidad)}**. Intenta de nuevo."
+        return f"{formato.EMOJI_ERROR} Ocurrió un error al registrar tu gasto: **{formato.fmt_monto(cantidad)}**. Intenta de nuevo.", None
 
 
 def _procesar_gastos_hormiga(usuario: Dict[str, Any]) -> str:
@@ -583,13 +630,20 @@ def _procesar_presupuestos(usuario: Dict[str, Any]) -> str:
             restante = planeado - gastado
             progreso = (gastado / planeado * 100) if planeado > 0 else 0
             periodo = p.get("periodo")
+            completado = gastado >= planeado
             lineas.append("")
-            lineas.append(f"**{cat}**{f' · {periodo}' if periodo else ''}")
+            titulo = f"**{cat}**{f' · {periodo}' if periodo else ''}"
+            if completado:
+                titulo += "  ✅ Completado"
+            lineas.append(titulo)
             lineas.append(
                 f"{formato.barra_progreso(progreso)} {progreso:.0f}% — "
                 f"{formato.fmt_moneda(gastado, simbolo=simbolo)} de {formato.fmt_moneda(planeado, abrev=abrev, simbolo=simbolo)}"
             )
-            lineas.append(f"Restante: **{formato.fmt_moneda(restante, abrev=abrev)}**")
+            if completado:
+                lineas.append("✅ **Presupuesto completado** — ya no queda saldo disponible.")
+            else:
+                lineas.append(f"Restante: **{formato.fmt_moneda(restante, abrev=abrev)}**")
 
         return "\n".join(lineas)
     except Exception as e:
@@ -795,12 +849,16 @@ def _procesar_presupuesto_especifico(usuario: Dict[str, Any], etiqueta: str) -> 
         simbolo = moneda.get("simbolo", "$") if moneda else "$"
         periodo = p.get("periodo")
 
-        lineas = [f"{formato.EMOJI_PRESUPUESTO} **{label}**{f' · {periodo}' if periodo else ''}"]
+        completado = gastado >= planeado
+        lineas = [f"{formato.EMOJI_PRESUPUESTO} **{label}**{f' · {periodo}' if periodo else ''}{'  ✅ Completado' if completado else ''}"]
         lineas.append(
             f"{formato.barra_progreso(pct)} {pct:.0f}% — "
             f"{formato.fmt_moneda(gastado, simbolo=simbolo)} de {formato.fmt_moneda(planeado, abrev=abrev, simbolo=simbolo)}"
         )
-        lineas.append(f"Restante: **{formato.fmt_moneda(restante, abrev=abrev)}**")
+        if completado:
+            lineas.append("✅ **Presupuesto completado** — ya no queda saldo disponible.")
+        else:
+            lineas.append(f"Restante: **{formato.fmt_moneda(restante, abrev=abrev)}**")
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error en presupuesto específico: %s", e)

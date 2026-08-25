@@ -144,9 +144,10 @@ class TestHookProcesarGasto(unittest.TestCase):
         self.assertEqual(nota, "")
 
     def test_procesar_gasto_no_crashea(self):
-        texto = knowledge._procesar_gasto("gaste 3 en café", self.usuario)
+        texto, pendiente = knowledge._procesar_gasto("gaste 3 en café", self.usuario)
         self.assertIsInstance(texto, str)
         self.assertTrue(len(texto) > 0)
+        self.assertIsNone(pendiente)
 
 
 class TestReporteYConfig(unittest.TestCase):

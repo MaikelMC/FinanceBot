@@ -99,7 +99,7 @@ class TestBalancePorMoneda(unittest.TestCase):
         monedas = database.obtener_monedas(usuario["id"])
 
         m_usdt = knowledge._detectar_moneda_en_texto("gaste 50 usdt", monedas)
-        knowledge._procesar_gasto("gaste 50 usdt", usuario, moneda=m_usdt)
+        knowledge._procesar_gasto("gaste 50 usdt", usuario, moneda=m_usdt)[0]
         m_cup = knowledge._detectar_moneda_en_texto("recibi 1000 cup", monedas)
         knowledge._procesar_ingreso("recibi 1000 cup", usuario, moneda=m_cup)
 
@@ -130,7 +130,7 @@ class TestBalancePorMoneda(unittest.TestCase):
     def test_decimal_322_45_se_guarda(self):
         """Bug 2: '322.45' se guarda como 322.45, no como 32245."""
         usuario, cup, usdt = _crear_usuario_con_monedas()
-        knowledge._procesar_gasto("gaste 322.45 en comida", usuario, moneda=usdt)
+        knowledge._procesar_gasto("gaste 322.45 en comida", usuario, moneda=usdt)[0]
 
         trans = database.obtener_transacciones(usuario["id"], 10)
         self.assertEqual(len(trans), 1)

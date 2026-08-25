@@ -118,6 +118,13 @@ def _crear_botones_pendiente(pendiente: dict, usuario_id: int) -> Optional[Inlin
             ])
         filas.append([InlineKeyboardButton("❌ Cancelar", callback_data="pendiente_cancel")])
         return InlineKeyboardMarkup(filas)
+    if accion == "confirmar_gasto_excedido":
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Sí, continuar", callback_data="conf_exc_si"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="pendiente_cancel"),
+            ],
+        ])
     return None
 
 
@@ -135,7 +142,8 @@ def _completar_pendiente(pendiente: dict, tipo: str, usuario: dict,
                     break
     if tipo == "ingreso":
         return knowledge._procesar_ingreso(mensaje, usuario, moneda=moneda_obj)
-    return knowledge._procesar_gasto(mensaje, usuario, moneda=moneda_obj)
+    texto, _pend = knowledge._procesar_gasto(mensaje, usuario, moneda=moneda_obj, forzar=True)
+    return texto
 
 
 def _completar_pendiente_presupuesto(pendiente: dict, moneda: dict, usuario: dict) -> str:
@@ -280,9 +288,18 @@ async def _manejar_ctx_presupuesto(update: Update, context: ContextTypes.DEFAULT
         context.user_data.pop("presupuesto_ctx", None)
         return False
 
-    texto = knowledge._procesar_gasto(mensaje, usuario, presupuesto=presupuesto)
+    texto, pendiente = knowledge._procesar_gasto(mensaje, usuario, presupuesto=presupuesto)
     context.user_data.pop("presupuesto_ctx", None)
-    await msg.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
+    if pendiente and pendiente.get("accion") == "confirmar_gasto_excedido":
+        context.user_data["transaccion_pendiente"] = pendiente
+        botones = _crear_botones_pendiente(pendiente, usuario_id)
+        await msg.reply_text(
+            md_a_html(texto),
+            parse_mode="HTML",
+            reply_markup=botones or _crear_teclado_principal(),
+        )
+    else:
+        await msg.reply_text(md_a_html(texto), parse_mode="HTML", reply_markup=_crear_teclado_principal())
     return True
 
 
@@ -1307,6 +1324,41 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 texto = "❌ Ocurrió un error al registrar. Por favor, intenta de nuevo."
             context.user_data.pop("transaccion_pendiente", None)
             await _responder_editando(query, texto)
+
+        elif query.data == "conf_exc_si":
+            pendiente = context.user_data.get("transaccion_pendiente")
+            if not pendiente or pendiente.get("accion") != "confirmar_gasto_excedido":
+                await _responder_editando(query, "No hay ninguna confirmación pendiente.")
+                return
+            presupuesto_id = pendiente.get("presupuesto_id")
+            moneda_id = pendiente.get("moneda_id")
+            presupuesto = None
+            if presupuesto_id:
+                presupuesto = next(
+                    (p for p in database.obtener_presupuestos(usuario_id) if p["id"] == presupuesto_id),
+                    None,
+                )
+            moneda = None
+            if moneda_id:
+                for m in database.obtener_monedas(usuario_id):
+                    if m["id"] == moneda_id:
+                        moneda = m
+                        break
+            try:
+                texto, _ = knowledge._procesar_gasto(
+                    pendiente.get("mensaje", ""), usuario,
+                    moneda=moneda, presupuesto=presupuesto, forzar=True,
+                )
+            except Exception as e:
+                logger.error("Error confirmando gasto excedido: %s", e)
+                texto = "❌ Ocurrió un error al registrar. Por favor, intenta de nuevo."
+            context.user_data.pop("transaccion_pendiente", None)
+            await _responder_editando(query, texto)
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="👇 Elige una opción o escríbeme en lenguaje natural:",
+                reply_markup=_crear_teclado_principal(),
+            )
 
         elif query.data.startswith("moneda_confirmar_"):
             moneda_id = int(query.data.replace("moneda_confirmar_", ""))

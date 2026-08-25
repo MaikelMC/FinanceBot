@@ -555,7 +555,15 @@ class GoogleSheetsDB:
         candidatos.sort(key=lambda x: str(x.get("fecha_inicio", "")), reverse=True)
         target = candidatos[0]
         actual = float(target.get("cantidad_gastada", 0))
-        target["cantidad_gastada"] = actual + cantidad
+        nueva = actual + cantidad
+        # Tope: un presupuesto nunca se pasa de lo planeado. El exceso
+        # (saldo faltante) NO se imputa al presupuesto y se descuenta del
+        # balance disponible (el gasto baja el neto, el reservado baja solo
+        # hasta agotar el presupuesto).
+        tope = float(target.get("cantidad_planejada", 0))
+        if nueva > tope:
+            nueva = tope
+        target["cantidad_gastada"] = nueva
         self._cache_dirty.add("presupuestos")
 
     def obtener_transacciones(self, usuario_id: int, limite: int = 50, tipo: Optional[str] = None) -> List[Dict[str, Any]]:
