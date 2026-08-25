@@ -340,6 +340,22 @@ async def _manejar_ctx_meta(update: Update, context: ContextTypes.DEFAULT_TYPE,
     return True
 
 
+async def _responder_seguro(msg, texto: str, reply_markup: Optional[InlineKeyboardMarkup] = None):
+    """Envía una respuesta al usuario de forma resiliente.
+
+    Intenta con ``parse_mode="Markdown"``; si Telegram rechaza el texto
+    (caracteres que rompen el formato, respuesta generada por la IA, etc.),
+    reintenta sin formato para no perder el mensaje ni disparar el error
+    genérico del handler."""
+    try:
+        await msg.reply_text(texto, parse_mode="Markdown", reply_markup=reply_markup)
+    except Exception:
+        try:
+            await msg.reply_text(texto, reply_markup=reply_markup)
+        except Exception:
+            logger.error("No se pudo enviar la respuesta al usuario")
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja mensajes de texto en lenguaje natural."""
     user = update.effective_user
@@ -459,18 +475,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                       pendiente.get("formato"), pendiente.get("periodo"))
             return
 
-        await msg.reply_text(respuesta, parse_mode="Markdown", reply_markup=reply_markup)
+        await _responder_seguro(msg, respuesta, reply_markup)
     except Exception as e:
         logger.error("Error procesando mensaje de %s: %s", user.first_name, e)
-        await msg.reply_text(
+        await _responder_seguro(
+            msg,
             "⚠️ Ups, algo salió mal al procesar tu mensaje.\n\n"
             "Intenta con estos comandos:\n"
             "• `Gasté $50 en comida`\n"
             "• `¿Cuánto tengo?`\n"
             "• `¿Qué gasté hoy?`\n\n"
             "Si el problema persiste, escribe `/help`.",
-            parse_mode="Markdown",
-            reply_markup=_crear_teclado_principal(),
+            _crear_teclado_principal(),
         )
 
 
