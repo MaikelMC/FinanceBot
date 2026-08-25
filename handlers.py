@@ -1237,9 +1237,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             )
 
         elif query.data.startswith("moneda_eliminar_"):
-            moneda_id = int(query.data.replace("moneda_eliminar_", ""))
+            moneda_id_str = query.data.replace("moneda_eliminar_", "")
             monedas = database.obtener_monedas(usuario_id)
-            moneda = next((m for m in monedas if m["id"] == moneda_id), None)
+            moneda = next((m for m in monedas if str(m["id"]) == moneda_id_str), None)
             if not moneda:
                 await _responder_editando(query, "❌ Esa moneda ya no existe.")
                 return
@@ -1250,7 +1250,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     "Primero cambia la predeterminada a otra moneda.",
                 )
                 return
-            database.eliminar_moneda(usuario_id, moneda_id)
+            database.eliminar_moneda(usuario_id, int(moneda_id_str))
             await _responder_editando(
                 query,
                 f"🗑️ Moneda eliminada: **{moneda['simbolo']} {moneda['nombre']} "
@@ -1284,13 +1284,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             )
 
         elif query.data.startswith("moneda_default_"):
-            moneda_id = int(query.data.replace("moneda_default_", ""))
+            moneda_id_str = query.data.replace("moneda_default_", "")
             monedas = database.obtener_monedas(usuario_id)
-            moneda = next((m for m in monedas if m["id"] == moneda_id), None)
+            moneda = next((m for m in monedas if str(m["id"]) == moneda_id_str), None)
             if not moneda:
                 await _responder_editando(query, "❌ Esa moneda ya no existe.")
                 return
-            database.establecer_moneda_default(usuario_id, moneda_id)
+            database.establecer_moneda_default(usuario_id, int(moneda_id_str))
             await _responder_editando(
                 query,
                 f"⭐ **{moneda['nombre']} ({moneda['abreviatura']})** es ahora "
@@ -1298,9 +1298,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             )
 
         elif query.data.startswith("moneda_info_"):
-            moneda_id = int(query.data.split("_")[-1])
+            moneda_id_str = query.data.split("_")[-1]
             monedas = database.obtener_monedas(usuario_id)
-            moneda = next((m for m in monedas if m["id"] == moneda_id), None)
+            moneda = next((m for m in monedas if str(m["id"]) == moneda_id_str), None)
             if moneda:
                 default = " ⭐ predeterminada" if moneda.get("es_default") else ""
                 await _responder_editando(
@@ -1363,13 +1363,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             )
 
         elif query.data.startswith("moneda_confirmar_"):
-            moneda_id = int(query.data.replace("moneda_confirmar_", ""))
+            moneda_id_str = query.data.replace("moneda_confirmar_", "")
             pendiente = context.user_data.get("transaccion_pendiente")
             if not pendiente or pendiente.get("accion") not in ("elegir_moneda", "elegir_moneda_presupuesto"):
                 await _responder_editando(query, "No hay ninguna acción pendiente.")
                 return
             monedas = database.obtener_monedas(usuario_id)
-            moneda = next((m for m in monedas if m["id"] == moneda_id), None)
+            moneda = next((m for m in monedas if str(m["id"]) == moneda_id_str), None)
             if not moneda:
                 await _responder_editando(query, "❌ Esa moneda ya no existe.")
                 return
