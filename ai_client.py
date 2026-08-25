@@ -198,7 +198,7 @@ class AIResponder:
         return mapa.get(tipo, "cómo funciona el bot")
 
     async def _procesar_registro(self, resultado: dict, usuario: Dict[str, Any],
-                                 mensaje: str) -> Tuple[str, Optional[dict]]:
+                                 mensaje: str, forzar: bool = False) -> Tuple[str, Optional[dict]]:
         """Procesa el registro de una transacción."""
         tipo = resultado.get("tipo")
         cantidad = resultado.get("cantidad")
@@ -266,7 +266,8 @@ class AIResponder:
             categoria_sugerida = resultado.get("categoria_sugerida")
 
             if tipo == "gasto":
-                return _procesar_gasto(mensaje, usuario, moneda=moneda_obj, categoria_sugerida=categoria_sugerida)
+                return _procesar_gasto(mensaje, usuario, moneda=moneda_obj,
+                                       categoria_sugerida=categoria_sugerida, forzar=forzar)
             elif tipo == "ingreso":
                 return _procesar_ingreso(mensaje, usuario, moneda=moneda_obj, categoria_sugerida=categoria_sugerida), None
             else:

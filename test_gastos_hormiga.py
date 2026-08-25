@@ -144,6 +144,8 @@ class TestHookProcesarGasto(unittest.TestCase):
         self.assertEqual(nota, "")
 
     def test_procesar_gasto_no_crashea(self):
+        # Saldo suficiente para que el gasto se registre sin pedir confirmación.
+        database.agregar_transaccion(self.usuario["id"], None, "ingreso", 100.0)
         texto, pendiente = knowledge._procesar_gasto("gaste 3 en café", self.usuario)
         self.assertIsInstance(texto, str)
         self.assertTrue(len(texto) > 0)

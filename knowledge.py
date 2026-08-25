@@ -260,6 +260,17 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                     moneda_id = m["id"]
                     break
 
+        # Balance disponible en la moneda de este gasto (para alerta de sobregiro).
+        abrev = moneda.get("abreviatura") if moneda else None
+        _clave = abrev if abrev else "Sin moneda"
+        _por = database.obtener_balance(usuario["id"]).get("por_moneda", {})
+        _disp_balance = 0.0
+        if _por:
+            if _clave in _por:
+                _disp_balance = float(_por[_clave].get("disponible", 0) or 0)
+            elif "Sin moneda" in _por:
+                _disp_balance = float(_por["Sin moneda"].get("disponible", 0) or 0)
+
         # --- Alerta si el gasto excede el disponible del presupuesto ---
         # El exceso (saldo faltante) NO se imputa al presupuesto y se descuenta
         # del balance disponible; por eso pedimos confirmación.
@@ -284,9 +295,15 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                     f"📉 Este gasto: **{formato.fmt_moneda(cantidad, abrev=abrev_b)}**\n"
                     f"📊 Te pasarías por: **{formato.fmt_moneda(faltante, abrev=abrev_b)}**\n\n"
                     f"Si continúas, el saldo faltante (**{formato.fmt_moneda(faltante, abrev=abrev_b)}**) "
-                    f"se descontará de tu **balance disponible** y el presupuesto quedará **completado** ✅.\n\n"
-                    f"¿Deseas continuar con la transacción?"
+                    f"se descontará de tu **balance disponible** y el presupuesto quedará **completado** ✅."
                 )
+                # Si el faltante también supera el balance disponible, advertir sobregiro.
+                if faltante > _disp_balance + 0.001:
+                    texto_alerta += (
+                        f"\n⚠️ Además, el saldo faltante supera tu balance disponible "
+                        f"(**{formato.fmt_moneda(_disp_balance, abrev=abrev_b)}**); quedarías en negativo."
+                    )
+                texto_alerta += "\n\n¿Deseas continuar con la transacción?"
                 pendiente = {
                     "accion": "confirmar_gasto_excedido",
                     "mensaje": mensaje,
@@ -294,6 +311,26 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                     "moneda_id": moneda_id,
                 }
                 return texto_alerta, pendiente
+
+        # --- Alerta si un gasto NORMAL deja el balance en negativo ---
+        # (no imputado a presupuesto: el gasto descuenta del balance disponible).
+        if not presupuesto and not forzar and cantidad > _disp_balance + 0.001:
+            faltante = round(cantidad - _disp_balance, 2)
+            texto_alerta = (
+                f"{formato.EMOJI_GASTO} **Vas a gastar más de tu balance disponible**\n"
+                f"{formato.SEPARADOR}\n"
+                f"💰 Disponible: **{formato.fmt_moneda(_disp_balance, abrev=abrev)}**\n"
+                f"📉 Este gasto: **{formato.fmt_moneda(cantidad, abrev=abrev)}**\n"
+                f"📊 Te pasarías por: **{formato.fmt_moneda(faltante, abrev=abrev)}**\n\n"
+                f"Si continúas, tu balance quedará en **negativo**.\n\n"
+                f"¿Deseas continuar con la transacción?"
+            )
+            pendiente = {
+                "accion": "confirmar_gasto_balance",
+                "mensaje": mensaje,
+                "moneda_id": moneda_id,
+            }
+            return texto_alerta, pendiente
 
         if presupuesto:
             categoria_id = presupuesto["categoria_id"]

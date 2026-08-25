@@ -116,5 +116,35 @@ class TestPresupuestoExcedido(unittest.TestCase):
         self.assertIn("Completado", lista)
 
 
+class TestGastoNormalExcedeBalance(unittest.TestCase):
+    def setUp(self):
+        _UID[0] += 1
+        self.usuario = database.obtener_o_crear_usuario(777_556_000 + _UID[0], "BalTest")
+        self.cup = database.crear_moneda(self.usuario["id"], "Peso cubano", "$", "CUP", es_default=True)
+        # Ingreso de 100 CUP -> balance disponible 100.
+        database.agregar_transaccion(self.usuario["id"], None, "ingreso", 100.0, moneda_id=self.cup["id"])
+
+    def test_gasto_normal_excede_balance_pide_confirmacion(self):
+        n_txn_antes = len(database.obtener_transacciones(self.usuario["id"], 100))
+        texto, pendiente = knowledge._procesar_gasto("gaste 150 cup", self.usuario, moneda=self.cup)
+        self.assertIsNotNone(pendiente)
+        self.assertEqual(pendiente["accion"], "confirmar_gasto_balance")
+        self.assertIn("negativo", texto.lower())
+        # No se registró la transacción.
+        n_txn_despues = len(database.obtener_transacciones(self.usuario["id"], 100))
+        self.assertEqual(n_txn_despues, n_txn_antes)
+
+    def test_confirmar_gasto_normal_balance_registra(self):
+        texto, pendiente = knowledge._procesar_gasto("gaste 150 cup", self.usuario, moneda=self.cup)
+        self.assertIsNotNone(pendiente)
+        texto2, pendiente2 = knowledge._procesar_gasto(
+            "gaste 150 cup", self.usuario, moneda=self.cup, forzar=True,
+        )
+        self.assertIsNone(pendiente2)
+        # El balance disponible quedó en negativo (-50).
+        balance = database.obtener_balance(self.usuario["id"])
+        self.assertAlmostEqual(balance["disponible"], -50.0)
+
+
 if __name__ == "__main__":
     unittest.main()

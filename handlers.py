@@ -118,7 +118,7 @@ def _crear_botones_pendiente(pendiente: dict, usuario_id: int) -> Optional[Inlin
             ])
         filas.append([InlineKeyboardButton("❌ Cancelar", callback_data="pendiente_cancel")])
         return InlineKeyboardMarkup(filas)
-    if accion == "confirmar_gasto_excedido":
+    if accion in ("confirmar_gasto_excedido", "confirmar_gasto_balance"):
         return InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✅ Sí, continuar", callback_data="conf_exc_si"),
@@ -1327,7 +1327,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         elif query.data == "conf_exc_si":
             pendiente = context.user_data.get("transaccion_pendiente")
-            if not pendiente or pendiente.get("accion") != "confirmar_gasto_excedido":
+            if not pendiente or pendiente.get("accion") not in (
+                "confirmar_gasto_excedido", "confirmar_gasto_balance"
+            ):
                 await _responder_editando(query, "No hay ninguna confirmación pendiente.")
                 return
             presupuesto_id = pendiente.get("presupuesto_id")
