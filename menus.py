@@ -585,24 +585,45 @@ def _render(data: str, usuario: dict) -> Optional[Tuple[str, InlineKeyboardMarku
     return None
 
 
-async def _editar(query, texto: str, kb: InlineKeyboardMarkup) -> None:
-    """Edita el mensaje del botón con el nuevo contenido (fallback: mensaje nuevo)."""
+async def _enviar_fallback(texto: str, kb: InlineKeyboardMarkup, context, chat_id) -> None:
+    """Si el mensaje original no se puede editar (callback expirado, mensaje
+    borrado, etc.), enviamos la respuesta como un mensaje NUEVO al chat en vez
+    de tragar la excepción (lo que dejaba al usuario sin respuesta)."""
+    try:
+        if chat_id is not None and context is not None:
+            await context.bot.send_message(
+                chat_id=chat_id, text=texto, parse_mode="Markdown", reply_markup=kb
+            )
+            return
+    except Exception as e:
+        logger.error("Fallback send_message falló: %s", e)
+    try:
+        if chat_id is not None:
+            # Último recurso sin markup si el bot API rechaza el teclado.
+            await context.bot.send_message(chat_id=chat_id, text=texto, parse_mode="Markdown")
+    except Exception as e:
+        logger.error("Fallback send_message sin markup falló: %s", e)
+
+
+async def _editar(query, texto: str, kb: InlineKeyboardMarkup, context=None) -> None:
+    """Edita el mensaje del botón con el nuevo contenido.
+
+    Si el mensaje ya no es editable (callback expirado / mensaje borrado),
+    envía un mensaje nuevo al chat para no dejar al usuario sin respuesta.
+    """
     if kb is None:
         kb = InlineKeyboardMarkup([])
+    chat_id = getattr(query.message, "chat_id", None) if query.message else None
     try:
         await query.edit_message_text(texto, parse_mode="Markdown", reply_markup=kb)
     except BadRequest as e:
         if "not modified" in str(e).lower():
             return
-        try:
-            await query.message.reply_text(texto, parse_mode="Markdown", reply_markup=kb)
-        except Exception:
-            pass
-    except Exception:
-        try:
-            await query.message.reply_text(texto, parse_mode="Markdown", reply_markup=kb)
-        except Exception:
-            pass
+        logger.warning("Edit fallido (%s); enviando mensaje nuevo al chat.", e)
+        await _enviar_fallback(texto, kb, context, chat_id)
+    except Exception as e:
+        logger.warning("Edit fallido (%s); enviando mensaje nuevo al chat.", e)
+        await _enviar_fallback(texto, kb, context, chat_id)
 
 
 async def procesar_callback(data: str, query, context, usuario: dict, usuario_id: int) -> bool:
@@ -628,16 +649,18 @@ async def procesar_callback(data: str, query, context, usuario: dict, usuario_id
             else:
                 context.user_data.pop("presupuesto_ctx", None)
                 context.user_data.pop("meta_ctx", None)
-        await _editar(query, texto, kb)
+        await _editar(query, texto, kb, context)
         return True
     except Exception as e:
         logger.error("Error en callback de menú %s: %s", data, e)
         try:
             from handlers import _crear_teclado_principal
-            await query.edit_message_text(
+            chat_id = getattr(query.message, "chat_id", None) if query.message else None
+            await _enviar_fallback(
                 "⚠️ Ocurrió un error al procesar la opción. Intenta de nuevo.",
-                parse_mode="Markdown",
-                reply_markup=_crear_teclado_principal(),
+                _crear_teclado_principal(),
+                context,
+                chat_id,
             )
         except Exception:
             pass
