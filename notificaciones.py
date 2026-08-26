@@ -8,7 +8,7 @@ Incluye:
 """
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -91,15 +91,53 @@ def verificar_alertas_presupuesto(
     return "\n".join(lineas) if lineas else None
 
 
+def _fecha_hoy_usuario() -> date:
+    """Fecha de hoy en la zona del usuario (config.DEFAULT_TIMEZONE)."""
+    try:
+        return datetime.now(ZoneInfo(config.DEFAULT_TIMEZONE)).date()
+    except Exception:
+        return date.today()
+
+
 def formatear_resumen_diario(usuario: Dict[str, Any]) -> str:
     """Compone el texto del resumen diario (gastos/ingresos de hoy + balance)."""
     try:
-        hoy = date.today().isoformat()
+        # El resumen diario usa la zona del usuario (fija en America/Havana para
+        # todos), NO la hora UTC del servidor. Si usáramos date.today() (UTC),
+        # al enviarse a las 21:30 Havana (= 01:30 UTC del dia siguiente) filtraria
+        # el dia UTC equivocado y el resumen llegaria vacio ("Sin movimientos hoy").
+        fecha_hoy = _fecha_hoy_usuario()
+        hoy = fecha_hoy.isoformat()
         uid = usuario["id"]
         moneda_lookup = knowledge._moneda_lookup_usuario(usuario)
 
-        gastos = database.obtener_transacciones_por_fecha(uid, hoy, hoy, "gasto")
-        ingresos = database.obtener_transacciones_por_fecha(uid, hoy, hoy, "ingreso")
+        # Las transacciones se guardan en UTC. Para no perder los movimientos
+        # de la noche del usuario (p.ej. 21:00 Havana = 01:00 UTC del dia
+        # siguiente), consultamos un margen de +/-1 dia y luego filtramos cada
+        # transaccion por su fecha convertida a la zona del usuario.
+        try:
+            tz = ZoneInfo(config.DEFAULT_TIMEZONE)
+        except Exception:
+            tz = None
+        inicio = (fecha_hoy - timedelta(days=1)).isoformat()
+        fin = (fecha_hoy + timedelta(days=1)).isoformat()
+        trans_rango = database.obtener_transacciones_por_fecha(uid, inicio, fin)
+
+        def _es_del_dia(t):
+            f = str(t.get("fecha", ""))
+            if len(f) < 10:
+                return False
+            if tz is not None:
+                try:
+                    dt = datetime.strptime(f[:19], "%Y-%m-%d %H:%M:%S")
+                    dt = dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
+                    return dt.date() == fecha_hoy
+                except Exception:
+                    pass
+            return f[:10] == hoy
+
+        gastos = [t for t in trans_rango if t.get("tipo") == "gasto" and _es_del_dia(t)]
+        ingresos = [t for t in trans_rango if t.get("tipo") == "ingreso" and _es_del_dia(t)]
 
         def totales_por_moneda(trans):
             agg: Dict[Any, float] = {}
@@ -113,7 +151,7 @@ def formatear_resumen_diario(usuario: Dict[str, Any]) -> str:
 
         lineas = [
             f"{formato.EMOJI_PRESUPUESTO} **Resumen diario**",
-            f"📅 {date.today().strftime('%d/%m/%Y')}",
+            f"📅 {fecha_hoy.strftime('%d/%m/%Y')}",
             formato.SEPARADOR,
         ]
 
@@ -188,10 +226,15 @@ async def _enviar_resumen(context, usuario: Dict[str, Any], motivo: str, chat_id
         return
 
     texto = formatear_resumen_diario(usuario)
-    try:
-        await context.bot.send_message(chat_id=chat_id, text=texto, parse_mode="Markdown")
-    except Exception as e:
-        logger.error("Error enviando resumen diario a %d (%s): %s", uid, motivo, e)
+    enviado = False
+    for modo, cuerpo in (("Markdown", texto), ("HTML", formato.md_a_html(texto))):
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=cuerpo, parse_mode=modo)
+            enviado = True
+            break
+        except Exception as e:
+            logger.error("Error enviando resumen diario a %d (%s, %s): %s", uid, motivo, modo, e)
+    if not enviado:
         return
 
     zona = config.DEFAULT_TIMEZONE
