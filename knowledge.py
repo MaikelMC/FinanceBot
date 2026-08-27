@@ -31,21 +31,24 @@ def _detectar_moneda_en_texto(texto: str, monedas_usuario: List[Dict[str, Any]])
     if not monedas_usuario:
         return None
 
-    texto_lower = texto.lower()
+    # Normalizamos texto y nombres (minúsculas + sin acentos) para que
+    # "dolares" coincida con "Dólar", "euros" con "Euro", etc.
+    texto_n = _normalizar_texto(texto)
     coincidencias = []
 
     for moneda in monedas_usuario:
-        abreviatura = moneda.get("abreviatura", "").lower().strip()
-        nombre = moneda.get("nombre", "").lower().strip()
+        abreviatura = _normalizar_texto(moneda.get("abreviatura", ""))
+        nombre = _normalizar_texto(moneda.get("nombre", ""))
         simbolo = moneda.get("simbolo", "")
 
         if abreviatura:
-            if re.search(r'(?<![a-z0-9])' + re.escape(abreviatura) + r'(?![a-z0-9])', texto_lower):
+            if re.search(r'(?<![a-z0-9])' + re.escape(abreviatura) + r'(?![a-z0-9])', texto_n):
                 coincidencias.append((len(abreviatura), abreviatura, moneda))
                 continue
 
         if nombre and len(nombre) > 1:
-            if re.search(r'(?<![a-z0-9])' + re.escape(nombre) + r's?(?![a-z0-9])', texto_lower):
+            # Plurales en español: "dolar"/"dolares", "euro"/"euros", "peso"/"pesos".
+            if re.search(r'(?<![a-z0-9])' + re.escape(nombre) + r'(?:es|s)?(?![a-z0-9])', texto_n):
                 coincidencias.append((len(nombre), nombre, moneda))
                 continue
 

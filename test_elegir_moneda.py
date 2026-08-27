@@ -67,7 +67,8 @@ class TestElegirMoneda(unittest.TestCase):
         database.crear_tablas()
         _UID[0] += 1
         self.usuario = database.obtener_o_crear_usuario(770_000_000 + _UID[0], "Test")
-        self.usd = database.crear_moneda(self.usuario["id"], "Dólar", "$", "USD", es_default=True)
+        # Sin moneda predeterminada: el bot debe preguntar qué moneda usar.
+        self.usd = database.crear_moneda(self.usuario["id"], "Dólar", "$", "USD", es_default=False)
         self.eur = database.crear_moneda(self.usuario["id"], "Euro", "€", "EUR", es_default=False)
 
     def test_responder_pide_moneda_y_botones(self):

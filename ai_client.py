@@ -205,26 +205,39 @@ class AIResponder:
         descripcion = resultado.get("descripcion") or ""
         moneda_detectada = resultado.get("moneda")
 
+        from knowledge import _normalizar_texto
         monedas_usuario = database.obtener_monedas(usuario["id"])
 
-        # Buscar moneda en el resultado de la IA
+        # Buscar moneda en el resultado de la IA (abreviatura, nombre o símbolo)
         moneda_obj = None
         if moneda_detectada and monedas_usuario:
+            token = (moneda_detectada or "").strip()
+            t_norm = _normalizar_texto(token)
             for m in monedas_usuario:
-                if m.get("abreviatura", "").lower() == moneda_detectada.lower():
+                if (m.get("abreviatura", "").lower() == token.lower()
+                        or _normalizar_texto(m.get("nombre", "")) == t_norm
+                        or m.get("simbolo", "") == token):
                     moneda_obj = m
                     break
 
-        # Fallback: detectar la moneda directamente desde el texto del mensaje
+        # Fallback 1: detectar la moneda directamente desde el texto del mensaje
         # (evita que "gaste 50 usdt" quede sin moneda y se acumule en la default)
         if moneda_obj is None and monedas_usuario:
             try:
                 from knowledge import _detectar_moneda_en_texto
                 moneda_obj = _detectar_moneda_en_texto(mensaje, monedas_usuario)
-                if moneda_obj is None and len(monedas_usuario) == 1:
-                    moneda_obj = monedas_usuario[0]
             except Exception as e:
                 logger.error("Error detectando moneda en texto: %s", e)
+
+        # Fallback 2: si sigue sin moneda, usar la predeterminada (o la única).
+        # Así los mensajes sin moneda explícita se registran directamente en
+        # lugar de pedir que el usuario elija y perder la transacción.
+        if moneda_obj is None and monedas_usuario:
+            def_moneda = next((m for m in monedas_usuario if m.get("es_default")), None)
+            if def_moneda is not None:
+                moneda_obj = def_moneda
+            elif len(monedas_usuario) == 1:
+                moneda_obj = monedas_usuario[0]
 
         if not cantidad or cantidad <= 0:
             return (
