@@ -1284,6 +1284,18 @@ def _procesar_resumen_mensual(usuario: Dict[str, Any]) -> str:
         else:
             lineas.append("**$0.00**")
 
+        # Aclarar el dinero apartado en presupuestos vs. lo realmente disponible,
+        # para que el usuario no confunda el saldo total con lo que puede gastar.
+        reservado = balance_act.get("reservado", 0) or 0
+        disponible = balance_act.get("disponible", 0) or 0
+        if reservado > 0:
+            lineas.append(
+                f"🔒 Apartado en presupuestos: **{formato.fmt_moneda(reservado)}**"
+            )
+            lineas.append(
+                f"💸 Disponible (libre de presupuestos): **{formato.fmt_moneda(disponible)}**"
+            )
+
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error en resumen mensual: %s", e)
