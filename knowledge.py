@@ -415,21 +415,23 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
         return f"{formato.EMOJI_ERROR} Ocurrió un error al registrar tu gasto: **{formato.fmt_monto(cantidad)}**. Intenta de nuevo.", None
 
 
-def _procesar_gastos_hormiga(usuario: Dict[str, Any]) -> str:
-    """Reporte de gastos hormiga (últimos 30 días) con sugerencia de ahorro."""
+def _procesar_gastos_hormiga(usuario: Dict[str, Any], dias: int = 30, etiqueta: Optional[str] = None) -> str:
+    """Reporte de gastos hormiga (ventana de `dias`) con sugerencia de ahorro."""
     try:
-        stats = database.obtener_estadisticas_gastos_hormiga(usuario["id"], dias=30)
-        gastos = database.obtener_gastos_hormiga(usuario["id"], dias=30)
+        dias = int(dias) if dias and dias > 0 else 30
+        stats = database.obtener_estadisticas_gastos_hormiga(usuario["id"], dias=dias)
+        gastos = database.obtener_gastos_hormiga(usuario["id"], dias=dias)
+        titulo_periodo = etiqueta or f"últimos {dias} días"
         if not gastos:
             return (
-                f"{formato.EMOJI_HORMIGA} **Tus gastos hormiga**\n{formato.SEPARADOR}\n"
+                f"{formato.EMOJI_HORMIGA} **Tus gastos hormiga** ({titulo_periodo})\n{formato.SEPARADOR}\n"
                 "📝 Aún no he detectado gastos hormiga. Cuando registres pequeños gastos "
                 "recurrentes (café, snacks, taxi...), los verás aquí."
             )
         total = stats.get("total", 0.0)
         cantidad = stats.get("cantidad", 0)
         lineas = [
-            f"{formato.EMOJI_HORMIGA} **Tus gastos hormiga** (últimos 30 días)",
+            f"{formato.EMOJI_HORMIGA} **Tus gastos hormiga** ({titulo_periodo})",
             formato.SEPARADOR,
             f"{formato.EMOJI_GASTO} Total: **{formato.fmt_monto(total)}** · {cantidad} transacciones",
             "",
@@ -590,10 +592,20 @@ def _procesar_balance(usuario: Dict[str, Any]) -> str:
         return "❌ Ocurrió un error al obtener tu balance. Por favor, inténtalo de nuevo."
 
 
-def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Optional[str] = None) -> str:
-    """Muestra las transacciones del usuario, opcionalmente filtradas por tipo (gasto/ingreso)."""
+def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Optional[str] = None,
+                            fecha_inicio: Optional[str] = None, fecha_fin: Optional[str] = None,
+                            periodo_label: Optional[str] = None) -> str:
+    """Muestra las transacciones del usuario, opcionalmente filtradas por tipo y período."""
     try:
-        transacciones = database.obtener_transacciones(usuario["id"], limite, tipo)
+        if fecha_inicio and fecha_fin:
+            # Filtrado por fecha en memoria (ISO 'YYYY-MM-DD' compara lexicamente).
+            todas = database.obtener_transacciones(usuario["id"], 1000, tipo)
+            transacciones = [
+                t for t in todas
+                if fecha_inicio <= (t.get("fecha", "") or "")[:10] <= fecha_fin
+            ][:limite]
+        else:
+            transacciones = database.obtener_transacciones(usuario["id"], limite, tipo)
 
         if not transacciones:
             if tipo == "gasto":
@@ -607,6 +619,8 @@ def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Opt
             titulo = "Tus gastos recientes"
         elif tipo == "ingreso":
             titulo = "Tus ingresos recientes"
+        if periodo_label:
+            titulo = f"{titulo} ({periodo_label})"
 
         emoji = {"gasto": formato.EMOJI_GASTO, "ingreso": formato.EMOJI_INGRESO}
         lookup = _moneda_lookup_usuario(usuario)
@@ -635,14 +649,18 @@ def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Opt
         return "❌ Ocurrió un error al obtener tus transacciones.\nIntenta de nuevo o escribe /help."
 
 
-def _procesar_gastos(usuario: Dict[str, Any]) -> str:
-    """Muestra solo los gastos del usuario."""
-    return _procesar_transacciones(usuario, tipo="gasto")
+def _procesar_gastos(usuario: Dict[str, Any], fecha_inicio: Optional[str] = None,
+                    fecha_fin: Optional[str] = None, periodo_label: Optional[str] = None) -> str:
+    """Muestra solo los gastos del usuario, opcionalmente filtrados por período."""
+    return _procesar_transacciones(usuario, tipo="gasto", fecha_inicio=fecha_inicio,
+                                   fecha_fin=fecha_fin, periodo_label=periodo_label)
 
 
-def _procesar_ingresos(usuario: Dict[str, Any]) -> str:
-    """Muestra solo los ingresos del usuario."""
-    return _procesar_transacciones(usuario, tipo="ingreso")
+def _procesar_ingresos(usuario: Dict[str, Any], fecha_inicio: Optional[str] = None,
+                       fecha_fin: Optional[str] = None, periodo_label: Optional[str] = None) -> str:
+    """Muestra solo los ingresos del usuario, opcionalmente filtrados por período."""
+    return _procesar_transacciones(usuario, tipo="ingreso", fecha_inicio=fecha_inicio,
+                                   fecha_fin=fecha_fin, periodo_label=periodo_label)
 
 
 def _procesar_presupuestos(usuario: Dict[str, Any]) -> str:

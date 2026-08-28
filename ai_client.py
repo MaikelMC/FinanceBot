@@ -335,6 +335,9 @@ class AIResponder:
         subconsulta = resultado.get("subconsulta")
 
         try:
+            from datetime import date, timedelta
+
+            from intent_parser import _extraer_dias_periodo
             from knowledge import (
                 _procesar_balance, _procesar_transacciones,
                 _procesar_gastos, _procesar_ingresos,
@@ -342,17 +345,31 @@ class AIResponder:
                 _analizar_transacciones_por_fecha,
                 _procesar_presupuesto_especifico, _procesar_mayor_gasto,
                 _procesar_gastos_por_presupuestos, _procesar_gastos_por_fecha,
-                _procesar_metas_ahorro,
+                _procesar_metas_ahorro, _procesar_gastos_hormiga,
             )
+
+            dias, etiqueta, explicito = _extraer_dias_periodo(mensaje)
+            hoy = date.today()
+            fecha_fin = hoy.isoformat()
+            fecha_inicio = (hoy - timedelta(days=max(dias - 1, 0))).isoformat()
+            # Solo filtrar por fecha si el usuario mencionó un período explícito,
+            # para no cambiar el comportamiento de "ver mis gastos" (sin fecha).
+            pf_inicio = fecha_inicio if explicito else None
+            pf_fin = fecha_fin if explicito else None
 
             if subconsulta == "balance":
                 return _procesar_balance(usuario)
             elif subconsulta == "transacciones":
-                return _procesar_transacciones(usuario)
+                return _procesar_transacciones(usuario, fecha_inicio=pf_inicio,
+                                               fecha_fin=pf_fin, periodo_label=etiqueta if explicito else None)
             elif subconsulta == "gastos":
-                return _procesar_gastos(usuario)
+                return _procesar_gastos(usuario, fecha_inicio=pf_inicio,
+                                        fecha_fin=pf_fin, periodo_label=etiqueta if explicito else None)
             elif subconsulta == "ingresos":
-                return _procesar_ingresos(usuario)
+                return _procesar_ingresos(usuario, fecha_inicio=pf_inicio,
+                                          fecha_fin=pf_fin, periodo_label=etiqueta if explicito else None)
+            elif subconsulta == "gastos_hormiga":
+                return _procesar_gastos_hormiga(usuario, dias=dias, etiqueta=etiqueta)
             elif subconsulta == "presupuesto":
                 return _procesar_presupuestos(usuario)
             elif subconsulta == "categorias":

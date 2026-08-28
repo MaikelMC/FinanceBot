@@ -15,3 +15,4 @@ data/logs/
 credentials.json
 data/*.json
 .agents/
+PATRON_FALLO_INTENCIONES.md

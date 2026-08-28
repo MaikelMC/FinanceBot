@@ -48,6 +48,42 @@ def _subconsulta_gasto_ingreso(texto: str) -> str:
     return "transacciones"
 
 
+def _extraer_dias_periodo(mensaje: str) -> "tuple[int, str, bool]":
+    """Convierte frases de período del mensaje en (días, etiqueta, explícito).
+
+    Usado para consultas que admiten una ventana de tiempo (gastos hormiga,
+    gastos/ingresos por período). Devuelve (30, 'últimos 30 días', False) por defecto
+    cuando el usuario NO menciona ningún periodo, para no filtrar sin pedirlo.
+
+    Reconoce: hoy(1), ayer(2), esta/de la semana(7), semana pasada(7),
+    este/del mes(30), mes pasado(30), año(365), 'últimos N días'(N).
+    """
+    import re
+    msg = (mensaje or "").lower()
+
+    m = re.search(r"[úu]ltimos?\s+(\d+)\s+d[íi]as?", msg)
+    if m:
+        n = int(m.group(1))
+        return n, f"últimos {n} días", True
+
+    if re.search(r"\bhoy\b", msg):
+        return 1, "hoy", True
+    if re.search(r"\bayer\b", msg):
+        return 2, "ayer", True
+    if re.search(r"(?:esta\s+semana|de\s+la\s+semana|semana\s+actual|la\s+semana)", msg):
+        return 7, "esta semana", True
+    if re.search(r"semana\s+pasada", msg):
+        return 7, "la semana pasada", True
+    if re.search(r"(?:este\s+mes|del\s+mes|de\s+este\s+mes|este\s+mes)", msg):
+        return 30, "este mes", True
+    if re.search(r"mes\s+pasado", msg):
+        return 30, "el mes pasado", True
+    if re.search(r"\b(a[ñn]o|anual)\b", msg):
+        return 365, "este año", True
+
+    return 30, "últimos 30 días", False
+
+
 def _build_exportar(mensaje: str) -> Dict[str, Any]:
     """Construye el resultado del fast-path para exportación."""
     from exportador import _detectar_formato, mapear_periodo_ia
@@ -144,6 +180,11 @@ _FAST_PATTERNS = [
     # --- CONSULTA: balance/saldo ---
     (re.compile(r'(?:cu[áa]nto\s+(?:tengo|dinero|plata|saldo)|(?:cu[áa]l\s+es\s+(?:mi\s+)?(?:balance|saldo))|ver\s+(?:balance|saldo|resumen))', re.IGNORECASE),
      lambda m: {"intencion": "consultar", "subconsulta": "balance", "confianza": 0.99}),
+
+    # --- CONSULTA: gastos hormiga (debe ir ANTES de la genérica de "ver gastos") ---
+    # "gastos hormiga", "gasto hormiga", "mis hormigas", "muéstrame mis gastos hormiga de la semana"
+    (re.compile(r'\b(gastos?\s+hormigas?|hormigas?)\b', re.IGNORECASE),
+     lambda m: {"intencion": "consultar", "subconsulta": "gastos_hormiga", "confianza": 0.98}),
 
     # --- CONSULTA: ver gastos/ingresos/transacciones ---
     (re.compile(r'(?:ver|mostrar|listar|dame)\s+(?:mis\s+)?(?:gastos|ingresos|transacciones|historial|movimientos)', re.IGNORECASE),
@@ -285,6 +326,7 @@ REGLAS:
   * "metas": pregunta por sus METAS DE AHORRO o el progreso de su ahorro (ej: "ver mis ahorros", "revisar mis metas", "cuánto llevo ahorrado", "cómo va mi meta de vacaciones"). NO es un balance ni un presupuesto.
   * "presupuesto": pregunta genérica por sus presupuestos ("ver mis presupuestos").
   * "gastos"/"ingresos"/"transacciones": pedir ver la lista de movimientos.
+  * "gastos_hormiga": pedir ver el reporte de GASTOS HORMIGA (pequeños gastos recurrentes, café, snacks, taxi). Palabras clave: "gastos hormiga", "gasto hormiga", "hormigas". Incluye el período en "fecha" si lo menciona (ej: "gastos hormiga de la semana").
 - Estas consultas de subconsulta NO son ayuda_uso: el usuario pregunta por SUS datos, no por cómo usar el bot. NUNCA inventes cifras en "respuesta" para estas consultas: el sistema calculará los valores reales; deja "respuesta" en null y solo clasifica.
 - El campo "fecha" para períodos usa solo palabras: "hoy", "ayer", "anteayer", "esta semana", "este mes" u otro período que mencione el usuario, o null si no menciona ninguno.
 - Para "registrar": además de clasificar con "categoria" (usando la lista genérica), escribe en "categoria_sugerida" un NOMBRE CORTO, específico y con sentido en español de la categoría de la operación (ej: "Café", "Farmacia", "Alquiler", "Netflix", "Taxi", "Barbería", "Gimnasio"). Si el usuario menciona su propia etiqueta (ej: "gasté 200 en barbería"), usa esa palabra exacta (ej: "Barbería"). NO uses los nombres genéricos de la lista para "categoria_sugerida", y NO inventes detalles: usa solo lo que indica la descripción. Para el resto de intenciones, deja "categoria_sugerida" en null.
@@ -293,7 +335,7 @@ REGLAS:
 JSON DE SALIDA:
 {
   "intencion": "registrar|consultar|configurar_presupuesto|configurar_ahorro|agregar_ahorro|modificar|eliminar|analizar_por_fecha|ayuda_uso|general|exportar",
-  "subconsulta": "balance|transacciones|gastos|ingresos|presupuesto|presupuesto_especifico|gastos_por_presupuestos|mayor_gasto|gastos_por_fecha|categorias|null",
+  "subconsulta": "balance|transacciones|gastos|ingresos|presupuesto|presupuesto_especifico|gastos_por_presupuestos|mayor_gasto|gastos_por_fecha|gastos_hormiga|categorias|null",
   "tipo": "gasto|ingreso|null",
   "cantidad": numero | null,
   "descripcion": "texto | null",
