@@ -1136,13 +1136,25 @@ class GoogleSheetsDB:
 
     def registrar_gasto_hormiga(self, transaccion_id: int, usuario_id: int, categoria: str,
                                 monto: float, moneda_id: Optional[int] = None) -> Dict[str, Any]:
-        """Registra un gasto como hormiga."""
+        """Registra un gasto como hormiga (idempotente por transacción)."""
         with LOCK:
             try:
                 monto = round(float(monto), 2)
             except (TypeError, ValueError):
                 monto = 0.0
             gh = self._cache.get("gastos_hormiga", [])
+            # Idempotente: no duplicar para la misma transacción.
+            try:
+                tid_i = int(transaccion_id)
+                uid_i = int(usuario_id)
+            except (TypeError, ValueError):
+                tid_i = uid_i = None
+            for ex in gh:
+                try:
+                    if int(ex.get("transaccion_id", -1)) == tid_i and int(ex.get("usuario_id", -1)) == uid_i:
+                        return dict(ex)
+                except (TypeError, ValueError):
+                    continue
             gid = self._next_id("gastos_hormiga")
             now = self._now()
             nuevo = {
@@ -1162,37 +1174,65 @@ class GoogleSheetsDB:
             return dict(nuevo)
 
     def obtener_gastos_hormiga(self, usuario_id: int, dias: int = 30) -> List[Dict[str, Any]]:
-        """Obtiene gastos hormiga con JOIN manual a transacciones y monedas."""
+        """Obtiene gastos hormiga derivando monto/descripción/fecha de la transacción.
+
+        Solo incluye GASTOS (nunca ingresos) y de-duplica por transacción.
+        """
         gh = self._cache.get("gastos_hormiga", [])
         trans = self._cache.get("transacciones", [])
         monedas = self._cache.get("monedas", [])
         txn_lookup = {int(t["id"]): t for t in trans}
         moneda_lookup = {int(m["id"]): m for m in monedas}
         hoy = datetime.now()
+        vistos = set()
         resultado = []
-        for g in gh:
+        for g in sorted(gh, key=lambda x: str(x.get("detectado_en", "")), reverse=True):
             if int(g.get("usuario_id", 0)) != usuario_id:
                 continue
-            row = dict(g)
+            tid = g.get("transaccion_id")
             try:
-                row["monto"] = float(row.get("monto", 0))
+                tid_i = int(tid) if tid not in (None, "") else None
             except (TypeError, ValueError):
-                row["monto"] = 0.0
-            fecha_g = row.get("fecha", "")
-            if fecha_g:
+                tid_i = None
+            txn = txn_lookup.get(tid_i) if tid_i is not None else None
+            # Nunca mostrar ingresos como gastos hormiga.
+            if txn and txn.get("tipo") and txn.get("tipo") != "gasto":
+                continue
+            if tid_i in vistos:
+                continue
+            vistos.add(tid_i)
+
+            monto = None
+            if txn:
+                _raw = txn.get("monto")
+                if _raw is None:
+                    _raw = txn.get("cantidad")
                 try:
-                    if (hoy - datetime.strptime(str(fecha_g)[:10], "%Y-%m-%d")).days > dias:
+                    monto = float(_raw)
+                except (TypeError, ValueError):
+                    monto = None
+            if monto is None:
+                try:
+                    monto = float(g.get("monto", 0))
+                except (TypeError, ValueError):
+                    monto = 0.0
+
+            fecha_txn = (txn.get("fecha") if txn else None) or g.get("fecha") or ""
+            if dias and fecha_txn:
+                try:
+                    if (hoy - datetime.strptime(str(fecha_txn)[:10], "%Y-%m-%d")).days > dias:
                         continue
                 except ValueError:
                     pass
-            tid = g.get("transaccion_id")
-            try:
-                txn = txn_lookup.get(int(tid)) if tid not in (None, "") else None
-            except (TypeError, ValueError):
-                txn = None
-            if txn:
-                row["transaccion_descripcion"] = txn.get("descripcion", "")
-                row["transaccion_fecha"] = txn.get("fecha", "")
+
+            categoria = g.get("categoria") or (txn.get("categoria") if txn else None) or "otros"
+            descripcion = txn.get("descripcion", "") if txn else ""
+            row = dict(g)
+            row["monto"] = monto
+            row["categoria"] = categoria
+            row["fecha"] = fecha_txn[:10] if fecha_txn else (g.get("fecha") or "")
+            row["transaccion_descripcion"] = descripcion
+            row["transaccion_fecha"] = fecha_txn
             mid = g.get("moneda_id")
             if mid not in (None, ""):
                 m = moneda_lookup.get(int(mid)) if str(mid).isdigit() else None
@@ -1200,7 +1240,6 @@ class GoogleSheetsDB:
                     row["moneda_simbolo"] = m.get("simbolo", "$")
                     row["moneda_abreviatura"] = m.get("abreviatura", "")
             resultado.append(row)
-        resultado.sort(key=lambda x: str(x.get("detectado_en", "")), reverse=True)
         return resultado
 
     def obtener_estadisticas_gastos_hormiga(self, usuario_id: int, dias: int = 30) -> Dict[str, Any]:

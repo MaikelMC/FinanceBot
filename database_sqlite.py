@@ -1234,7 +1234,11 @@ def guardar_config_gastos_hormiga(usuario_id: int, config: Dict[str, Any]) -> Di
 
 def registrar_gasto_hormiga(transaccion_id: int, usuario_id: int, categoria: str,
                             monto: float, moneda_id: Optional[int] = None) -> Dict[str, Any]:
-    """Registra un gasto detectado como hormiga."""
+    """Registra un gasto detectado como hormiga.
+
+    Es idempotente: si ya existe una marca para la misma transacción, devuelve
+    el registro existente en lugar de crear un duplicado.
+    """
     try:
         monto = round(float(monto), 2)
     except (TypeError, ValueError):
@@ -1242,6 +1246,16 @@ def registrar_gasto_hormiga(transaccion_id: int, usuario_id: int, categoria: str
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id FROM gastos_hormiga WHERE transaccion_id = ? AND usuario_id = ? LIMIT 1",
+        (transaccion_id, usuario_id),
+    )
+    existente = cursor.fetchone()
+    if existente:
+        cursor.execute("SELECT * FROM gastos_hormiga WHERE id = ?", (existente["id"],))
+        fila = cursor.fetchone()
+        conn.close()
+        return dict(fila) if fila else {}
     cursor.execute(
         """
         INSERT INTO gastos_hormiga
@@ -1261,41 +1275,85 @@ def registrar_gasto_hormiga(transaccion_id: int, usuario_id: int, categoria: str
 
 
 def obtener_gastos_hormiga(usuario_id: int, dias: int = 30) -> List[Dict[str, Any]]:
-    """Obtiene los gastos hormiga del usuario con JOIN manual a transacciones y monedas."""
+    """Obtiene los gastos hormiga del usuario.
+
+    Cada registro se enlaza con su transacción real (JOIN) y se derivan de ella
+    el monto, la descripción, la fecha y el tipo. Solo se incluyen GASTOS
+    (nunca ingresos) y se de-duplican por transacción.
+    """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM gastos_hormiga WHERE usuario_id = ?", (usuario_id,))
+    cursor.execute(
+        """
+        SELECT gh.id AS gh_id, gh.transaccion_id, gh.usuario_id,
+               gh.categoria AS gh_categoria, gh.monto AS gh_monto,
+               gh.moneda_id AS gh_moneda_id, gh.fecha AS gh_fecha,
+               gh.detectado_en, gh.es_recurrente,
+               t.cantidad AS t_monto,
+               t.descripcion AS t_descripcion, t.fecha AS t_fecha, t.tipo AS t_tipo,
+               m.simbolo AS m_simbolo, m.abreviatura AS m_abrev
+        FROM gastos_hormiga gh
+        LEFT JOIN transacciones t ON t.id = gh.transaccion_id
+        LEFT JOIN monedas m ON m.id = gh.moneda_id
+        WHERE gh.usuario_id = ?
+        ORDER BY gh.detectado_en DESC
+        """,
+        (usuario_id,),
+    )
     rows = cursor.fetchall()
-    transacciones = {t["id"]: t for t in obtener_transacciones(usuario_id, limite=1000)}
-    monedas = {m["id"]: m for m in obtener_monedas(usuario_id)}
     conn.close()
 
-    resultado = []
     hoy = datetime.now()
+    vistos = set()
+    resultado = []
     for g in rows:
-        row = dict(g)
+        g = dict(g)
+        # Nunca mostrar ingresos como gastos hormiga.
+        if g.get("t_tipo") and g.get("t_tipo") != "gasto":
+            continue
+        tid = g.get("transaccion_id")
+        # De-duplicar por transacción (conservar el registro más reciente).
+        if tid in vistos:
+            continue
+        vistos.add(tid)
+
+        monto = g.get("t_monto")
         try:
-            row["monto"] = float(row.get("monto", 0))
+            monto = float(monto)
         except (TypeError, ValueError):
-            row["monto"] = 0.0
-        row["notificaciones_activas"] = bool(int(row.get("es_recurrente", 1)))
-        fecha_g = row.get("fecha", "")
-        if fecha_g:
             try:
-                if (hoy - datetime.strptime(str(fecha_g)[:10], "%Y-%m-%d")).days > dias:
+                monto = float(g.get("gh_monto") or 0)
+            except (TypeError, ValueError):
+                monto = 0.0
+
+        fecha_txn = g.get("t_fecha") or g.get("gh_fecha") or ""
+        if dias and fecha_txn:
+            try:
+                if (hoy - datetime.strptime(str(fecha_txn)[:10], "%Y-%m-%d")).days > dias:
                     continue
             except ValueError:
                 pass
-        txn = transacciones.get(int(row.get("transaccion_id") or 0))
-        if txn:
-            row["transaccion_descripcion"] = txn.get("descripcion", "")
-            row["transaccion_fecha"] = txn.get("fecha", "")
-        mid = row.get("moneda_id")
-        if mid and mid in monedas:
-            row["moneda_simbolo"] = monedas[mid].get("simbolo", "$")
-            row["moneda_abreviatura"] = monedas[mid].get("abreviatura", "")
-        resultado.append(row)
-    resultado.sort(key=lambda x: str(x.get("detectado_en", "")), reverse=True)
+
+        categoria = g.get("gh_categoria") or "otros"
+        descripcion = g.get("t_descripcion") or ""
+        moneda_simbolo = g.get("m_simbolo") or "$"
+        moneda_abrev = g.get("m_abrev") or ""
+
+        resultado.append({
+            "id": g.get("gh_id"),
+            "transaccion_id": tid,
+            "usuario_id": g.get("usuario_id"),
+            "categoria": categoria,
+            "monto": monto,
+            "moneda_id": g.get("gh_moneda_id"),
+            "fecha": fecha_txn[:10] if fecha_txn else (g.get("gh_fecha") or ""),
+            "detectado_en": g.get("detectado_en"),
+            "es_recurrente": g.get("es_recurrente"),
+            "transaccion_descripcion": descripcion,
+            "transaccion_fecha": fecha_txn,
+            "moneda_simbolo": moneda_simbolo,
+            "moneda_abreviatura": moneda_abrev,
+        })
     return resultado
 
 

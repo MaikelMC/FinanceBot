@@ -151,7 +151,7 @@ class TestHistorialHormiga(unittest.TestCase):
                                           "café en la esquina", self.mon["id"])
         database.registrar_gasto_hormiga(txn["id"], self.usuario["id"], "Café", 50.0, self.mon["id"])
         texto = knowledge._procesar_gastos_hormiga(self.usuario, dias=30, etiqueta="últimos 30 días")
-        self.assertIn("Historial", texto)
+        self.assertIn("Detalle", texto)
         self.assertIn("café en la esquina", texto)
         self.assertIn("Café", texto)
 

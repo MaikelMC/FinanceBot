@@ -184,10 +184,24 @@ def _nota_gasto_hormiga(usuario: Dict[str, Any], cantidad: float, mensaje: str,
         config = _obtener_config_hormiga_cacheada(usuario["id"])
         if not int(config.get("notificaciones_activas", 1)):
             return ""
-        if not detectar_gasto_hormiga(usuario, cantidad, mensaje, categoria, moneda):
+        # Solo los GASTOS pueden ser gastos hormiga. Nunca ingresos.
+        monto = float(cantidad)
+        if transaccion_id:
+            try:
+                txn = database.obtener_transaccion_por_id(usuario["id"], transaccion_id)
+            except Exception:
+                txn = None
+            if txn is not None and str(txn.get("tipo", "")).lower() != "gasto":
+                return ""
+            if txn is not None:
+                try:
+                    monto = float(txn.get("monto", cantidad))
+                except (TypeError, ValueError):
+                    monto = float(cantidad)
+        if not detectar_gasto_hormiga(usuario, monto, mensaje, categoria, moneda):
             return ""
         database.registrar_gasto_hormiga(
-            transaccion_id, usuario["id"], categoria or "otros", cantidad,
+            transaccion_id, usuario["id"], categoria or "otros", monto,
             moneda["id"] if moneda else None,
         )
         frecuencia_minima = int(config.get("frecuencia_minima", 3))
@@ -451,35 +465,47 @@ def _procesar_gastos_hormiga(usuario: Dict[str, Any], dias: int = 30, etiqueta: 
         total = stats.get("total", 0.0)
         cantidad = stats.get("cantidad", 0)
         lineas = [
-            f"{formato.EMOJI_HORMIGA} **Tus gastos hormiga** ({titulo_periodo})",
+            f"{formato.EMOJI_HORMIGA} **Tus gastos hormiga** · {titulo_periodo}",
             formato.SEPARADOR,
-            f"{formato.EMOJI_GASTO} Total: **{formato.fmt_monto(total)}** · {cantidad} transacciones",
+            f"{formato.EMOJI_GASTO} Total: **{formato.fmt_monto(total)}** · {cantidad} movimientos",
             "",
             f"{formato.EMOJI_INFO} **Por categoría:**",
         ]
         for cat in stats.get("por_categoria", []):
-            lineas.append(f"  • {cat['categoria']}: {formato.fmt_monto(cat['total'])} ({cat['cantidad']})")
+            pct = (cat["total"] / total * 100) if total > 0 else 0
+            lineas.append(
+                f"  • {cat['categoria']} — {formato.fmt_monto(cat['total'])} "
+                f"({cat['cantidad']}) · {pct:.0f}%"
+            )
 
-        # --- Historial de transacciones hormiga ---
+        # --- Detalle de transacciones hormiga ---
         lineas.append("")
-        lineas.append(f"{formato.EMOJI_INFO} **Historial de gastos hormiga:**")
-        for g in gastos[:15]:
-            fecha = (g.get("transaccion_fecha") or g.get("fecha") or "")[:10]
+        lineas.append(f"{formato.EMOJI_INFO} **Detalle:**")
+        mostrados = 0
+        for g in gastos:
+            if mostrados >= 20:
+                break
+            fecha = _formato_fecha_corta(g.get("transaccion_fecha") or g.get("fecha") or "")
             cat = g.get("categoria") or "Sin categoría"
             monto = formato.fmt_moneda(
                 g.get("monto", 0.0),
-                simbolo=g.get("moneda_simbolo"),
+                simbolo=g.get("moneda_simbolo", "$"),
                 abrev=g.get("moneda_abreviatura"),
             )
             desc = _limpiar_descripcion(g.get("transaccion_descripcion", "") or "")
-            lineas.append(f"  • {fecha} · {cat}: {monto} — {desc}")
+            if len(desc) > 70:
+                desc = desc[:67].rstrip() + "..."
+            lineas.append(f"  {fecha} · {cat} · {monto} — {desc}")
+            mostrados += 1
+        if len(gastos) > mostrados:
+            lineas.append(f"  _(mostrando {mostrados} de {len(gastos)})_")
 
         if total > 0:
             ahorro = round(total * 0.8, 2)
             lineas.append("")
             lineas.append(
-                f"{formato.EMOJI_AHORRO} Sugerencia: podrías ahorrar **{formato.fmt_monto(ahorro)}/mes** "
-                "reduciendo un 80% estos gastos."
+                f"{formato.EMOJI_AHORRO} Si redujeras un 80% estos gastos, ahorrarías "
+                f"**~{formato.fmt_monto(ahorro)}/mes**."
             )
         lineas.append("")
         lineas.append("Configura la detección con /config_hormiga.")
@@ -2057,6 +2083,18 @@ def _limpiar_descripcion(desc: str) -> str:
             desc = desc[len(prefijo):].strip()
             break
     return desc
+
+
+def _formato_fecha_corta(fecha: str) -> str:
+    """'2026-08-26 14:03:00' -> '26/08'. Devuelve el original si no parsea."""
+    if not fecha:
+        return ""
+    iso = str(fecha)[:10]
+    try:
+        from datetime import datetime as _dt
+        return _dt.strptime(iso, "%Y-%m-%d").strftime("%d/%m")
+    except ValueError:
+        return iso
 
 
 def _detectar_modificacion(mensaje: str) -> Dict[str, Any]:
