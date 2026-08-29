@@ -1289,6 +1289,13 @@ def obtener_gastos_hormiga(usuario_id: int, dias: int = 30, respetar_umbral: boo
     umbral_base = float(config.get("umbral_base", 5.0))
     umbral_moneda = str(config.get("umbral_moneda", "USD")).upper()
 
+    # Interpretación de la categoría a partir de la descripción (corrige
+    # etiquetas mal asignadas en la transacción, p.ej. recarga de teléfono).
+    try:
+        from knowledge import _interpretar_categoria_hormiga
+    except Exception:
+        _interpretar_categoria_hormiga = None
+
     def _umbral_para(moneda_abrev: str) -> float:
         u = float(umbral_base)
         ma = (moneda_abrev or "USD").upper()
@@ -1358,6 +1365,8 @@ def obtener_gastos_hormiga(usuario_id: int, dias: int = 30, respetar_umbral: boo
 
         categoria = g.get("gh_categoria") or "otros"
         descripcion = g.get("t_descripcion") or ""
+        if _interpretar_categoria_hormiga is not None:
+            categoria = _interpretar_categoria_hormiga(descripcion, categoria)
         moneda_simbolo = g.get("m_simbolo") or "$"
         moneda_abrev = g.get("m_abrev") or ""
 

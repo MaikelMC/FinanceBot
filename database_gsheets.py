@@ -1193,6 +1193,13 @@ class GoogleSheetsDB:
         umbral_base = float(cfg.get("umbral_base", 5.0))
         umbral_moneda = str(cfg.get("umbral_moneda", "USD")).upper()
 
+        # Interpretación de la categoría a partir de la descripción (corrige
+        # etiquetas mal asignadas en la transacción, p.ej. recarga de teléfono).
+        try:
+            from knowledge import _interpretar_categoria_hormiga
+        except Exception:
+            _interpretar_categoria_hormiga = None
+
         def _umbral_para(moneda_abrev):
             u = float(umbral_base)
             ma = (moneda_abrev or "USD").upper()
@@ -1247,6 +1254,8 @@ class GoogleSheetsDB:
 
             categoria = g.get("categoria") or (txn.get("categoria") if txn else None) or "otros"
             descripcion = txn.get("descripcion", "") if txn else ""
+            if _interpretar_categoria_hormiga is not None:
+                categoria = _interpretar_categoria_hormiga(descripcion, categoria)
             row = dict(g)
             row["monto"] = monto
             row["categoria"] = categoria

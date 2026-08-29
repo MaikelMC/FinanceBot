@@ -112,6 +112,52 @@ def _invalidar_cache_hormiga(usuario_id):
     _config_hormiga_cache.pop(usuario_id, None)
 
 
+# Mapa de interpretación de la descripción del gasto. Es más amplio que
+# CATEGORIAS_HORMIGA_DEFAULT (que solo se usa para la detección por palabra
+# clave) y permite etiquetar correctamente gastos hormiga cuyo texto no coincide
+# con la categoría de la transacción (ej. "recarga de teléfono" mal etiquetada
+# como "comida").
+_CATEGORIAS_HORMIGA_KEYWORDS = {
+    "café": ["café", "cafe", "coffee", "starbucks", "capuchino", "espresso", "barista"],
+    "snacks": ["snack", "snacks", "galleta", "chocolate", "dulce", "golosina",
+               "chuchería", "chucheria", "caramelo", "dulces"],
+    "transporte": ["taxi", "uber", "didi", "cabify", "bici", "moto", "bus", "guagua",
+                   "metro", "gasolina", "parking", "pasaje", "transporte", "combustible"],
+    "suscripciones": ["netflix", "spotify", "youtube", "amazon prime", "disney", "hbo",
+                      "premium", "suscripción", "suscripcion", "mensualidad"],
+    "comida rápida": ["mcdonalds", "burger", "pizza", "pizz", "hamburguesa", "delivery",
+                      "subway", "kfc", "rapida", "rapido", "pollo"],
+    "recarga": ["recarga", "recargue", "saldo", "datos móviles", "datos moviles",
+                "tarjeta de datos", "teléfono", "telefono", "nauta", "etecsa",
+                "recarga telefonica", "recarga telefónica"],
+    "bebidas": ["refresco", "refrescos", "gaseosa", "jugo", "soda", "cerveza",
+                "batido", "batidos", "bebida", "bebidas"],
+}
+
+
+def _interpretar_categoria_hormiga(descripcion: str, categoria_actual: str = None) -> str:
+    """Deriva la categoría del gasto hormiga interpretando la descripción.
+
+    No copia ciegamente la categoría de la transacción (que puede estar mal
+    asignada), sino que busca palabras clave en el texto. Si no encuentra
+    coincidencia, conserva la categoría recibida como respaldo.
+    """
+    texto = (descripcion or "").lower()
+    if texto:
+        mejor_cat = None
+        mejor_puntaje = 0
+        for cat, kws in _CATEGORIAS_HORMIGA_KEYWORDS.items():
+            golpes = sum(1 for kw in kws if kw in texto)
+            if golpes > mejor_puntaje:
+                mejor_puntaje = golpes
+                mejor_cat = cat
+        if mejor_cat:
+            return mejor_cat
+    if categoria_actual:
+        return categoria_actual
+    return "otros"
+
+
 def detectar_gasto_hormiga(usuario: Dict[str, Any], monto: float, descripcion: str,
                            categoria: str, moneda: Optional[Dict[str, Any]] = None) -> bool:
     """Detecta si una transacción es un gasto hormiga (pequeño y recurrente)."""
@@ -200,8 +246,9 @@ def _nota_gasto_hormiga(usuario: Dict[str, Any], cantidad: float, mensaje: str,
                     monto = float(cantidad)
         if not detectar_gasto_hormiga(usuario, monto, mensaje, categoria, moneda):
             return ""
+        cat_hormiga = _interpretar_categoria_hormiga(mensaje, categoria)
         database.registrar_gasto_hormiga(
-            transaccion_id, usuario["id"], categoria or "otros", monto,
+            transaccion_id, usuario["id"], cat_hormiga, monto,
             moneda["id"] if moneda else None,
         )
         frecuencia_minima = int(config.get("frecuencia_minima", 3))
