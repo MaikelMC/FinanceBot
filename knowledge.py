@@ -175,7 +175,11 @@ def _es_gasto_hormiga_por_frecuencia(usuario_id: int, categoria: str, config: Di
 
 def _nota_gasto_hormiga(usuario: Dict[str, Any], cantidad: float, mensaje: str,
                         categoria: str, moneda: Optional[Dict[str, Any]], transaccion_id: int) -> str:
-    """Si el gasto es hormiga, lo registra y retorna el mensaje de aviso."""
+    """Si el gasto es hormiga, lo registra y retorna el mensaje de aviso.
+
+    La alerta solo se dispara cuando se acumulan `frecuencia_minima` gastos hormiga
+    en la misma semana (ventana de 7 días), para no ser molesto en cada gasto pequeño.
+    """
     try:
         config = _obtener_config_hormiga_cacheada(usuario["id"])
         if not int(config.get("notificaciones_activas", 1)):
@@ -186,10 +190,26 @@ def _nota_gasto_hormiga(usuario: Dict[str, Any], cantidad: float, mensaje: str,
             transaccion_id, usuario["id"], categoria or "otros", cantidad,
             moneda["id"] if moneda else None,
         )
+        frecuencia_minima = int(config.get("frecuencia_minima", 3))
+        semana = database.obtener_gastos_hormiga(usuario["id"], dias=7)
+        if len(semana) < frecuencia_minima:
+            return ""
+        por_moneda: Dict[str, float] = {}
+        for g in semana:
+            abrev = (g.get("moneda_abreviatura") or g.get("moneda_simbolo") or "").strip()
+            por_moneda[abrev] = por_moneda.get(abrev, 0.0) + float(g.get("monto", 0) or 0)
+        if por_moneda:
+            partes = " + ".join(
+                (f"{formato.fmt_monto(v)} {k}" if k else formato.fmt_monto(v))
+                for k, v in por_moneda.items()
+            )
+            total_txt = f" (unos {partes})"
+        else:
+            total_txt = ""
         return (
-            f"\n\n{formato.EMOJI_HORMIGA} ¡Gasto hormiga detectado! "
-            "Este pequeño gasto puede sumar mucho con el tiempo. "
-            "Revísalo con /gastos_hormiga."
+            f"\n\n{formato.EMOJI_HORMIGA} ¡Atención! Llevas **{len(semana)} gastos hormiga esta semana**"
+            f"{total_txt}. Estos pequeñines se acumulan sin que te des cuenta. "
+            "Revísalos con /gastos_hormiga."
         )
     except Exception as e:
         logger.error("Error generando nota de gasto hormiga: %s", e)

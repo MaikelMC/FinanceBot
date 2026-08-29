@@ -128,14 +128,25 @@ class TestHookProcesarGasto(unittest.TestCase):
     def setUp(self):
         self.usuario = _crear_usuario()
 
-    def test_nota_registra_hormiga(self):
+    def test_nota_registra_hormiga_sin_alerta_hasta_umbral(self):
+        # Por debajo del umbral semanal (3) el gasto SÍ se registra, pero la alerta queda vacía.
         nota = knowledge._nota_gasto_hormiga(
             self.usuario, 3.0, "café", "café", None, transaccion_id=555
         )
-        self.assertIn(formato.EMOJI_HORMIGA, nota)
+        self.assertEqual(nota, "")
         gastos = database.obtener_gastos_hormiga(self.usuario["id"], dias=30)
         self.assertEqual(len(gastos), 1)
         self.assertEqual(gastos[0]["categoria"], "café")
+
+    def test_nota_alerta_al_llegar_al_umbral_semanal(self):
+        # 2 previos en la semana + 1 vía la nota -> dispara la alerta con el conteo.
+        database.registrar_gasto_hormiga(701, self.usuario["id"], "café", 3.0)
+        database.registrar_gasto_hormiga(702, self.usuario["id"], "café", 2.0)
+        nota = knowledge._nota_gasto_hormiga(
+            self.usuario, 3.0, "café", "café", None, transaccion_id=703
+        )
+        self.assertIn(formato.EMOJI_HORMIGA, nota)
+        self.assertIn("3 gastos hormiga esta semana", nota)
 
     def test_nota_vacia_si_no_es_hormiga(self):
         nota = knowledge._nota_gasto_hormiga(
