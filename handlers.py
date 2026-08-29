@@ -1530,7 +1530,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             tipo_cb = partes[1] if len(partes) > 1 else "all"
             tipo_filtro = {"all": None, "gasto": "gasto", "ingreso": "ingreso"}.get(tipo_cb, None)
             texto = knowledge._procesar_transacciones_todas(usuario, tipo_filtro)
-            await _responder_seguro(query.message, texto, reply_markup=_crear_teclado_principal())
+            volver_kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Volver a Transacciones", callback_data="menu_transacciones")
+            ]])
+            await _responder_seguro(query.message, texto, reply_markup=volver_kb)
 
     except Exception as e:
         logger.error("Error en callback query: %s", e)

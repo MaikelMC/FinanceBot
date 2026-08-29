@@ -179,14 +179,37 @@ def menu_monedas(usuario: dict) -> Tuple[str, InlineKeyboardMarkup]:
 
 def menu_transacciones(usuario: dict) -> Tuple[str, InlineKeyboardMarkup]:
     """Últimas transacciones + acciones."""
+    try:
+        total = len(database.obtener_transacciones(usuario["id"], 100000))
+    except Exception:
+        total = 0
+    extras = []
+    if total > 10:
+        extras.append([("📂 Ver todas las transacciones", "ver_todas:all")])
     return _con_botones(
         knowledge._procesar_transacciones(usuario),
-        [
+        extras + [
             [("📉 Ver gastos", CB_TRANS_GASTOS), ("📈 Ver ingresos", CB_TRANS_INGRESOS)],
             [("➕ Registrar gasto", CB_TRANS_GASTO)],
             [("➕ Registrar ingreso", CB_TRANS_INGRESO)],
         ],
     )
+
+
+def _menu_ver_tipo(usuario: dict, tipo: str) -> Tuple[str, InlineKeyboardMarkup]:
+    """Vista 'Ver gastos' / 'Ver ingresos' del menú, con botón 'Ver todas' si hay más de 10."""
+    if tipo == "gasto":
+        texto = knowledge._procesar_gastos(usuario)
+    else:
+        texto = knowledge._procesar_ingresos(usuario)
+    filas = []
+    try:
+        total = len(database.obtener_transacciones(usuario["id"], 100000, tipo))
+    except Exception:
+        total = 0
+    if total > 10:
+        filas.append([("📂 Ver todas las transacciones", f"ver_todas:{tipo}")])
+    return _con_botones(texto, filas, volver=CB_TRANS)
 
 
 def menu_ayuda() -> Tuple[str, InlineKeyboardMarkup]:
@@ -534,9 +557,9 @@ def _render(data: str, usuario: dict) -> Optional[Tuple[str, InlineKeyboardMarku
 
     # Transacciones
     if data == CB_TRANS_GASTOS:
-        return _con_botones(knowledge._procesar_gastos(usuario), [], volver=CB_TRANS)
+        return _menu_ver_tipo(usuario, "gasto")
     if data == CB_TRANS_INGRESOS:
-        return _con_botones(knowledge._procesar_ingresos(usuario), [], volver=CB_TRANS)
+        return _menu_ver_tipo(usuario, "ingreso")
     if data == CB_TRANS_GASTO:
         return prompt_transaccion_gasto()
     if data == CB_TRANS_INGRESO:

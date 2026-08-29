@@ -22,6 +22,7 @@ import config
 import database
 import database_sqlite
 import knowledge
+import menus
 
 _TMP = tempfile.mkdtemp(prefix="finbot_ver_")
 _DB = Path(_TMP) / "ver.db"
@@ -143,6 +144,41 @@ class TestCallbackVerTodas(unittest.TestCase):
         texto_enviado = query.message.reply_text.call_args.args[0]
         self.assertIn("Todas tus transacciones", texto_enviado)
         self.assertIn("Neto acumulado", texto_enviado)
+
+
+class TestMenuVerTodas(unittest.TestCase):
+    _seq = 0
+
+    def setUp(self):
+        database.crear_tablas()
+        TestMenuVerTodas._seq += 1
+        self.usuario = database.obtener_o_crear_usuario(910001000 + TestMenuVerTodas._seq, "MenuVT")
+        self.mon = database.crear_moneda(self.usuario["id"], "Peso", "", "CUP", es_default=True)
+
+    def _callbacks(self, tupla):
+        texto, kb = tupla
+        return [b.callback_data for fila in kb.inline_keyboard for b in fila]
+
+    def test_menu_transacciones_incluye_ver_todas(self):
+        _sembrar(self.usuario, self.mon, 12)
+        cbs = self._callbacks(menus.menu_transacciones(self.usuario))
+        self.assertIn("ver_todas:all", cbs)
+
+    def test_menu_gastos_incluye_ver_todas(self):
+        _sembrar(self.usuario, self.mon, 12)
+        cbs = self._callbacks(menus._menu_ver_tipo(self.usuario, "gasto"))
+        self.assertIn("ver_todas:gasto", cbs)
+
+    def test_menu_ingresos_incluye_ver_todas(self):
+        for i in range(12):
+            database.agregar_transaccion(self.usuario["id"], 0, "ingreso", 100.0 + i, f"ingreso {i}", self.mon["id"])
+        cbs = self._callbacks(menus._menu_ver_tipo(self.usuario, "ingreso"))
+        self.assertIn("ver_todas:ingreso", cbs)
+
+    def test_pocas_transacciones_no_boton(self):
+        _sembrar(self.usuario, self.mon, 3)
+        cbs = self._callbacks(menus._menu_ver_tipo(self.usuario, "gasto"))
+        self.assertNotIn("ver_todas:gasto", cbs)
 
 
 if __name__ == "__main__":
