@@ -1274,13 +1274,35 @@ def registrar_gasto_hormiga(transaccion_id: int, usuario_id: int, categoria: str
     }
 
 
-def obtener_gastos_hormiga(usuario_id: int, dias: int = 30) -> List[Dict[str, Any]]:
+def obtener_gastos_hormiga(usuario_id: int, dias: int = 30, respetar_umbral: bool = True) -> List[Dict[str, Any]]:
     """Obtiene los gastos hormiga del usuario.
 
     Cada registro se enlaza con su transacción real (JOIN) y se derivan de ella
     el monto, la descripción, la fecha y el tipo. Solo se incluyen GASTOS
     (nunca ingresos) y se de-duplican por transacción.
+
+    Si `respetar_umbral` es True, se excluyen los registros cuyo monto supera
+    el umbral actual del usuario (en la moneda de la transacción), de modo que
+    el histórico siempre refleje solo gastos hormiga válidos.
     """
+    config = obtener_config_gastos_hormiga(usuario_id) or {}
+    umbral_base = float(config.get("umbral_base", 5.0))
+    umbral_moneda = str(config.get("umbral_moneda", "USD")).upper()
+
+    def _umbral_para(moneda_abrev: str) -> float:
+        u = float(umbral_base)
+        ma = (moneda_abrev or "USD").upper()
+        if ma != umbral_moneda:
+            try:
+                from knowledge import FACTORES_CONVERSION
+            except Exception:
+                FACTORES_CONVERSION = {}
+            fm = float(FACTORES_CONVERSION.get(ma, 1.0))
+            fu = float(FACTORES_CONVERSION.get(umbral_moneda, 1.0))
+            if fm > 0 and fu > 0:
+                u = (u * fu) / fm
+        return u
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -1338,6 +1360,12 @@ def obtener_gastos_hormiga(usuario_id: int, dias: int = 30) -> List[Dict[str, An
         descripcion = g.get("t_descripcion") or ""
         moneda_simbolo = g.get("m_simbolo") or "$"
         moneda_abrev = g.get("m_abrev") or ""
+
+        # Respetar el umbral actual: descartar lo que lo supera (en su moneda).
+        if respetar_umbral:
+            tiene_moneda = bool(moneda_abrev) or moneda_simbolo not in ("$", "")
+            if tiene_moneda and monto > _umbral_para(moneda_abrev or moneda_simbolo):
+                continue
 
         resultado.append({
             "id": g.get("gh_id"),

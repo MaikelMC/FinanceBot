@@ -464,8 +464,12 @@ def _procesar_gastos_hormiga(usuario: Dict[str, Any], dias: int = 30, etiqueta: 
             )
         total = stats.get("total", 0.0)
         cantidad = stats.get("cantidad", 0)
+        cfg_h = database.obtener_config_gastos_hormiga(usuario["id"]) or {}
+        umbral_base = float(cfg_h.get("umbral_base", 5.0))
+        umbral_moneda = str(cfg_h.get("umbral_moneda", "USD")).upper()
+        umbral_txt = f"{formato.fmt_monto(umbral_base)} {umbral_moneda}"
         lineas = [
-            f"{formato.EMOJI_HORMIGA} **Tus gastos hormiga** · {titulo_periodo}",
+            f"{formato.EMOJI_HORMIGA} **Tus gastos hormiga** · {titulo_periodo} · umbral ≤ {umbral_txt}",
             formato.SEPARADOR,
             f"{formato.EMOJI_GASTO} Total: **{formato.fmt_monto(total)}** · {cantidad} movimientos",
             "",

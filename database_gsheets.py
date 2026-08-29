@@ -1173,10 +1173,11 @@ class GoogleSheetsDB:
             self._schedule_flush()
             return dict(nuevo)
 
-    def obtener_gastos_hormiga(self, usuario_id: int, dias: int = 30) -> List[Dict[str, Any]]:
+    def obtener_gastos_hormiga(self, usuario_id: int, dias: int = 30, respetar_umbral: bool = True) -> List[Dict[str, Any]]:
         """Obtiene gastos hormiga derivando monto/descripción/fecha de la transacción.
 
-        Solo incluye GASTOS (nunca ingresos) y de-duplica por transacción.
+        Solo incluye GASTOS (nunca ingresos) y de-duplica por transacción. Si
+        `respetar_umbral` es True, descarta los montos que superan el umbral.
         """
         gh = self._cache.get("gastos_hormiga", [])
         trans = self._cache.get("transacciones", [])
@@ -1186,6 +1187,25 @@ class GoogleSheetsDB:
         hoy = datetime.now()
         vistos = set()
         resultado = []
+
+        cfgs = self._cache.get("config_gastos_hormiga", [])
+        cfg = next((c for c in cfgs if int(c.get("usuario_id", -1)) == int(usuario_id)), None) or {}
+        umbral_base = float(cfg.get("umbral_base", 5.0))
+        umbral_moneda = str(cfg.get("umbral_moneda", "USD")).upper()
+
+        def _umbral_para(moneda_abrev):
+            u = float(umbral_base)
+            ma = (moneda_abrev or "USD").upper()
+            if ma != umbral_moneda:
+                try:
+                    from knowledge import FACTORES_CONVERSION
+                except Exception:
+                    FACTORES_CONVERSION = {}
+                fm = float(FACTORES_CONVERSION.get(ma, 1.0))
+                fu = float(FACTORES_CONVERSION.get(umbral_moneda, 1.0))
+                if fm > 0 and fu > 0:
+                    u = (u * fu) / fm
+            return u
         for g in sorted(gh, key=lambda x: str(x.get("detectado_en", "")), reverse=True):
             if int(g.get("usuario_id", 0)) != usuario_id:
                 continue
@@ -1239,6 +1259,12 @@ class GoogleSheetsDB:
                 if m:
                     row["moneda_simbolo"] = m.get("simbolo", "$")
                     row["moneda_abreviatura"] = m.get("abreviatura", "")
+            # Respetar el umbral actual: descartar lo que lo supera (en su moneda).
+            if respetar_umbral:
+                abrev_u = row.get("moneda_abreviatura") or row.get("moneda_simbolo") or ""
+                tiene_moneda = bool(row.get("moneda_abreviatura")) or (row.get("moneda_simbolo") not in ("$", ""))
+                if tiene_moneda and monto > _umbral_para(abrev_u):
+                    continue
             resultado.append(row)
         return resultado
 
