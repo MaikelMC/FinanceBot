@@ -182,8 +182,9 @@ _FAST_PATTERNS = [
      lambda m: {"intencion": "consultar", "subconsulta": "balance", "confianza": 0.99}),
 
     # --- CONSULTA: gastos hormiga (debe ir ANTES de la genérica de "ver gastos") ---
-    # "gastos hormiga", "gasto hormiga", "mis hormigas", "muéstrame mis gastos hormiga de la semana"
-    (re.compile(r'\b(gastos?\s+hormigas?|hormigas?)\b', re.IGNORECASE),
+    # "gastos hormiga", "gasto hormiga", "mis hormigas", "muéstrame mis gastos hormiga de la
+    # semana", "historial de mis gastos hormiga", "transacciones de mis hormigas", "ver mis hormiguitos"
+    (re.compile(r'\b(?:gastos?\s+hormig\w*|hormig\w*|transacciones?\s+(?:de\s+)?(?:mis\s+)?hormig\w*|historial\s+(?:de\s+)?(?:mis\s+)?gastos?\s*hormig\w*)\b', re.IGNORECASE),
      lambda m: {"intencion": "consultar", "subconsulta": "gastos_hormiga", "confianza": 0.98}),
 
     # --- CONSULTA: ver gastos/ingresos/transacciones ---

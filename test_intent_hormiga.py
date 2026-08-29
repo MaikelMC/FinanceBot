@@ -133,5 +133,28 @@ class TestEnrutadoConsulta(unittest.TestCase):
         self.assertNotIn("999", texto)
 
 
+class TestHistorialHormiga(unittest.TestCase):
+    def setUp(self):
+        database.crear_tablas()
+        self.usuario = database.obtener_o_crear_usuario(890000003, "Hist")
+        self.mon = database.crear_moneda(self.usuario["id"], "Peso", "", "CUP", es_default=True)
+
+    def test_fast_path_historial_y_transacciones(self):
+        for msg in ("historial de mis gastos hormiga", "transacciones de mis hormigas",
+                    "ver mis hormiguitos", "el historial de gastos hormiga"):
+            r = intent_parser._fast_path(msg)
+            self.assertIsNotNone(r, f"fast-path no capturó: {msg}")
+            self.assertEqual(r["subconsulta"], "gastos_hormiga", msg)
+
+    def test_reporte_lista_transacciones(self):
+        txn = database.agregar_transaccion(self.usuario["id"], 0, "gasto", 50.0,
+                                          "café en la esquina", self.mon["id"])
+        database.registrar_gasto_hormiga(txn["id"], self.usuario["id"], "Café", 50.0, self.mon["id"])
+        texto = knowledge._procesar_gastos_hormiga(self.usuario, dias=30, etiqueta="últimos 30 días")
+        self.assertIn("Historial", texto)
+        self.assertIn("café en la esquina", texto)
+        self.assertIn("Café", texto)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

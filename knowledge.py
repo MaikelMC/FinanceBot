@@ -439,6 +439,21 @@ def _procesar_gastos_hormiga(usuario: Dict[str, Any], dias: int = 30, etiqueta: 
         ]
         for cat in stats.get("por_categoria", []):
             lineas.append(f"  • {cat['categoria']}: {formato.fmt_monto(cat['total'])} ({cat['cantidad']})")
+
+        # --- Historial de transacciones hormiga ---
+        lineas.append("")
+        lineas.append(f"{formato.EMOJI_INFO} **Historial de gastos hormiga:**")
+        for g in gastos[:15]:
+            fecha = (g.get("transaccion_fecha") or g.get("fecha") or "")[:10]
+            cat = g.get("categoria") or "Sin categoría"
+            monto = formato.fmt_moneda(
+                g.get("monto", 0.0),
+                simbolo=g.get("moneda_simbolo"),
+                abrev=g.get("moneda_abreviatura"),
+            )
+            desc = _limpiar_descripcion(g.get("transaccion_descripcion", "") or "")
+            lineas.append(f"  • {fecha} · {cat}: {monto} — {desc}")
+
         if total > 0:
             ahorro = round(total * 0.8, 2)
             lineas.append("")
