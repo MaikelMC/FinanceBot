@@ -125,6 +125,12 @@ def _crear_botones_pendiente(pendiente: dict, usuario_id: int) -> Optional[Inlin
                 InlineKeyboardButton("❌ Cancelar", callback_data="pendiente_cancel"),
             ],
         ])
+    if accion == "ver_todas":
+        tipo = pendiente.get("tipo") or "all"
+        etiqueta = "📂 Ver todas las transacciones"
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(etiqueta, callback_data=f"ver_todas:{tipo}")],
+        ])
     return None
 
 
@@ -1516,6 +1522,15 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         elif query.data == "exp_cancel":
             context.user_data.pop("exp_formato", None)
             await _responder_editando(query, "❌ Exportación cancelada.")
+
+        # === CALLBACKS DE "VER TODAS" LAS TRANSACCIONES ===
+        elif query.data.startswith("ver_todas"):
+            context.user_data.pop("transaccion_pendiente", None)
+            partes = query.data.split(":", 1)
+            tipo_cb = partes[1] if len(partes) > 1 else "all"
+            tipo_filtro = {"all": None, "gasto": "gasto", "ingreso": "ingreso"}.get(tipo_cb, None)
+            texto = knowledge._procesar_transacciones_todas(usuario, tipo_filtro)
+            await _responder_seguro(query.message, texto, reply_markup=_crear_teclado_principal())
 
     except Exception as e:
         logger.error("Error en callback query: %s", e)

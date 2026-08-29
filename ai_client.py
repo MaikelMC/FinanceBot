@@ -124,7 +124,9 @@ class AIResponder:
 
         # --- CONSULTAR ---
         if intencion == "consultar":
-            return self._procesar_consulta(resultado, usuario, mensaje), None
+            texto = self._procesar_consulta(resultado, usuario, mensaje)
+            pend = resultado.get("_pendiente_consulta")
+            return texto, pend
 
         # --- ANALIZAR POR FECHA ---
         if intencion == "analizar_por_fecha":
@@ -360,14 +362,20 @@ class AIResponder:
             if subconsulta == "balance":
                 return _procesar_balance(usuario)
             elif subconsulta == "transacciones":
-                return _procesar_transacciones(usuario, fecha_inicio=pf_inicio,
-                                               fecha_fin=pf_fin, periodo_label=etiqueta if explicito else None)
+                texto = _procesar_transacciones(usuario, fecha_inicio=pf_inicio,
+                                                fecha_fin=pf_fin, periodo_label=etiqueta if explicito else None)
+                self._marcar_ver_todas(resultado, usuario, None)
+                return texto
             elif subconsulta == "gastos":
-                return _procesar_gastos(usuario, fecha_inicio=pf_inicio,
-                                        fecha_fin=pf_fin, periodo_label=etiqueta if explicito else None)
+                texto = _procesar_gastos(usuario, fecha_inicio=pf_inicio,
+                                         fecha_fin=pf_fin, periodo_label=etiqueta if explicito else None)
+                self._marcar_ver_todas(resultado, usuario, "gasto")
+                return texto
             elif subconsulta == "ingresos":
-                return _procesar_ingresos(usuario, fecha_inicio=pf_inicio,
-                                          fecha_fin=pf_fin, periodo_label=etiqueta if explicito else None)
+                texto = _procesar_ingresos(usuario, fecha_inicio=pf_inicio,
+                                           fecha_fin=pf_fin, periodo_label=etiqueta if explicito else None)
+                self._marcar_ver_todas(resultado, usuario, "ingreso")
+                return texto
             elif subconsulta == "gastos_hormiga":
                 return _procesar_gastos_hormiga(usuario, dias=dias, etiqueta=etiqueta)
             elif subconsulta == "presupuesto":
@@ -395,6 +403,16 @@ class AIResponder:
         except Exception as e:
             logger.error("Error en consulta: %s", e)
             return "❌ Ocurrió un error al consultar tus datos."
+
+    def _marcar_ver_todas(self, resultado: dict, usuario: Dict[str, Any], tipo: Optional[str]) -> None:
+        """Marca en `resultado` que la vista debe ofrecer el botón 'Ver todas' si hay
+        más de 10 transacciones (el reporte solo muestra las últimas 10)."""
+        try:
+            total = len(database.obtener_transacciones(usuario["id"], 100000, tipo))
+        except Exception:
+            total = 0
+        if total > 10:
+            resultado["_pendiente_consulta"] = {"accion": "ver_todas", "tipo": tipo}
 
     def _procesar_analisis_fecha(self, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa un análisis de transacciones por fecha."""
