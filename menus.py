@@ -67,6 +67,7 @@ CB_MAS_NOTIF = "menu_mas_notificaciones"
 CB_MAS_EXPORTAR = "menu_mas_exportar"
 CB_MAS_RESUMEN = "menu_mas_resumen"
 CB_MAS_BORRAR = "menu_mas_borrar"
+CB_MAS_SOPORTE = "menu_mas_soporte"
 CB_DELETE_CONF = "menu_delete_confirm"
 CB_DELETE_CANCEL = "menu_delete_cancel"
 
@@ -233,6 +234,7 @@ def menu_mas() -> Tuple[str, InlineKeyboardMarkup]:
             [("📤 Exportar", CB_MAS_EXPORTAR)],
             [("📅 Resumen del mes", CB_MAS_RESUMEN)],
             [("🗑️ Borrar historial", CB_MAS_BORRAR)],
+            [("🎫 Soporte", CB_MAS_SOPORTE)],
         ],
     )
 
@@ -598,6 +600,9 @@ def _render(data: str, usuario: dict) -> Optional[Tuple[str, InlineKeyboardMarku
         return _con_botones(knowledge._procesar_resumen_mensual(usuario), [], volver=CB_MAS)
     if data == CB_MAS_BORRAR:
         return _confirmar_borrar_historial()
+    if data == CB_MAS_SOPORTE:
+        from handlers import _crear_teclado_soporte, _texto_soporte
+        return _texto_soporte(), _crear_teclado_soporte()
     if data == CB_DELETE_CONF:
         eliminadas = database.eliminar_transacciones(usuario["id"])
         texto = f"🗑️ **Historial eliminado.** Se borraron **{eliminadas}** transacciones.\n\nTu balance ahora está en $0.00."

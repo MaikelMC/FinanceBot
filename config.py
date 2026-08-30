@@ -21,6 +21,10 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 # ID de Telegram del admin (dueño del bot). Solo él puede usar /anuncio.
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 
+# @username de Telegram del admin (opcional). Si está configurado, el menú de
+# /soporte ofrece un botón "Escribir al admin directo" (t.me/<usuario>).
+ADMIN_TELEGRAM_USERNAME = os.getenv("ADMIN_TELEGRAM_USERNAME", "").strip().lstrip("@")
+
 # Backend de base de datos: "sqlite" (default) o "gsheets"
 DB_BACKEND = os.getenv("DB_BACKEND", "sqlite").lower()
 

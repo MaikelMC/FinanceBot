@@ -25,7 +25,7 @@ import notificaciones
 import menus
 import metricas
 import validators
-from config import IMAGES_DIR, ADMIN_USER_ID
+from config import IMAGES_DIR, ADMIN_USER_ID, ADMIN_TELEGRAM_USERNAME
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,30 @@ def _formatear_notificacion(ultima_vista: Optional[str]) -> Optional[str]:
 def _crear_teclado_principal() -> InlineKeyboardMarkup:
     """Botones principales de navegación (menú principal inline)."""
     return menus.teclado_principal()
+
+
+def _crear_teclado_soporte() -> InlineKeyboardMarkup:
+    """Menú de soporte: reportar un problema o escribir al admin directo."""
+    filas = [
+        [InlineKeyboardButton("📤 Enviar reporte", callback_data="soporte:reporte")],
+    ]
+    if ADMIN_TELEGRAM_USERNAME:
+        filas.append([
+            InlineKeyboardButton("💬 Escribir al admin directo", callback_data="soporte:directo"),
+        ])
+    filas.append([InlineKeyboardButton("❌ Cancelar", callback_data="soporte:cancelar")])
+    return InlineKeyboardMarkup(filas)
+
+
+def _texto_soporte() -> str:
+    """Texto de cabecera del menú de soporte."""
+    return (
+        "🎫 **Soporte**\n"
+        f"{'─' * 20}\n"
+        "¿Cómo prefieres contactar al administrador?\n\n"
+        "• **Enviar reporte**: cuéntame el problema y le llega un ticket al admin.\n"
+        + ("• **Escribir directo**: chatear con el admin en su Telegram personal.\n" if ADMIN_TELEGRAM_USERNAME else "")
+    )
 
 
 def _crear_botones_multi_transacciones(cantidad: int) -> InlineKeyboardMarkup:
@@ -897,9 +921,9 @@ async def _enviar_ticket(context: ContextTypes.DEFAULT_TYPE, msg, user, texto: s
 
 
 async def soporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /soporte: crea un ticket de reporte que llega al admin.
+    """Comando /soporte: reportar un problema o escribir al admin directo.
 
-    Uso: /soporte <texto>  o  /soporte (y luego escribir el reporte).
+    Uso: /soporte <texto>  (ticket rápido)  o  /soporte (menú con opciones).
     """
     user = update.effective_user
     msg = update.message
@@ -912,13 +936,10 @@ async def soporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _enviar_ticket(context, msg, user, texto_directo)
         return
 
-    context.user_data["esperando_soporte"] = True
     await msg.reply_text(
-        "🎫 **Soporte**\n\n"
-        "Cuéntame qué ocurrió en tu próximo mensaje "
-        "(mientras más detalle, mejor).\n\n"
-        "Escribe *cancelar* para salir sin enviar nada.",
+        _texto_soporte(),
         parse_mode="Markdown",
+        reply_markup=_crear_teclado_soporte(),
     )
 
 
@@ -1522,6 +1543,43 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         elif query.data == "exp_cancel":
             context.user_data.pop("exp_formato", None)
             await _responder_editando(query, "❌ Exportación cancelada.")
+
+        # === CALLBACKS DE SOPORTE ===
+        elif query.data.startswith("soporte:"):
+            accion = query.data.split(":", 1)[1]
+            if accion == "reporte":
+                context.user_data["esperando_soporte"] = True
+                await _responder_editando(
+                    query,
+                    "🎫 **Soporte — Enviar reporte**\n\n"
+                    "Cuéntame qué ocurrió en tu próximo mensaje "
+                    "(mientras más detalle, mejor).\n\n"
+                    "Escribe *cancelar* para salir sin enviar nada.",
+                )
+            elif accion == "directo":
+                if ADMIN_TELEGRAM_USERNAME:
+                    kb = InlineKeyboardMarkup([[
+                        InlineKeyboardButton(
+                            "💬 Abrir chat con el admin",
+                            url=f"https://t.me/{ADMIN_TELEGRAM_USERNAME}",
+                        )
+                    ]])
+                    await _responder_editando(
+                        query,
+                        "💬 **Escribir al admin directo**\n\n"
+                        "Toca el botón para abrir el chat con el administrador "
+                        "en su Telegram personal. Menciónale que vienes del bot.",
+                        kb,
+                    )
+                else:
+                    await _responder_editando(
+                        query,
+                        "💬 El contacto directo no está habilitado por ahora. "
+                        "Usa **Enviar reporte** para que el admin te contacte.",
+                    )
+            else:
+                context.user_data.pop("esperando_soporte", None)
+                await _responder_editando(query, "❌ Soporte cancelado.")
 
         # === CALLBACKS DE "VER TODAS" LAS TRANSACCIONES ===
         elif query.data.startswith("ver_todas"):

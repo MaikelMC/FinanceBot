@@ -52,7 +52,7 @@ COMANDOS_MENU = [
     BotCommand("help", "Ver todos los comandos y ejemplos de uso"),
     BotCommand("user", "Ver tu información de usuario"),
     BotCommand("delete", "Borrar todo el historial de transacciones"),
-    BotCommand("soporte", "Reportar un problema al administrador"),
+    BotCommand("soporte", "Reportar un problema o escribir al admin"),
 ]
 
 
