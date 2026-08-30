@@ -22,7 +22,7 @@ def main():
     print("=" * 60)
     
     # Change to the script's directory
-    script_dir = pathlib.Path(__file__).parent
+    script_dir = pathlib.Path(__file__).resolve().parent.parent
     os.chdir(script_dir)
     
     print(f"Directorio actual: {os.getcwd()}")

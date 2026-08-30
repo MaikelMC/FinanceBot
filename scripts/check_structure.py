@@ -1,7 +1,10 @@
 import os
 import sys
 import sqlite3
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# El script vive en scripts/; la raíz del proyecto es el directorio padre.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.chdir(ROOT)
+sys.path.insert(0, ROOT)
 
 print("=== VERIFICACIÓN DE TODOS LOS MÓDULOS ===")
 

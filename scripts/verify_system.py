@@ -21,8 +21,8 @@ def main():
     print("VERIFICACIÓN DEL SISTEMA DEL BOT DE FINANZAS PERSONALES")
     print("=" * 60)
     
-    # Change to the script's directory
-    script_dir = pathlib.Path(__file__).parent
+    # El script vive en scripts/; la raíz del proyecto es el directorio padre.
+    script_dir = pathlib.Path(__file__).resolve().parent.parent
     os.chdir(script_dir)
     
     all_good = True

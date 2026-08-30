@@ -1,0 +1,405 @@
+PROMPT COMPLETO PARA OPENCODE: CORRECCIÓN DE PRESUPUESTOS Y BALANCE
+
+# 🎯 PROMPT: Integración Correcta de Presupuestos con Balance en FinanceBot
+## 📌 OBJETIVO
+**Problema actual:**
+- El balance muestra `Ingresos - Gastos Totales` sin considerar que los presupuestos reservan dinero
+- Cuando creas un presupuesto de $500, el balance sigue mostrando los $500 como disponibles
+- Los gastos asociados a presupuestos se cuentan DOBLE: una vez en la transacción y otra en el presupuesto
+**Solución requerida:**
+- El dinero de los presupuestos debe "apartarse" del balance disponible
+- Los gastos en presupuestos solo deben restarse UNA vez
+- El balance real debe ser: `Ingresos - Gastos fuera de presupuestos - (Presupuestos planeados - Gastos en presupuestos)`
+---
+## 🔍 ANÁLISIS DEL CÓDIGO ACTUAL
+### En `database_gsheets.py`:
+1. **`obtener_balance()` (línea ~580):**
+   - Solo calcula: `ingresos - gastos`
+   - NO considera el dinero reservado en presupuestos
+   - **Problema:** El balance no refleja el dinero reservado
+2. **`_actualizar_gasto_presupuesto()` (línea ~515):**
+   - Solo actualiza `cantidad_gastada` del presupuesto
+   - NO afecta el cálculo del balance
+   - **Problema:** Los gastos en presupuestos se cuentan en el balance general Y en el presupuesto
+3. **`agregar_transaccion()` (línea ~490):**
+   - Registra todas las transacciones
+   - Si es gasto con categoría, actualiza presupuesto
+   - **Problema:** No distingue entre gastos en presupuestos vs fuera de presupuestos
+### En `knowledge.py`:
+1. **`_procesar_gasto()` (línea ~100):**
+   - Detecta si el gasto está asociado a presupuesto
+   - Registra la transacción
+   - **Problema:** No marca la transacción como "perteneciente a presupuesto"
+---
+## ✅ SOLUCIÓN DETALLADA
+### 1. Añadir columna `es_presupuesto` a transacciones
+**En `database_gsheets.py` y `database_sqlite.py`:**
+```python
+# En SHEET_COLUMNS (Google Sheets)
+"transacciones": [
+    "id", "usuario_id", "categoria_id", "tipo", "cantidad",
+    "descripcion", "moneda_id", "fecha", "created_at", "es_presupuesto"  # ← NUEVO
+]
+# En SQLite (database_sqlite.py)
+cursor.execute("""
+    ALTER TABLE transacciones ADD COLUMN es_presupuesto INTEGER DEFAULT 0
+""")
+2. Modificar agregar_transaccion() para aceptar es_presupuesto
+En database_gsheets.py (línea ~490):
+def agregar_transaccion(self, usuario_id: int, categoria_id: int, tipo: str, cantidad: float,
+                       descripcion: str = "", moneda_id: Optional[int] = None,
+                       es_presupuesto: bool = False) -> Dict[str, Any]:
+    """Agrega una transacción. es_presupuesto=True si el gasto está asociado a un presupuesto."""
+    with LOCK:
+        # Validar cantidad
+        try:
+            cantidad = round(float(cantidad), 2)
+        except (TypeError, ValueError):
+            cantidad = 0.0
+        if cantidad <= 0:
+            raise ValueError("La cantidad debe ser mayor a 0")
+        # Moneda default si no se especifica
+        if moneda_id is None:
+            monedas = self.obtener_monedas(usuario_id)
+            for m in monedas:
+                if m.get("es_default"):
+                    moneda_id = m["id"]
+                    break
+        trans = self._cache.get("transacciones", [])
+        tid = self._next_id("transacciones")
+        now = self._now()
+        nueva = {
+            "id": tid,
+            "usuario_id": usuario_id,
+            "categoria_id": categoria_id,
+            "tipo": tipo,
+            "cantidad": cantidad,
+            "descripcion": descripcion,
+            "moneda_id": moneda_id or "",
+            "fecha": now,
+            "created_at": now,
+            "es_presupuesto": 1 if es_presupuesto else 0,  # ← NUEVO
+        }
+        trans.append(nueva)
+        # Solo actualizar presupuesto si es gasto Y está marcado como presupuesto
+        if tipo == "gasto" and categoria_id and es_presupuesto:
+            self._actualizar_gasto_presupuesto(usuario_id, categoria_id, cantidad)
+        self._schedule_flush()
+        return dict(nueva)
+En database_sqlite.py (similar):
+def agregar_transaccion(usuario_id: int, categoria_id: int, tipo: str, cantidad: float,
+                       descripcion: str = "", moneda_id: Optional[int] = None,
+                       es_presupuesto: bool = False) -> Dict[str, Any]:
+    # ... código existente ...
+    cursor.execute(
+        """INSERT INTO transacciones
+        (usuario_id, categoria_id, tipo, cantidad, descripcion, moneda_id, fecha, es_presupuesto)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (usuario_id, categoria_id, tipo, cantidad, descripcion, moneda_id, now, 1 if es_presupuesto else 0)
+    )
+    # Solo actualizar presupuesto si es gasto Y está marcado como presupuesto
+    if tipo == "gasto" and categoria_id and es_presupuesto:
+        cursor.execute("""
+            UPDATE presupuestos SET cantidad_gastada = cantidad_gastada + ?
+            WHERE categoria_id = ? AND usuario_id = ?
+            ORDER BY fecha_inicio DESC LIMIT 1
+        """, (cantidad, categoria_id, usuario_id))
+    # ... resto del código ...
+3. Modificar obtener_balance() para calcular correctamente
+En database_gsheets.py (línea ~580):
+def obtener_balance(self, usuario_id: int, fecha_inicio: Optional[str] = None) -> Dict[str, Any]:
+    """Calcula el balance REAL considerando presupuestos.
+    
+    Fórmula: Balance = Ingresos - Gastos fuera de presupuestos - (Presupuestos planeados - Gastos en presupuestos)
+    """
+    if fecha_inicio is None:
+        from . import inicio_mes_actual
+        fecha_inicio = inicio_mes_actual()
+    trans = self._cache.get("transacciones", [])
+    pres = self._cache.get("presupuestos", [])
+    monedas = self.obtener_monedas(usuario_id)
+    moneda_lookup = {str(m["id"]): m for m in monedas}
+    moneda_default = next((m for m in monedas if m.get("es_default")), None)
+    # Inicializar contadores
+    ingresos = 0.0
+    gastos_fuera_presupuestos = 0.0
+    gastos_en_presupuestos = 0.0
+    por_moneda: Dict[str, Dict[str, float]] = {}
+    # 1. Procesar transacciones
+    for t in trans:
+        if int(t.get("usuario_id", 0)) != usuario_id:
+            continue
+        if fecha_inicio and str(t.get("fecha", "")) < fecha_inicio:
+            continue
+        try:
+            cant = float(t.get("cantidad", 0))
+        except (TypeError, ValueError):
+            cant = 0.0
+        # Determinar moneda
+        mid = str(t.get("moneda_id", ""))
+        if mid and mid in moneda_lookup:
+            m = moneda_lookup[mid]
+            key = m["abreviatura"]
+        elif moneda_default:
+            key = moneda_default["abreviatura"]
+            mid = str(moneda_default["id"])
+        else:
+            key = "Sin moneda"
+        if key not in por_moneda:
+            por_moneda[key] = {
+                "ingresos": 0.0, "gastos": 0.0, "gastos_presupuesto": 0.0,
+                "simbolo": "", "nombre": ""
+            }
+        if mid in moneda_lookup:
+            por_moneda[key]["simbolo"] = moneda_lookup[mid].get("simbolo", "$")
+            por_moneda[key]["nombre"] = moneda_lookup[mid].get("nombre", key)
+        elif moneda_default:
+            por_moneda[key]["simbolo"] = moneda_default.get("simbolo", "$")
+            por_moneda[key]["nombre"] = moneda_default.get("nombre", key)
+        # Clasicar transacción
+        if t.get("tipo") == "ingreso":
+            por_moneda[key]["ingresos"] += cant
+            ingresos += cant
+        elif t.get("tipo") == "gasto":
+            # Separar gastos en presupuestos vs fuera de presupuestos
+            if t.get("es_presupuesto", 0):
+                por_moneda[key]["gastos_presupuesto"] += cant
+                gastos_en_presupuestos += cant
+            else:
+                por_moneda[key]["gastos"] += cant
+                gastos_fuera_presupuestos += cant
+    # 2. Calcular dinero reservado en presupuestos
+    presupuesto_planeado_total = 0.0
+    presupuesto_gastado_total = 0.0
+    for p in pres:
+        if int(p.get("usuario_id", 0)) != usuario_id:
+            continue
+        if fecha_inicio and str(p.get("fecha_inicio", "")) < fecha_inicio:
+            continue
+        planeado = float(p.get("cantidad_planejada", 0))
+        gastado = float(p.get("cantidad_gastada", 0))
+        presupuesto_planeado_total += planeado
+        presupuesto_gastado_total += gastado
+    # 3. Calcular balance real
+    dinero_reservado = presupuesto_planeado_total - presupuesto_gastado_total
+    balance_real = ingresos - gastos_fuera_presupuestos - dinero_reservado
+    # 4. Calcular neto por moneda (simplificado)
+    for key, datos in por_moneda.items():
+        datos["neto"] = datos["ingresos"] - datos["gastos"] - datos.get("gastos_presupuesto", 0)
+    return {
+        "ingresos": round(ingresos, 2),
+        "gastos": round(gastos_fuera_presupuestos + gastos_en_presupuestos, 2),
+        "gastos_fuera_presupuestos": round(gastos_fuera_presupuestos, 2),
+        "gastos_en_presupuestos": round(gastos_en_presupuestos, 2),
+        "presupuestos_planeados": round(presupuesto_planeado_total, 2),
+        "presupuestos_gastados": round(presupuesto_gastado_total, 2),
+        "dinero_reservado": round(dinero_reservado, 2),
+        "neto": round(balance_real, 2),
+        "por_moneda": por_moneda,
+    }
+4. Modificar _procesar_gasto() para marcar gastos en presupuestos
+En knowledge.py (línea ~100):
+def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict[str, Any]] = None,
+                    categoria_sugerida: Optional[str] = None,
+                    presupuesto: Optional[Dict[str, Any]] = None) -> str:
+    """Procesa una transacción de gasto."""
+    cantidad, err_monto = validators.validar_monto(mensaje)
+    if err_monto:
+        return err_monto
+    moneda_id = moneda["id"] if moneda else None
+    try:
+        # Detectar presupuesto en el mensaje
+        if presupuesto is None:
+            presupuesto = _detectar_presupuesto_en_gasto(mensaje, usuario)
+        # Reutilizar la moneda del presupuesto
+        if moneda_id is None and presupuesto and presupuesto.get("moneda_id"):
+            for m in database.obtener_monedas(usuario["id"]):
+                if m["id"] == presupuesto["moneda_id"]:
+                    moneda = m
+                    moneda_id = m["id"]
+                    break
+        # Determinar si es gasto en presupuesto
+        es_presupuesto = presupuesto is not None
+        if presupuesto:
+            categoria_id = presupuesto["categoria_id"]
+            categoria = presupuesto.get("categoria_nombre") or presupuesto.get("nombre") or "otros"
+        else:
+            categoria, categoria_id = _categorizar_operacion(usuario, mensaje, "gasto", categoria_sugerida)
+            if categoria_id is None:
+                raise Exception(f"No se pudo crear/asociar la categoría '{categoria}'")
+        gastado_antes = presupuesto.get("cantidad_gastada", 0) if presupuesto else 0
+        descripcion, _err_desc = validators.validar_descripcion(mensaje)
+        # PASAR es_presupuesto a agregar_transaccion
+        database.agregar_transaccion(
+            usuario["id"], categoria_id, "gasto", cantidad,
+            descripcion or mensaje, moneda_id=moneda_id, es_presupuesto=es_presupuesto
+        )
+        metricas.registrar_transaccion()
+        simbolo = moneda.get("simbolo", "$") if moneda else "$"
+        nombre_moneda = f" ({moneda['nombre']})" if moneda else ""
+        if presupuesto:
+            updated = next(
+                (p for p in database.obtener_presupuestos(usuario["id"]) if p.get("id") == presupuesto.get("id")),
+                None,
+            )
+            if updated:
+                label = presupuesto.get("nombre") or categoria
+                planeado = updated.get("cantidad_planejada", 0)
+                gastado = updated.get("cantidad_gastada", 0)
+                restante = max(planeado - gastado, 0)
+                pct = (gastado / planeado * 100) if planeado > 0 else 0
+                moneda_b = None
+                if updated.get("moneda_id"):
+                    for m in database.obtener_monedas(usuario["id"]):
+                        if m["id"] == updated["moneda_id"]:
+                            moneda_b = m
+                            break
+                s_b = moneda_b.get("simbolo", "$") if moneda_b else "$"
+                abrev_b = moneda_b.get("abreviatura", "") if moneda_b else ""
+                texto = (
+                    f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev_b)}** "
+                    f"del presupuesto de **{label}**\n"
+                    f"{formato.EMOJI_PRESUPUESTO} **{label}**: {formato.fmt_moneda(planeado, abrev=abrev_b)} planeado, "
+                    f"{formato.fmt_moneda(gastado, abrev=abrev_b)} usado (**{pct:.0f}%**). "
+                    f"Te quedan **{formato.fmt_moneda(restante, abrev=abrev_b)}**.\n"
+                )
+                # Mostrar balance actualizado
+                balance_actual = database.obtener_balance(usuario["id"])
+                texto += f"{formato.EMOJI_BALANCE} Balance disponible: **{formato.fmt_moneda(balance_actual['neto'])}**"
+                try:
+                    from notificaciones import verificar_alertas_presupuesto
+                    prefs = database.obtener_preferencias(usuario["id"])
+                    alerta = verificar_alertas_presupuesto(
+                        prefs, planeado, gastado_antes, gastado, label,
+                        s_b, moneda_b.get("abreviatura", "") if moneda_b else "",
+                    )
+                    if alerta:
+                        texto += "\n\n" + alerta
+                except Exception as e:
+                    logger.error("Error generando alerta de presupuesto: %s", e)
+                return texto
+        abrev = moneda.get("abreviatura", "") if moneda else ""
+        return f"{formato.EMOJI_OK} Gasto registrado: **{formato.fmt_moneda(cantidad, abrev=abrev)}** en **{categoria}**"
+    except Exception as e:
+        logger.error("Error al procesar gasto: %s", e)
+        return f"{formato.EMOJI_ERROR} Ocurrió un error al registrar tu gasto: **{formato.fmt_monto(cantidad)}**. Intenta de nuevo."
+5. Modificar _procesar_balance() para mostrar información de presupuestos
+En knowledge.py:
+def _procesar_balance(usuario: Dict[str, Any]) -> str:
+    """Muestra el balance con información de presupuestos."""
+    try:
+        balance = database.obtener_balance(usuario["id"])
+        por_moneda = balance.get("por_moneda", {})
+        lineas = [
+            formato.header(formato.EMOJI_BALANCE, f"Balance de {formato.nombre_mes_actual()}"),
+            formato.SEPARADOR,
+        ]
+        if len(por_moneda) > 1 or (len(por_moneda) == 1 and list(por_moneda.keys()) != ["Sin moneda"]):
+            for abrev, datos in por_moneda.items():
+                neto_m = datos["ingresos"] - datos["gastos"]
+                lineas.append("")
+                lineas.append(f"**{abrev}**")
+                lineas.append(
+                    f"{formato.EMOJI_INGRESO} {formato.fmt_moneda(datos['ingresos'])}   "
+                    f"{formato.EMOJI_GASTO} {formato.fmt_moneda(datos['gastos'])}   "
+                    f"→ **{formato.fmt_moneda(neto_m)}**"
+                )
+        else:
+            lineas.append(f"{formato.EMOJI_INGRESO} Ingresos: {formato.fmt_moneda(balance['ingresos'])}")
+            lineas.append(f"{formato.EMOJI_GASTO} Gastos: {formato.fmt_moneda(balance['gastos'])}")
+            lineas.append(f"Neto: **{formato.fmt_moneda(balance['neto'])}**")
+        # Añadir información de presupuestos
+        dinero_reservado = balance.get("dinero_reservado", 0)
+        if dinero_reservado > 0:
+            lineas.append("")
+            lineas.append(f"{formato.EMOJI_PRESUPUESTO} **Dinero reservado en presupuestos:** {formato.fmt_moneda(dinero_reservado)}")
+            lineas.append(f"   (Planeado: {formato.fmt_moneda(balance.get('presupuestos_planeados', 0))} - "
+                        f"Gastado: {formato.fmt_moneda(balance.get('presupuestos_gastados', 0))})")
+        lineas.append("")
+        lineas.append("¿Ver transacciones recientes o configurar un presupuesto?")
+        return "\n".join(lineas)
+    except Exception as e:
+        logger.error("Error al obtener balance: %s", e)
+        return "\u274c Ocurrió un error al obtener tu balance."
+6. Añadir función de migración para datos existentes
+En database_gsheets.py:
+def migrar_transacciones_presupuestos(self) -> int:
+    """Migra transacciones existentes para marcar las asociadas a presupuestos."""
+    with LOCK:
+        trans = self._cache.get("transacciones", [])
+        pres = self._cache.get("presupuestos", [])
+        # Obtener todas las categorías que tienen presupuestos
+        categorias_con_presupuesto = set()
+        for p in pres:
+            cid = p.get("categoria_id")
+            if cid:
+                categorias_con_presupuesto.add(str(cid))
+        # Marcar transacciones de gasto en categorías con presupuesto
+        actualizadas = 0
+        for t in trans:
+            if t.get("tipo") == "gasto":
+                cid = str(t.get("categoria_id", ""))
+                if cid in categorias_con_presupuesto:
+                    if "es_presupuesto" not in t:
+                        t["es_presupuesto"] = 1
+                        actualizadas += 1
+                    elif t.get("es_presupuesto", 0) == 0:
+                        t["es_presupuesto"] = 1
+                        actualizadas += 1
+        if actualizadas > 0:
+            self._cache_dirty.add("transacciones")
+            self._schedule_flush()
+            logger.info("Migración: %d transacciones marcadas como de presupuesto", actualizadas)
+        return actualizadas
+📊 EJEMPLOS DE COMPORTAMIENTO
+Escenario 1: Sin presupuestos
+Usuario: Recibí $1000 de salario
+Balance: Ingresos $1000, Gastos $0, Neto $1000
+Escenario 2: Crear presupuesto
+Usuario: Mi presupuesto para comida es $500
+Balance: Ingresos $1000, Gastos $0, Neto $500
+        Dinero reservado: $500 (Planeado: $500 - Gastado: $0)
+Escenario 3: Gasto en presupuesto
+Usuario: Gasté $100 en comida
+Balance: Ingresos $1000, Gastos $100, Neto $500
+        Dinero reservado: $400 (Planeado: $500 - Gastado: $100)
+Escenario 4: Gasto fuera de presupuesto
+Usuario: Gasté $50 en cine
+Balance: Ingresos $1000, Gastos $150, Neto $450
+        Dinero reservado: $400 (Planeado: $500 - Gastado: $100)
+🧪 PRUEBAS RECOMENDADAS
+ 1. Balance inicial: Registrar ingresos y verificar balance
+ 2. Crear presupuesto: Verificar que el balance disponible disminuye
+ 3. Gasto en presupuesto: Verificar que el balance y el presupuesto se actualicen correctamente
+ 4. Gasto fuera de presupuesto: Verificar que solo afecte el balance
+ 5. Múltiples presupuestos: Verificar cálculos con varios presupuestos activos
+ 6. Migración: Ejecutar migración y verificar que las transacciones existentes se marquen correctamente
+📁 ARCHIVOS A MODIFICAR
+FinanceBot/
+├── database_gsheets.py      # ✅ obtener_balance(), agregar_transaccion(), migrar_transacciones_presupuestos()
+├── database_sqlite.py       # ✅ Mismos cambios para SQLite
+├── knowledge.py             # ✅ _procesar_gasto(), _procesar_balance()
+└── main.py                  # ✅ (Opcional: comando /migrar_presupuestos)
+🎯 CHECKLIST DE IMPLEMENTACIÓN
+- Añadir columna es_presupuesto a transacciones en ambos backends
+- Modificar agregar_transaccion() para aceptar y usar es_presupuesto
+- Modificar obtener_balance() para calcular balance real
+- Modificar _procesar_gasto() para pasar es_presupuesto=True
+- Modificar _procesar_balance() para mostrar información de presupuestos
+- Añadir función de migración para datos existentes
+- Probar todos los escenarios
+- Ejecutar migración de datos
+🚀 PROMPT FINAL PARA OPENCODE
+Tarea: Implementar la corrección de la lógica de presupuestos y balance como se describe en este documento.
+Requisitos:
+ 1. Los presupuestos deben reservar dinero del balance disponible
+ 2. Los gastos en presupuestos no deben contarse dos veces
+ 3. El balance debe mostrar: Ingresos - Gastos fuera - (Presupuestos planeados - Gastos en presupuestos)
+ 4. Mantener compatibilidad con datos existentes mediante migración
+ 5. Aplicar cambios a ambos backends (Google Sheets y SQLite)
+Prioridad:
+ 1. ✅ Modificar obtener_balance() con cálculo correcto
+ 2. ✅ Modificar agregar_transaccion() con parámetro es_presupuesto
+ 3. ✅ Modificar _procesar_gasto() para marcar gastos en presupuestos
+ 4. ✅ Añadir función de migración
+ 5. ✅ Probar todos los escenarios

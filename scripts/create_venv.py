@@ -31,7 +31,7 @@ def main():
     print("=" * 70)
     
     # Obtener el directorio actual
-    script_dir = pathlib.Path(__file__).parent
+    script_dir = pathlib.Path(__file__).resolve().parent.parent
     os.chdir(script_dir)
     
     print(f"\n📁 Directorio actual: {os.getcwd()}")

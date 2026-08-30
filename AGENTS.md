@@ -30,6 +30,9 @@ python -m venv venv && venv\\Scripts\\activate && pip install python-telegram-bo
 **Key directories:**
 - `data/` - SQLite DB, images
 - `prompts/` - System prompts
+- `tests/` - Suites unitarias pytest
+- `scripts/` - Setup de entorno, verificación y estructura
+- `docs/` - Documentación del proyecto (diseño, gastos hormiga, límites, etc.)
 
 ## Configuration
 
@@ -57,18 +60,23 @@ HORA_RESUMEN_DEFAULT=21:30        # Hora fija del resumen diario (para todos)
 
 **Set up fresh environment:**
 ```bash
-python create_venv.py          # Complete setup
-python setup_environment.py     # Quick setup
+python scripts/create_venv.py          # Complete setup
+python scripts/setup_environment.py     # Quick setup
 ```
 
 **Verify installation:**
 ```bash
-python verify_system.py         # Check all dependencies
+python scripts/verify_system.py         # Check all dependencies
 ```
 
 **Run verification:**
 ```bash
 python -c "import config, database, knowledge; config.validate_config(); database.crear_tablas(); print('✓ Config OK')"
+```
+
+**Run tests:**
+```bash
+python -m pytest -q          # desde la raíz; los tests viven en tests/
 ```
 
 ## Language & Intent Detection
@@ -158,12 +166,12 @@ python -c "import config, database, knowledge; config.validate_config(); databas
 
 **Run verification:**
 ```bash
-python verify_system.py
+python scripts/verify_system.py
 ```
 
 **Check structure:**
 ```bash
-python check_structure.py
+python scripts/check_structure.py
 ```
 
 ## Database Backends
@@ -194,7 +202,7 @@ Single package structure with clear boundaries:
 - `ai_client.py` - AI integration
 - `notificaciones.py` - Alerts + daily summary (sweep & catch-up)
 - `exportador.py` - Excel/CSV export + period resolution
-- `setup_environment.py` - Dev environment setup
+- `scripts/setup_environment.py` - Dev environment setup
 
 All dependencies in virtual environment - no global installs.
 

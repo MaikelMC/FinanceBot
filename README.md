@@ -63,11 +63,16 @@ Este es un **bot completo de finanzas personales** que el usuario solicitó. Ha 
 personal-finance-bot/
 ├── main.py                    # Punto de entrada del bot
 ├── config.py                  # Configuración centralizada
-├── database.py                # Esquema SQLite y APIs CRUD
+├── database.py                # Proxy SQLite/Google Sheets
+├── database_sqlite.py         # Data access layer SQLite
+├── database_gsheets.py        # Data access layer Google Sheets
 ├── handlers.py                # Detección de intenciones y routing
 ├── knowledge.py               # Lógica de IA y procesamiento de mensajes
-├── prompts/                  # Prompts del sistema (comentados)
-├── .env                      # Variables de entorno
+├── prompts/                   # Prompts del sistema (comentados)
+├── tests/                     # Suites unitarias pytest
+├── scripts/                   # Setup de entorno, verificación y estructura
+├── docs/                      # Documentación del proyecto
+├── .env                       # Variables de entorno
 ├── data/                      # Directorio de base de datos e imágenes
 └── README.md                  # Esta documentación
 ```

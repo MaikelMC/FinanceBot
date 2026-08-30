@@ -1,6 +1,6 @@
 """Helpers de presentación para los mensajes del bot.
 
-Sistema de diseño definido en `REDISENO MENSAJES.md`: emojis semánticos
+Sistema de diseño definido en `docs/REDISENO MENSAJES.md`: emojis semánticos
 (tabla cerrada), separador corto, montos con separador de miles y jerarquía
 de 3 niveles (título -> separador -> cuerpo).
 """

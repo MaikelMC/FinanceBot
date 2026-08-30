@@ -22,6 +22,8 @@ def run_command(cmd):
         return -1, "", str(e)
 
 def main():
+    # El script vive en scripts/; la raíz del proyecto es el directorio padre.
+    os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     print("=" * 70)
     print("CONFIGURANDO ENTORNO VIRTUAL - BOT DE FINANZAS PERSONALES")
     print("=" * 70)
