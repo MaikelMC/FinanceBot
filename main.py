@@ -192,6 +192,7 @@ def _build_app():
 
     modelo_ia = {
         "groq": config.GROQ_MODEL,
+        "gemini": config.GEMINI_MODEL,
         "mistral": config.MISTRAL_MODEL,
         "ollama": config.OLLAMA_MODEL,
     }.get(config.AI_PROVIDER, config.GROQ_MODEL)

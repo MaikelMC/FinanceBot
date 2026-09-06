@@ -588,7 +588,8 @@ def _mock_respuesta(mensaje: str) -> Dict[str, Any]:
 
 
 async def _call_ai(mensaje: str, usuario: Dict[str, Any]) -> Dict[str, Any]:
-    """Llama a la IA (Groq, Mistral u Ollama) y retorna el JSON analizado."""
+    """Llama a la IA en rotación (Groq -> Gemini -> Mistral -> Ollama)
+    y retorna el JSON analizado. Ante límites/cuota agotados pasa al siguiente."""
     logger.info("Enviando a IA para %s: %s", usuario.get("nombre", "?"), mensaje[:60])
 
     if config.AI_PROVIDER == "mock":
@@ -597,102 +598,162 @@ async def _call_ai(mensaje: str, usuario: Dict[str, Any]) -> Dict[str, Any]:
     contexto = _construir_contexto_usuario(usuario)
     user_content = _construir_prompt_usuario(mensaje, contexto)
 
-    # Intentar Groq (proveedor principal)
-    if config.AI_PROVIDER == "groq" and config.GROQ_API_KEY:
+    # Probar proveedores en rotación: si el primario agota cuota/límites o
+    # devuelve error, se pasa al siguiente con API key configurada.
+    for proveedor in _orden_proveedores():
         try:
-            from groq import Groq
-            client = Groq(api_key=config.GROQ_API_KEY)
-
-            import asyncio
-            chat_response = await asyncio.to_thread(
-                client.chat.completions.create,
-                model=config.GROQ_MODEL,
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content},
-                ],
-                temperature=0.1,
-                max_tokens=500,
-            )
-
-            texto = chat_response.choices[0].message.content
-            datos = _extraer_json(texto)
-
-            if datos:
-                return _validar_resultado(datos)
-
-            logger.warning("No se pudo extraer JSON de respuesta Groq: %s", texto[:200])
-
+            datos = await _llamar_proveedor(proveedor, user_content)
         except Exception as e:
-            logger.error("Error llamando a Groq: %s", e)
-
-    # Intentar Mistral
-    if config.AI_PROVIDER == "mistral" and config.MISTRAL_API_KEY:
-        try:
-            try:
-                from mistralai import Mistral
-            except ImportError:
-                from mistralai.client import Mistral
-            client = Mistral(api_key=config.MISTRAL_API_KEY)
-
-            import asyncio
-            chat_response = await asyncio.to_thread(
-                client.chat.complete,
-                model=config.MISTRAL_MODEL,
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content},
-                ],
-                temperature=0.1,
-                max_tokens=500,
-            )
-
-            texto = chat_response.choices[0].message.content
-            datos = _extraer_json(texto)
-
-            if datos:
-                return _validar_resultado(datos)
-
-            logger.warning("No se pudo extraer JSON de respuesta Mistral: %s", texto[:200])
-
-        except Exception as e:
-            logger.error("Error llamando a Mistral: %s", e)
-
-    # Intentar Ollama como fallback
-    if (config.AI_PROVIDER == "ollama"
-            or (config.AI_PROVIDER == "mistral" and not config.MISTRAL_API_KEY)
-            or (config.AI_PROVIDER == "groq" and not config.GROQ_API_KEY)):
-        try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                payload = {
-                    "model": config.OLLAMA_MODEL,
-                    "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": user_content},
-                    ],
-                    "stream": False,
-                    "options": {"temperature": 0.1},
-                }
-                async with session.post(
-                    f"{config.OLLAMA_BASE_URL}/api/chat",
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30),
-                ) as resp:
-                    data = await resp.json()
-                    texto = data.get("message", {}).get("content", "")
-
-            datos = _extraer_json(texto)
-            if datos:
-                return _validar_resultado(datos)
-
-            logger.warning("No se pudo extraer JSON de respuesta Ollama: %s", texto[:200])
-
-        except Exception as e:
-            logger.error("Error llamando a Ollama: %s", e)
+            logger.warning("Proveedor '%s' falló: %s", proveedor, e)
+            continue
+        if not datos:
+            continue
+        return _validar_resultado(datos)
 
     # Si todo falla, retornar vacío
     return dict(_RESULTADO_VACIO)
+
+
+# ------------------------------------------------------------
+# Proveedores de IA (rotación)
+# ------------------------------------------------------------
+
+def _orden_proveedores() -> list:
+    """Orden en que se intentan los proveedores de IA.
+
+    El proveedor fijado en AI_PROVIDER se prueba primero; los demás con API key
+    configurada lo siguen (rotación ante límites/cuota agotados). Ollama (local)
+    solo entra si está fijado o no hay ninguna API remota disponible.
+    """
+    remotos = []
+    for p in ("groq", "gemini", "mistral"):
+        var = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY",
+               "mistral": "MISTRAL_API_KEY"}[p]
+        if getattr(config, var, ""):
+            remotos.append(p)
+
+    prim = config.AI_PROVIDER
+    if prim == "ollama":
+        return ["ollama"] + remotos
+    if prim in remotos:
+        remotos.remove(prim)
+        remotos = [prim] + remotos
+    if not remotos:
+        return ["ollama"]
+    return remotos
+
+
+async def _llamar_proveedor(proveedor: str, user_content: str) -> Optional[Dict[str, Any]]:
+    """Llama a un proveedor y retorna el JSON extraído (None si falla o no es JSON)."""
+    if proveedor == "groq":
+        texto = await _llamada_groq(user_content)
+    elif proveedor == "gemini":
+        texto = await _llamada_gemini(user_content)
+    elif proveedor == "mistral":
+        texto = await _llamada_mistral(user_content)
+    elif proveedor == "ollama":
+        texto = await _llamada_ollama(user_content)
+    else:
+        return None
+
+    if not texto:
+        return None
+    datos = _extraer_json(texto)
+    if not datos:
+        logger.warning("No se pudo extraer JSON de respuesta %s: %s", proveedor, texto[:200])
+    return datos
+
+
+async def _llamada_groq(user_content: str) -> Optional[str]:
+    """Consulta a Groq; retorna el texto crudo o None."""
+    import asyncio
+    from groq import Groq
+    client = Groq(api_key=config.GROQ_API_KEY)
+    chat_response = await asyncio.to_thread(
+        client.chat.completions.create,
+        model=config.GROQ_MODEL,
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        temperature=0.1,
+        max_tokens=500,
+    )
+    return chat_response.choices[0].message.content
+
+
+async def _llamada_gemini(user_content: str) -> Optional[str]:
+    """Consulta a Google Gemini por REST (sin SDK) y retorna el texto crudo o None."""
+    import asyncio
+    import json as _json
+
+    def _sync():
+        import urllib.request
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
+        )
+        payload = {
+            "system_instruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
+            "contents": [{"role": "user", "parts": [{"text": user_content}]}],
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 500},
+        }
+        req = urllib.request.Request(
+            url,
+            data=_json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
+        )
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            data = _json.load(resp)
+        try:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    return await asyncio.to_thread(_sync)
+
+
+async def _llamada_mistral(user_content: str) -> Optional[str]:
+    """Consulta a Mistral; retorna el texto crudo o None."""
+    import asyncio
+    try:
+        from mistralai import Mistral
+    except ImportError:
+        from mistralai.client import Mistral
+    client = Mistral(api_key=config.MISTRAL_API_KEY)
+    chat_response = await asyncio.to_thread(
+        client.chat.complete,
+        model=config.MISTRAL_MODEL,
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        temperature=0.1,
+        max_tokens=500,
+    )
+    return chat_response.choices[0].message.content
+
+
+async def _llamada_ollama(user_content: str) -> Optional[str]:
+    """Consulta a Ollama local; retorna el texto crudo o None."""
+    import aiohttp
+    payload = {
+        "model": config.OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        "stream": False,
+        "options": {"temperature": 0.1},
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"{config.OLLAMA_BASE_URL}/api/chat",
+            json=payload,
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            data = await resp.json()
+    return data.get("message", {}).get("content", "")
 
 
 # ============================================================
@@ -705,7 +766,7 @@ async def analizar_intencion(mensaje: str, usuario: Dict[str, Any]) -> Dict[str,
 
     Pipeline:
     1. Fast-path regex (alta confianza, cero costo, ~80% de los mensajes)
-    2. IA (Groq, Mistral u Ollama, para el ~20% restante)
+    2. IA (Groq, Gemini, Mistral u Ollama en rotación, para el ~20% restante)
     3. Cache de resultados para evitar re-llamadas
 
     Args:

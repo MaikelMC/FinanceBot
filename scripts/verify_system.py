@@ -70,13 +70,15 @@ def main():
         config_tests = [
             ("TELEGRAM_BOT_TOKEN", len(config.TELEGRAM_BOT_TOKEN) > 0,
              f"Longitud: {len(config.TELEGRAM_BOT_TOKEN)}"),
-            ("AI_PROVIDER", config.AI_PROVIDER in ["groq", "mistral", "ollama"],
+            ("AI_PROVIDER", config.AI_PROVIDER in ["groq", "gemini", "mistral", "ollama"],
              f"Proveedor: {config.AI_PROVIDER}"),
             ("GROQ_API_KEY", len(config.GROQ_API_KEY) > 0,
              f"Clave: {config.GROQ_API_KEY[:20]}..." if config.GROQ_API_KEY else "No configurada"),
+            ("GEMINI_API_KEY", len(config.GEMINI_API_KEY) > 0,
+             f"Clave: {config.GEMINI_API_KEY[:20]}..." if config.GEMINI_API_KEY else "No configurada"),
             ("MISTRAL_API_KEY", len(config.MISTRAL_API_KEY) > 0,
              f"Clave: {config.MISTRAL_API_KEY[:20]}..." if config.MISTRAL_API_KEY else "No configurada"),
-            ("AI Provider válido", config.AI_PROVIDER in ["groq", "mistral", "ollama"],
+            ("AI Provider válido", config.AI_PROVIDER in ["groq", "gemini", "mistral", "ollama"],
              f"Proveedor seleccionado: {config.AI_PROVIDER}"),
         ]
         

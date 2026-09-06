@@ -127,12 +127,17 @@ def main():
 # Token del bot de Telegram (obtener de @BotFather)
 TELEGRAM_BOT_TOKEN=tu_token_aquí
 
-# Proveedor de IA: "groq" (default), "mistral" u "ollama"
+# Proveedor de IA primario: "groq", "gemini", "mistral" u "ollama".
+# El bot rota a los demás proveedores con key cuando el primario agota límites.
 AI_PROVIDER=groq
 
-# Configuración de Groq AI (si AI_PROVIDER es "groq")
+# Configuración de Groq AI
 GROQ_API_KEY=tu_clave_aquí
 GROQ_MODEL=openai/gpt-oss-120b
+
+# Configuración de Google Gemini (Google AI Studio)
+GEMINI_API_KEY=tu_clave_aquí
+GEMINI_MODEL=gemini-3.5-flash-lite
 
 # Configuración de Mistral AI
 MISTRAL_API_KEY=tu_clave_aquí

@@ -37,9 +37,13 @@ GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 
 AI_PROVIDER = os.getenv("AI_PROVIDER", "groq").lower()
 
-# Groq (proveedor principal)
+# Groq (proveedor primario)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
+# Google Gemini (Google AI Studio) - segundo en la rotación
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
@@ -115,6 +119,10 @@ def validate_config():
     if AI_PROVIDER == "groq" and not GROQ_API_KEY:
         raise ValueError(
             "AI_PROVIDER es 'groq' pero falta GROQ_API_KEY en .env"
+        )
+    if AI_PROVIDER == "gemini" and not GEMINI_API_KEY:
+        raise ValueError(
+            "AI_PROVIDER es 'gemini' pero falta GEMINI_API_KEY en .env"
         )
     if AI_PROVIDER == "mistral" and not MISTRAL_API_KEY:
         raise ValueError(
