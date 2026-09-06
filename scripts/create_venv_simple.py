@@ -61,6 +61,7 @@ def main():
     deps = [
         'python-telegram-bot>=22.8',
         'python-dotenv',
+        'groq',
         'mistralai',
         'Flask'
     ]

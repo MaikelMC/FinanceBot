@@ -55,17 +55,18 @@ def main():
         dependencies = [
             'python-telegram-bot',
             'python-dotenv',
+            'groq',
             'mistralai',
             'Flask'
         ]
-        
+
         deps_str = ' '.join(dependencies)
         code, out, err = run_command(f'"{pip_exe}" install {deps_str}')
         if code == 0:
             print("✅ Todas las dependencias instaladas exitosamente")
         else:
             print(f"❌ Error instalando dependencias: {err}")
-        
+
         # Instalar el paquete actual (bot de finanzas personales)
         print("📦 Instalando bot de finanzas personales...")
         code, out, err = run_command(f'"{pip_exe}" install -e .')
@@ -164,6 +165,7 @@ def main():
         dependencies = [
             'python-telegram-bot',
             'python-dotenv',
+            'groq',
             'mistralai',
             'Flask'
         ]

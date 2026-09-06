@@ -75,6 +75,7 @@ def main():
     deps = [
         'python-telegram-bot>=22.8',
         'python-dotenv',
+        'groq',
         'mistralai',
         'Flask'
     ]
@@ -126,8 +127,12 @@ def main():
 # Token del bot de Telegram (obtener de @BotFather)
 TELEGRAM_BOT_TOKEN=tu_token_aquí
 
-# Proveedor de IA: "ollama" o "mistral"
-AI_PROVIDER=mistral
+# Proveedor de IA: "groq" (default), "mistral" u "ollama"
+AI_PROVIDER=groq
+
+# Configuración de Groq AI (si AI_PROVIDER es "groq")
+GROQ_API_KEY=tu_clave_aquí
+GROQ_MODEL=openai/gpt-oss-120b
 
 # Configuración de Mistral AI
 MISTRAL_API_KEY=tu_clave_aquí

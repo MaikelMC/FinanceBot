@@ -35,13 +35,17 @@ GOOGLE_SHEETS_CREDENTIALS = os.getenv("GOOGLE_SHEETS_CREDENTIALS", "")
 GOOGLE_SHEETS_CREDENTIALS_JSON = os.getenv("GOOGLE_SHEETS_CREDENTIALS_JSON", "")
 GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 
-AI_PROVIDER = os.getenv("AI_PROVIDER", "mistral").lower()
+AI_PROVIDER = os.getenv("AI_PROVIDER", "groq").lower()
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+# Groq (proveedor principal)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
+
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 
 SYSTEM_PROMPT_PATH = PROMPTS_DIR / "system_prompt.txt"
 
@@ -108,6 +112,10 @@ def validate_config():
             raise ValueError(
                 "DB_BACKEND=gsheets pero falta GOOGLE_SHEETS_SPREADSHEET_ID en .env"
             )
+    if AI_PROVIDER == "groq" and not GROQ_API_KEY:
+        raise ValueError(
+            "AI_PROVIDER es 'groq' pero falta GROQ_API_KEY en .env"
+        )
     if AI_PROVIDER == "mistral" and not MISTRAL_API_KEY:
         raise ValueError(
             "AI_PROVIDER es 'mistral' pero falta MISTRAL_API_KEY en .env"

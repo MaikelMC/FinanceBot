@@ -1,5 +1,6 @@
 python-telegram-bot[webhooks,job-queue]>=22.8
 python-dotenv>=1.2.2
+groq>=0.11.0
 mistralai>=2.5.0
 gspread>=6.2.0
 pandas>=3.0.0

@@ -190,10 +190,15 @@ def _build_app():
     # === MANEJO DE ERRORES ===
     app.add_error_handler(error_handler)
 
+    modelo_ia = {
+        "groq": config.GROQ_MODEL,
+        "mistral": config.MISTRAL_MODEL,
+        "ollama": config.OLLAMA_MODEL,
+    }.get(config.AI_PROVIDER, config.GROQ_MODEL)
     logger.info(
         "Bot de finanzas iniciado correctamente. Proveedor IA: %s | Modelo: %s",
         config.AI_PROVIDER,
-        config.OLLAMA_MODEL if config.AI_PROVIDER == "ollama" else config.MISTRAL_MODEL,
+        modelo_ia,
     )
 
     return app

@@ -588,7 +588,7 @@ def _mock_respuesta(mensaje: str) -> Dict[str, Any]:
 
 
 async def _call_ai(mensaje: str, usuario: Dict[str, Any]) -> Dict[str, Any]:
-    """Llama a la IA (Mistral u Ollama) y retorna el JSON analizado."""
+    """Llama a la IA (Groq, Mistral u Ollama) y retorna el JSON analizado."""
     logger.info("Enviando a IA para %s: %s", usuario.get("nombre", "?"), mensaje[:60])
 
     if config.AI_PROVIDER == "mock":
@@ -596,6 +596,35 @@ async def _call_ai(mensaje: str, usuario: Dict[str, Any]) -> Dict[str, Any]:
 
     contexto = _construir_contexto_usuario(usuario)
     user_content = _construir_prompt_usuario(mensaje, contexto)
+
+    # Intentar Groq (proveedor principal)
+    if config.AI_PROVIDER == "groq" and config.GROQ_API_KEY:
+        try:
+            from groq import Groq
+            client = Groq(api_key=config.GROQ_API_KEY)
+
+            import asyncio
+            chat_response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model=config.GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.1,
+                max_tokens=500,
+            )
+
+            texto = chat_response.choices[0].message.content
+            datos = _extraer_json(texto)
+
+            if datos:
+                return _validar_resultado(datos)
+
+            logger.warning("No se pudo extraer JSON de respuesta Groq: %s", texto[:200])
+
+        except Exception as e:
+            logger.error("Error llamando a Groq: %s", e)
 
     # Intentar Mistral
     if config.AI_PROVIDER == "mistral" and config.MISTRAL_API_KEY:
@@ -630,7 +659,9 @@ async def _call_ai(mensaje: str, usuario: Dict[str, Any]) -> Dict[str, Any]:
             logger.error("Error llamando a Mistral: %s", e)
 
     # Intentar Ollama como fallback
-    if config.AI_PROVIDER == "ollama" or (config.AI_PROVIDER == "mistral" and not config.MISTRAL_API_KEY):
+    if (config.AI_PROVIDER == "ollama"
+            or (config.AI_PROVIDER == "mistral" and not config.MISTRAL_API_KEY)
+            or (config.AI_PROVIDER == "groq" and not config.GROQ_API_KEY)):
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
@@ -674,7 +705,7 @@ async def analizar_intencion(mensaje: str, usuario: Dict[str, Any]) -> Dict[str,
 
     Pipeline:
     1. Fast-path regex (alta confianza, cero costo, ~80% de los mensajes)
-    2. IA (Mistral u Ollama, para el ~20% restante)
+    2. IA (Groq, Mistral u Ollama, para el ~20% restante)
     3. Cache de resultados para evitar re-llamadas
 
     Args:
