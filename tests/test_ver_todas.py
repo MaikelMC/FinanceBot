@@ -125,7 +125,7 @@ class TestTotalesPorMoneda(unittest.TestCase):
         _sembrar(self.usuario["id"], self.cup["id"], "gasto", 10.0, "comida", hoy)
         _sembrar(self.usuario["id"], self.usd["id"], "gasto", 20.0, "café", hoy)
         texto = knowledge._vista_transacciones(self.usuario, tipo="gasto")["texto"]
-        self.assertIn("Total gastado", texto)
+        self.assertIn("Gastos:", texto)
         self.assertIn("(CUP)", texto)
         self.assertIn("(USD)", texto)
         self.assertNotIn("30.00", texto)  # nunca 10+20 mezclados en un solo monto

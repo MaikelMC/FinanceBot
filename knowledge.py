@@ -531,27 +531,36 @@ def _procesar_gastos_hormiga(usuario: Dict[str, Any], dias: int = 30, etiqueta: 
                 f"({cat['cantidad']}) · {pct:.0f}%"
             )
 
-        # --- Detalle de transacciones hormiga ---
+        # --- Detalle de transacciones hormiga agrupado por día ---
         lineas.append("")
         lineas.append(f"{formato.EMOJI_INFO} **Detalle:**")
         mostrados = 0
+        por_dia_hormiga: Dict[str, list] = {}
         for g in gastos:
+            dia = (g.get("transaccion_fecha") or g.get("fecha") or "")[:10]
+            if dia:
+                por_dia_hormiga.setdefault(dia, []).append(g)
+        for dia in sorted(por_dia_hormiga.keys(), reverse=True):
             if mostrados >= 20:
                 break
-            fecha = _formato_fecha_corta(g.get("transaccion_fecha") or g.get("fecha") or "")
-            cat = g.get("categoria") or "Sin categoría"
-            monto = formato.fmt_moneda(
-                g.get("monto", 0.0),
-                simbolo=g.get("moneda_simbolo", "$"),
-                abrev=g.get("moneda_abreviatura"),
-            )
-            desc = _limpiar_descripcion(g.get("transaccion_descripcion", "") or "")
-            if len(desc) > 70:
-                desc = desc[:67].rstrip() + "..."
-            lineas.append(f"  {fecha} · {cat} · {monto} — {desc}")
-            mostrados += 1
+            lineas.append("")
+            lineas.append(_cabecera_dia(dia))
+            for g in por_dia_hormiga[dia]:
+                if mostrados >= 20:
+                    break
+                cat = g.get("categoria") or "Sin categoría"
+                monto = formato.fmt_moneda(
+                    g.get("monto", 0.0),
+                    simbolo=g.get("moneda_simbolo", "$"),
+                    abrev=g.get("moneda_abreviatura"),
+                )
+                desc = _limpiar_descripcion(g.get("transaccion_descripcion", "") or "")
+                if len(desc) > 70:
+                    desc = desc[:67].rstrip() + "..."
+                lineas.append(f"  {cat} · {monto} — {desc}")
+                mostrados += 1
         if len(gastos) > mostrados:
-            lineas.append(f"  _(mostrando {mostrados} de {len(gastos)})_")
+            lineas.append(f"_(mostrando {mostrados} de {len(gastos)})_")
 
         if total > 0:
             ahorro = round(total * 0.8, 2)
@@ -760,21 +769,46 @@ def _fecha_corta(iso: str) -> str:
     return f"{d.day} {_MESES_CORTO[d.month - 1]}{sufijo}"
 
 
-def _fila_transaccion(t: Dict[str, Any], lookup: dict) -> str:
-    """Una línea legible de transacción: icono, descripción, monto con signo y fecha corta."""
+def _fila_transaccion(t: Dict[str, Any], lookup: dict) -> list:
+    """Una transacción como dos líneas: emoji+monto en una, descripción en otra.
+
+    Formato (alineado con el ejemplo de diseño):
+        📉 -$1,300.00 CUP
+        Juego para mi novia
+
+    La descripción va sin sangría (plana). Si está vacía, se omite la segunda línea.
+    """
     if t["tipo"] == "gasto":
         icono = formato.EMOJI_GASTO
         signo = "-"
     else:
         icono = formato.EMOJI_INGRESO
         signo = "+"
-    desc = _limpiar_descripcion(t.get("descripcion", "") or "").strip() or "Sin descripción"
+    desc = _limpiar_descripcion(t.get("descripcion", "") or "").strip()
     mid = t.get("moneda_id")
     moneda = lookup.get(mid) if mid else None
     abrev = moneda.get("abreviatura") if moneda else None
-    monto = formato.fmt_moneda(t["cantidad"], abrev=abrev)
-    fecha = _fecha_corta((t.get("fecha") or "")[:10])
-    return f"{icono} {desc} — {signo}{monto} · {fecha}"
+    simbolo = moneda.get("simbolo", "$") if moneda else "$"
+    cuerpo_monto = f"{formato.fmt_monto(t['cantidad'])} {abrev}" if abrev else formato.fmt_monto(t["cantidad"])
+    out = [f"{icono} {signo}{simbolo}{cuerpo_monto}"]
+    if desc:
+        out.append(desc)
+    return out
+
+
+def _agrupar_por_dia(transacciones: list) -> Dict[str, list]:
+    """Agrupa transacciones por día 'YYYY-MM-DD'; preserva el orden de cada grupo."""
+    por_dia: Dict[str, list] = {}
+    for t in transacciones:
+        dia = (t.get("fecha") or "")[:10]
+        if dia:
+            por_dia.setdefault(dia, []).append(t)
+    return por_dia
+
+
+def _cabecera_dia(iso_dia: str) -> str:
+    """Cabecera de grupo de día: '📅 5 sep' (sin separador, va sola en su línea)."""
+    return f"📅 {_fecha_corta(iso_dia)}"
 
 
 def _fecha_mes(t: Dict[str, Any]) -> str:
@@ -814,20 +848,23 @@ def _linea_totales(totales: Dict[Any, float], lookup: dict) -> Optional[str]:
 
 
 def _lineas_subtotal_mes(ts: list, lookup: dict, tipo: Optional[str]) -> list:
-    """Totales del mes listados POR MONEDA (cada divisa en su propio monto)."""
+    """Totales del mes POR MONEDA, en formato compacto (un renglón por tipo).
+
+    Emojis de la tabla semántica: 📉 gasto / 📈 ingreso.
+    """
+    out: list = []
     if tipo == "gasto":
         linea = _linea_totales(_totales_tipo(ts, "gasto"), lookup)
-        return [f"    💸 **Total gastado:** {linea}"] if linea else []
+        return [f"{formato.EMOJI_GASTO} Gastos: {linea}"] if linea else []
     if tipo == "ingreso":
         linea = _linea_totales(_totales_tipo(ts, "ingreso"), lookup)
-        return [f"    💰 **Total recibido:** {linea}"] if linea else []
-    out = []
+        return [f"{formato.EMOJI_INGRESO} Ingresos: {linea}"] if linea else []
     g = _linea_totales(_totales_tipo(ts, "gasto"), lookup)
     i = _linea_totales(_totales_tipo(ts, "ingreso"), lookup)
     if g:
-        out.append(f"    📉 **Gastos:** {g}")
+        out.append(f"{formato.EMOJI_GASTO} Gastos: {g}")
     if i:
-        out.append(f"    📈 **Ingresos:** {i}")
+        out.append(f"{formato.EMOJI_INGRESO} Ingresos: {i}")
     return out
 
 
@@ -835,25 +872,40 @@ _MAX_FILAS_MES = 40
 
 
 def _lineas_un_mes(mes: str, ts: list, lookup: dict, tipo: Optional[str]) -> list:
-    """Pantalla de UN mes: cabecera + filas + subtotales por moneda."""
-    anio, mm = mes.split("-")
-    nombre = _MESES_NOMBRE[int(mm) - 1]
-    if mes == datetime.now().strftime("%Y-%m"):
-        suf = "" if anio == str(datetime.now().year) else f" {anio}"
-        cab = f"📅 **Este mes · {nombre}{suf}**"
-    else:
-        cab = f"🗓 **{nombre} {anio}**"
-    out = [cab]
-    for t in ts[:_MAX_FILAS_MES]:
-        out.append(_fila_transaccion(t, lookup))
-    if len(ts) > _MAX_FILAS_MES:
-        out.append(f"    …y {len(ts) - _MAX_FILAS_MES} más este mes")
+    """Pantalla de UN mes: filas agrupadas por día + totales por moneda.
+
+    NO incluye cabecera del mes — la pone el caller en una sola línea con el
+    título (formato `📋 Transacciones — Agosto 2026`). Cada día lleva cabecera
+    `📅 DD mes`; cada transacción son 2 líneas (monto arriba, descripción
+    abajo). Entre transacciones hay una línea en blanco; entre días hay
+    exactamente una línea en blanco (no dos).
+    """
+    por_dia = _agrupar_por_dia(ts)
+    mostradas = 0
+    out: list = []
+    for idx_dia, dia in enumerate(sorted(por_dia.keys(), reverse=True)):
+        if mostradas >= _MAX_FILAS_MES:
+            break
+        if idx_dia > 0:
+            out.append("")  # ÚNICA línea de aire entre días
+        out.append(_cabecera_dia(dia))
+        for idx_t, t in enumerate(por_dia[dia]):
+            if mostradas >= _MAX_FILAS_MES:
+                break
+            out.extend(_fila_transaccion(t, lookup))
+            if idx_t < len(por_dia[dia]) - 1:
+                out.append("")  # aire entre transacciones del mismo día
+            mostradas += 1
+    if len(ts) > mostradas:
+        out.append("")
+        out.append(f"…y {len(ts) - mostradas} más este mes")
+    out.append("")
     out += _lineas_subtotal_mes(ts, lookup, tipo)
     return out
 
 
 def _lineas_historial_agrupado(transacciones: list, lookup: dict, tipo: Optional[str]) -> list:
-    """Cabeceras por mes + filas + subtotales POR MONEDA.
+    """Cabeceras por mes + filas AGRUPADAS POR DÍA + subtotales POR MONEDA.
 
     Mes en curso resaltado. Cuando la consulta abarca varios meses, los
     anteriores van bajo 'Meses anteriores'. Los totales nunca mezclan divisas.
@@ -873,12 +925,20 @@ def _lineas_historial_agrupado(transacciones: list, lookup: dict, tipo: Optional
         if es_mes_actual:
             cab = f"📅 **Este mes · {nombre}**" if anio == anio_actual else f"📅 **Este mes · {nombre} {anio}**"
         else:
-            cab = f"🗓 *{nombre} {anio}*"
+            cab = f"🗓 **{nombre} {anio}**"
         out = [cab]
-        for t in ts[:_MAX_FILAS_MES]:
-            out.append(_fila_transaccion(t, lookup))
-        if len(ts) > _MAX_FILAS_MES:
-            out.append(f"    …y {len(ts) - _MAX_FILAS_MES} más este mes")
+
+        por_dia = _agrupar_por_dia(ts)
+        for idx_dia, dia in enumerate(sorted(por_dia.keys(), reverse=True)):
+            filas_dia = por_dia[dia]
+            if idx_dia > 0:
+                out.append("")
+            out.append(_cabecera_dia(dia))
+            for idx_t, t in enumerate(filas_dia):
+                out.extend(_fila_transaccion(t, lookup))
+                if idx_t < len(filas_dia) - 1:
+                    out.append("")
+        out.append("")
         out += _lineas_subtotal_mes(ts, lookup, tipo)
         return out
 
@@ -940,14 +1000,14 @@ def _vista_transacciones(usuario: Dict[str, Any], tipo: Optional[str] = None,
         meses = sorted(por_mes.keys(), reverse=True)
         emoji = {"gasto": formato.EMOJI_GASTO,
                  "ingreso": formato.EMOJI_INGRESO}.get(tipo, "📋")
-        titulo = _titulo_lista(tipo)
-        if periodo_label:
-            titulo = f"{titulo} · {periodo_label}"
+        titulo_base = _titulo_lista(tipo)
         lookup = _moneda_lookup_usuario(usuario)
-        lineas = [formato.header(emoji, titulo), formato.SEPARADOR]
+        lineas: list = []
 
         if fecha_inicio and fecha_fin:
             # Reporte de período: todos los meses dentro del rango.
+            titulo = f"{emoji} {titulo_base} — {periodo_label or 'rango'}"
+            lineas = [titulo, formato.SEPARADOR]
             lineas += _lineas_historial_agrupado(todas, lookup, tipo)
             return {"texto": "\n".join(lineas), "meses": meses, "mes_mostrado": meses[0]}
 
@@ -955,9 +1015,14 @@ def _vista_transacciones(usuario: Dict[str, Any], tipo: Optional[str] = None,
         mes_actual = datetime.now().strftime("%Y-%m")
         objetivo = mes if (mes and mes in por_mes) else mes_actual
         ts = por_mes.get(objetivo) or []
+
+        if objetivo == mes_actual:
+            titulo = f"{emoji} {titulo_base} — Este mes"
+        else:
+            titulo = f"{emoji} {titulo_base} — {_nombre_mes_largo(objetivo)}"
+        lineas = [titulo, formato.SEPARADOR]
+
         if objetivo == mes_actual and not ts:
-            # Este mes vacío: no volcar meses anteriores aquí (van por botón).
-            lineas.append(f"📅 **Este mes · {_nombre_mes_largo(mes_actual)}**")
             lineas.append("_Todavía no hay movimientos este mes._")
         else:
             lineas += _lineas_un_mes(objetivo, ts, lookup, tipo)
@@ -2175,22 +2240,38 @@ def _parsear_multi_transaccion(mensaje: str, usuario: Optional[Dict[str, Any]] =
 
 
 def _formatear_preview_transacciones(transacciones: List[Dict[str, Any]]) -> str:
-    """Formatea una lista de transacciones como preview para confirmación."""
+    """Formatea una lista de transacciones como preview para confirmación.
+
+    Las transacciones detectadas en un mismo mensaje suelen ser del día actual;
+    si tienen campo `fecha` se agrupan por día con cabecera `📅 5 sep`, igual
+    que el resto del sistema.
+    """
     if not transacciones:
         return "❌ No pude detectar ninguna transacción en tu mensaje."
 
     lineas = [formato.header("📋", "Transacciones detectadas"), formato.SEPARADOR]
 
-    for i, t in enumerate(transacciones, 1):
-        emoji = formato.EMOJI_INGRESO if t["tipo"] == "ingreso" else formato.EMOJI_GASTO
-        label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
-        desc = t.get("descripcion", "Sin descripción")
-        cat = t.get("categoria", "otros")
-        moneda = t.get("moneda", {})
-        abrev = moneda.get("abreviatura") if moneda else None
-        simbolo = moneda.get("simbolo", "$") if moneda else "$"
-        monto = formato.fmt_moneda(t["cantidad"], abrev=abrev, simbolo=simbolo)
-        lineas.append(f"{emoji} **{i}.** {monto} - {label}: {desc} ({cat})")
+    # Si hay fechas presentes, agrupamos por día; si no, bloque único sin cabecera.
+    por_dia: Dict[str, list] = {}
+    for t in transacciones:
+        dia = (t.get("fecha") or "")[:10] or "hoy"
+        por_dia.setdefault(dia, []).append(t)
+
+    for i, (dia, items) in enumerate(por_dia.items()):
+        if any(t.get("fecha") for t in items):
+            if i > 0:
+                lineas.append("")
+            lineas.append(_cabecera_dia(dia) if dia != "hoy" else f"📅 {dia}")
+        for j, t in enumerate(items, 1):
+            emoji = formato.EMOJI_INGRESO if t["tipo"] == "ingreso" else formato.EMOJI_GASTO
+            desc = t.get("descripcion", "Sin descripción")
+            cat = t.get("categoria", "otros")
+            moneda = t.get("moneda", {})
+            abrev = moneda.get("abreviatura") if moneda else None
+            simbolo = moneda.get("simbolo", "$") if moneda else "$"
+            monto = formato.fmt_moneda(t["cantidad"], abrev=abrev, simbolo=simbolo)
+            idx_global = sum(len(por_dia[k]) for k in list(por_dia.keys())[:i]) + j
+            lineas.append(f"{emoji} **{idx_global}.** {monto} — {desc} ({cat})")
 
     lineas.append(formato.SEPARADOR)
 
@@ -3464,27 +3545,37 @@ def _analizar_transacciones_por_fecha(usuario: Dict[str, Any], mensaje: str) -> 
             f"{mayor.get('descripcion') or 'Sin descripción'} ({mayor.get('categoria_nombre') or 'otros'})"
         )
 
-    # Detalle de gastos
+    # Detalle de gastos agrupado por día
     if gastos:
         lineas.append("")
         lineas.append("**Detalle de gastos**")
-        for t in gastos:
-            fecha = str(t.get("fecha", ""))[:10]
-            desc = t.get("descripcion", "Sin descripción")
-            cat = t.get("categoria_nombre", "")
-            cat_str = f" ({cat})" if cat else ""
-            lineas.append(f"{formato.EMOJI_GASTO} {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} - {desc}{cat_str} [{fecha}]")
+        por_dia_g = _agrupar_por_dia(gastos)
+        for dia in sorted(por_dia_g.keys(), reverse=True):
+            lineas.append("")
+            lineas.append(_cabecera_dia(dia))
+            for t in por_dia_g[dia]:
+                desc = t.get("descripcion", "Sin descripción")
+                cat = t.get("categoria_nombre", "")
+                cat_str = f" ({cat})" if cat else ""
+                lineas.append(
+                    f"{formato.EMOJI_GASTO} {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} — {desc}{cat_str}"
+                )
 
-    # Detalle de ingresos
+    # Detalle de ingresos agrupado por día
     if ingresos:
         lineas.append("")
         lineas.append("**Detalle de ingresos**")
-        for t in ingresos:
-            fecha = str(t.get("fecha", ""))[:10]
-            desc = t.get("descripcion", "Sin descripción")
-            cat = t.get("categoria_nombre", "")
-            cat_str = f" ({cat})" if cat else ""
-            lineas.append(f"{formato.EMOJI_INGRESO} {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} - {desc}{cat_str} [{fecha}]")
+        por_dia_i = _agrupar_por_dia(ingresos)
+        for dia in sorted(por_dia_i.keys(), reverse=True):
+            lineas.append("")
+            lineas.append(_cabecera_dia(dia))
+            for t in por_dia_i[dia]:
+                desc = t.get("descripcion", "Sin descripción")
+                cat = t.get("categoria_nombre", "")
+                cat_str = f" ({cat})" if cat else ""
+                lineas.append(
+                    f"{formato.EMOJI_INGRESO} {_formatear_monto(lookup, t.get('moneda_id'), t['cantidad'])} — {desc}{cat_str}"
+                )
 
     # Promedio diario si es rango de varios días
     try:

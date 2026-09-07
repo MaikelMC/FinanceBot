@@ -1211,21 +1211,15 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             if not transacciones:
                 mensaje = "📝 No tienes transacciones registradas aún."
             else:
+                lookup = knowledge._moneda_lookup_usuario(usuario)
                 mensaje = f"📝 **Tus últimas transacciones**\n{formato.SEPARADOR}\n\n"
-                for t in transacciones:
-                    tipo_icono = formato.EMOJI_INGRESO if t["tipo"] == "ingreso" else formato.EMOJI_GASTO
-                    tipo_label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
-                    fecha = t.get("fecha", "N/A")[:10]
-                    desc = t.get("descripcion", "Sin descripción")
-                    if desc.lower().startswith("gasto: "):
-                        desc = desc[7:].strip()
-                    elif desc.lower().startswith("ingreso: "):
-                        desc = desc[9:].strip()
-                    for pv in ["gasté ", "gaste ", "recibí ", "recibi ", "compré ", "compre ", "pagué ", "pague "]:
-                        if desc.lower().startswith(pv):
-                            desc = desc[len(pv):].strip()
-                            break
-                    mensaje += f"{tipo_icono} {formato.fmt_moneda(t['cantidad'])} - {tipo_label}: {desc} ({fecha})\n"
+                por_dia = knowledge._agrupar_por_dia(transacciones)
+                for dia in sorted(por_dia.keys(), reverse=True):
+                    mensaje += f"{knowledge._cabecera_dia(dia)}\n"
+                    for t in por_dia[dia]:
+                        for ln in knowledge._fila_transaccion(t, lookup):
+                            mensaje += f"{ln}\n"
+                        mensaje += "\n"
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=md_a_html(mensaje),
