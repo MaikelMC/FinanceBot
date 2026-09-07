@@ -150,13 +150,41 @@ def _crear_botones_pendiente(pendiente: dict, usuario_id: int) -> Optional[Inlin
                 InlineKeyboardButton("❌ Cancelar", callback_data="pendiente_cancel"),
             ],
         ])
-    if accion == "ver_todas":
+    if accion == "hist_meses":
         tipo = pendiente.get("tipo") or "all"
-        etiqueta = "📂 Ver todas las transacciones"
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton(etiqueta, callback_data=f"ver_todas:{tipo}")],
+            [InlineKeyboardButton("🗂 Ver meses anteriores", callback_data=f"hist_meses:{tipo}")],
         ])
     return None
+
+
+_CB_HIST_MESES = "hist_meses:"
+_CB_HIST_MES = "hist_mes:"
+_CB_HIST_ACTUAL = "hist_actual:"
+
+
+def _hist_tipo_cb(tipo: Optional[str]) -> str:
+    """Tipo para callbacks: None (todas) -> 'all'."""
+    return "all" if tipo is None else tipo
+
+
+def _fila_hist_meses(vista: dict, tipo: Optional[str]) -> Optional[list]:
+    """Fila ('🗂 Ver meses anteriores', hist_meses:<tipo>) si hay meses con
+    movimientos distintos al mostrado; None si no existe historial anterior."""
+    m = vista.get("mes_mostrado")
+    if m and any(x != m for x in (vista.get("meses") or [])):
+        return [("🗂 Ver meses anteriores", f"{_CB_HIST_MESES}{_hist_tipo_cb(tipo)}")]
+    return None
+
+
+def _kb_con_hist(kb: InlineKeyboardMarkup, filas_extra) -> InlineKeyboardMarkup:
+    """Pone las filas de historial ENCIMA del teclado principal (no lo reemplaza)."""
+    inline = list(kb.inline_keyboard or [])
+    extra = [
+        [InlineKeyboardButton(et, callback_data=cb) for et, cb in fila]
+        for fila in filas_extra
+    ]
+    return InlineKeyboardMarkup(extra + inline)
 
 
 def _completar_pendiente(pendiente: dict, tipo: str, usuario: dict,
@@ -623,22 +651,32 @@ async def consultar_categorias(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def consultar_gastos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja el comando /gastos."""
+    """Maneja el comando /gastos (solo el mes en curso + botón a anteriores)."""
     try:
         usuario = _obtener_usuario_contexto(update, context)
-        texto = knowledge._procesar_gastos(usuario)
-        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
+        vista = knowledge._vista_transacciones(usuario, tipo="gasto")
+        texto = vista["texto"]
+        kb = _crear_teclado_principal()
+        extra = _fila_hist_meses(vista, "gasto")
+        if extra:
+            kb = _kb_con_hist(kb, [extra])
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=kb)
     except Exception as e:
         logger.error("Error en /gastos: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al obtener tus gastos.")
 
 
 async def consultar_ingresos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja el comando /ingresos."""
+    """Maneja el comando /ingresos (solo el mes en curso + botón a anteriores)."""
     try:
         usuario = _obtener_usuario_contexto(update, context)
-        texto = knowledge._procesar_ingresos(usuario)
-        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=_crear_teclado_principal())
+        vista = knowledge._vista_transacciones(usuario, tipo="ingreso")
+        texto = vista["texto"]
+        kb = _crear_teclado_principal()
+        extra = _fila_hist_meses(vista, "ingreso")
+        if extra:
+            kb = _kb_con_hist(kb, [extra])
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=kb)
     except Exception as e:
         logger.error("Error en /ingresos: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al obtener tus ingresos.")
@@ -1076,6 +1114,43 @@ async def _responder_editando(query, texto: str, reply_markup: Optional[InlineKe
                                            reply_markup=_crear_teclado_principal())
         except Exception:
             pass
+
+def _kb_hist(filas) -> InlineKeyboardMarkup:
+    """Construye teclado inline a partir de filas [(etiqueta, callback)]."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(et, callback_data=cb) for et, cb in fila]
+        for fila in filas
+    ])
+
+
+def _hist_volver_cb(tipo: str) -> str:
+    """Callback 'Volver' según el tipo (regresa a la vista de ese tipo en el menú)."""
+    return {
+        "all": "menu_transacciones",
+        "gasto": "menu_transacciones_gastos",
+        "ingreso": "menu_transacciones_ingresos",
+    }.get(tipo, "menu_transacciones")
+
+
+def _kb_hist_mes(tipo: str) -> InlineKeyboardMarkup:
+    """Botones de una pantalla de mes: ir a la lista de meses y volver al menú."""
+    return _kb_hist([
+        [("🗂 Meses anteriores", f"{_CB_HIST_MESES}{_hist_tipo_cb(tipo)}")],
+        [("🔙 Volver", _hist_volver_cb(_hist_tipo_cb(tipo)))],
+    ])
+
+
+def _texto_selector_hist(meses: list, tipo: str) -> str:
+    """Texto del selector de meses (lista de meses con movimientos)."""
+    etiqueta = {"gasto": "gastos", "ingreso": "ingresos"}.get(tipo, "transacciones")
+    if not meses:
+        return f"🗂 **Historial de {etiqueta}**\n{formato.SEPARADOR}\n📝 Aún no tienes movimientos registrados."
+    extra = ""
+    if len(meses) > 24:
+        extra = f"\n\n📎 Hay {len(meses) - 24} meses más antiguos. Usa /exportar para el historial completo."
+    return (f"🗂 **Historial de {etiqueta}**\n{formato.SEPARADOR}\n"
+            f"Toca un mes para ver sus movimientos:{extra}")
+
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja los callbacks de los botones inline."""
@@ -1591,17 +1666,34 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 context.user_data.pop("esperando_soporte", None)
                 await _responder_editando(query, "❌ Soporte cancelado.")
 
-        # === CALLBACKS DE "VER TODAS" LAS TRANSACCIONES ===
-        elif query.data.startswith("ver_todas"):
+        # === CALLBACKS: NAVEGACIÓN POR MESES (historial) ===
+        elif query.data.startswith(_CB_HIST_MESES):
             context.user_data.pop("transaccion_pendiente", None)
-            partes = query.data.split(":", 1)
-            tipo_cb = partes[1] if len(partes) > 1 else "all"
-            tipo_filtro = {"all": None, "gasto": "gasto", "ingreso": "ingreso"}.get(tipo_cb, None)
-            texto = knowledge._procesar_transacciones_todas(usuario, tipo_filtro)
-            volver_kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔙 Volver a Transacciones", callback_data="menu_transacciones")
-            ]])
-            await _responder_seguro(query.message, texto, reply_markup=volver_kb)
+            tipo = query.data.split(":", 1)[1] or "all"
+            tipo_filtro = None if tipo == "all" else tipo
+            meses = knowledge._meses_historial(usuario, tipo_filtro)
+            filas = []
+            for m in meses[:24]:
+                filas.append([(f"🗓 {knowledge._nombre_mes_largo(m)}", f"{_CB_HIST_MES}{tipo}:{m}")])
+            filas.append([("📅 Ver mes actual", f"{_CB_HIST_ACTUAL}{tipo}")])
+            filas.append([("🔙 Volver", _hist_volver_cb(tipo))])
+            await _responder_editando(query, _texto_selector_hist(meses, tipo), _kb_hist(filas))
+
+        elif query.data.startswith(_CB_HIST_MES):
+            context.user_data.pop("transaccion_pendiente", None)
+            partes = query.data.split(":", 2)
+            tipo = partes[1] if len(partes) > 1 else "all"
+            mes = partes[2] if len(partes) > 2 else None
+            tipo_filtro = None if tipo == "all" else tipo
+            vista = knowledge._vista_transacciones(usuario, tipo=tipo_filtro, mes=mes)
+            await _responder_editando(query, vista["texto"], _kb_hist_mes(tipo))
+
+        elif query.data.startswith(_CB_HIST_ACTUAL):
+            context.user_data.pop("transaccion_pendiente", None)
+            tipo = query.data.split(":", 1)[1] or "all"
+            tipo_filtro = None if tipo == "all" else tipo
+            vista = knowledge._vista_transacciones(usuario, tipo=tipo_filtro)
+            await _responder_editando(query, vista["texto"], _kb_hist_mes(tipo))
 
     except Exception as e:
         logger.error("Error en callback query: %s", e)

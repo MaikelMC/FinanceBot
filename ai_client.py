@@ -350,8 +350,7 @@ class AIResponder:
 
             from intent_parser import _extraer_dias_periodo
             from knowledge import (
-                _procesar_balance, _procesar_transacciones,
-                _procesar_gastos, _procesar_ingresos,
+                _procesar_balance, _vista_transacciones,
                 _procesar_presupuestos, _procesar_categorias,
                 _analizar_transacciones_por_fecha,
                 _procesar_presupuesto_especifico, _procesar_mayor_gasto,
@@ -370,21 +369,16 @@ class AIResponder:
 
             if subconsulta == "balance":
                 return _procesar_balance(usuario)
-            elif subconsulta == "transacciones":
-                texto = _procesar_transacciones(usuario, fecha_inicio=pf_inicio,
-                                                fecha_fin=pf_fin, periodo_label=etiqueta if explicito else None)
-                self._marcar_ver_todas(resultado, usuario, None)
-                return texto
-            elif subconsulta == "gastos":
-                texto = _procesar_gastos(usuario, fecha_inicio=pf_inicio,
-                                         fecha_fin=pf_fin, periodo_label=etiqueta if explicito else None)
-                self._marcar_ver_todas(resultado, usuario, "gasto")
-                return texto
-            elif subconsulta == "ingresos":
-                texto = _procesar_ingresos(usuario, fecha_inicio=pf_inicio,
-                                           fecha_fin=pf_fin, periodo_label=etiqueta if explicito else None)
-                self._marcar_ver_todas(resultado, usuario, "ingreso")
-                return texto
+            elif subconsulta in ("transacciones", "gastos", "ingresos"):
+                tipo_q = {"gastos": "gasto", "ingresos": "ingreso"}.get(subconsulta)
+                vista = _vista_transacciones(usuario, tipo=tipo_q, fecha_inicio=pf_inicio,
+                                             fecha_fin=pf_fin,
+                                             periodo_label=etiqueta if explicito else None)
+                # Solo el mes en curso en el texto; meses anteriores por botón
+                # (una consulta con período explícito ya agrupó su rango).
+                if not (pf_inicio and pf_fin):
+                    self._marcar_meses(resultado, usuario, tipo_q, vista)
+                return vista["texto"]
             elif subconsulta == "gastos_hormiga":
                 return _procesar_gastos_hormiga(usuario, dias=dias, etiqueta=etiqueta)
             elif subconsulta == "presupuesto":
@@ -413,15 +407,13 @@ class AIResponder:
             logger.error("Error en consulta: %s", e)
             return "❌ Ocurrió un error al consultar tus datos."
 
-    def _marcar_ver_todas(self, resultado: dict, usuario: Dict[str, Any], tipo: Optional[str]) -> None:
-        """Marca en `resultado` que la vista debe ofrecer el botón 'Ver todas' si hay
-        más de 10 transacciones (el reporte solo muestra las últimas 10)."""
-        try:
-            total = len(database.obtener_transacciones(usuario["id"], 100000, tipo))
-        except Exception:
-            total = 0
-        if total > 10:
-            resultado["_pendiente_consulta"] = {"accion": "ver_todas", "tipo": tipo}
+    def _marcar_meses(self, resultado: dict, usuario: Dict[str, Any], tipo: Optional[str],
+                      vista: dict) -> None:
+        """Marca que la respuesta ofrezca el botón a 'meses anteriores' cuando el
+        texto mostró solo el mes en curso y existen movimientos en otros meses."""
+        m = vista.get("mes_mostrado")
+        if m and any(x != m for x in (vista.get("meses") or [])):
+            resultado["_pendiente_consulta"] = {"accion": "hist_meses", "tipo": tipo}
 
     def _procesar_analisis_fecha(self, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa un análisis de transacciones por fecha."""

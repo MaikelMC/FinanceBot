@@ -708,47 +708,16 @@ def _procesar_balance(usuario: Dict[str, Any]) -> str:
 
 def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Optional[str] = None,
                             fecha_inicio: Optional[str] = None, fecha_fin: Optional[str] = None,
-                            periodo_label: Optional[str] = None) -> str:
-    """Muestra las transacciones del usuario agrupadas por mes.
+                            periodo_label: Optional[str] = None, mes: Optional[str] = None) -> str:
+    """Texto de la vista mensual de transacciones.
 
-    El mes en curso va primero y resaltado; los meses anteriores quedan en una
-    sección separada "Meses anteriores". Filtra por tipo y/o período.
+    Por defecto muestra SOLO el mes en curso: los anteriores no se vuelcan en
+    el mensaje (el menú los ofrece con botones). Si llega un período explícito,
+    agrupa los meses que caen en ese rango.
     """
-    try:
-        if fecha_inicio and fecha_fin:
-            # Filtrado por fecha en memoria (ISO 'YYYY-MM-DD' compara lexicamente).
-            todas = database.obtener_transacciones(usuario["id"], 1000, tipo)
-            transacciones = [
-                t for t in todas
-                if fecha_inicio <= (t.get("fecha", "") or "")[:10] <= fecha_fin
-            ][:limite]
-        else:
-            transacciones = database.obtener_transacciones(usuario["id"], limite, tipo)
-
-        if not transacciones:
-            if tipo == "gasto":
-                return "📝 No tienes gastos registrados todavía."
-            if tipo == "ingreso":
-                return "📝 No tienes ingresos registrados todavía."
-            return "📝 No tienes transacciones registradas todavía."
-
-        titulo = "Tus transacciones recientes"
-        if tipo == "gasto":
-            titulo = "Tus gastos recientes"
-        elif tipo == "ingreso":
-            titulo = "Tus ingresos recientes"
-        if periodo_label:
-            titulo = f"{titulo} ({periodo_label})"
-
-        emoji = {"gasto": formato.EMOJI_GASTO,
-                 "ingreso": formato.EMOJI_INGRESO}.get(tipo, "📋")
-        lookup = _moneda_lookup_usuario(usuario)
-        lineas = [formato.header(emoji, titulo), formato.SEPARADOR]
-        lineas += _lineas_historial_agrupado(transacciones, lookup, tipo)
-        return "\n".join(lineas)
-    except Exception as e:
-        logger.error("Error al obtener transacciones: %s", e)
-        return "❌ Ocurrió un error al obtener tus transacciones.\nIntenta de nuevo o escribe /help."
+    return _vista_transacciones(usuario, tipo=tipo, mes=mes, fecha_inicio=fecha_inicio,
+                                fecha_fin=fecha_fin, periodo_label=periodo_label,
+                                limite=limite)["texto"]
 
 
 _MESES_NOMBRE = [
@@ -808,9 +777,87 @@ def _fila_transaccion(t: Dict[str, Any], lookup: dict) -> str:
     return f"{icono} {desc} — {signo}{monto} · {fecha}"
 
 
+def _fecha_mes(t: Dict[str, Any]) -> str:
+    """'YYYY-MM' de una transacción ('' si no tiene fecha)."""
+    return (t.get("fecha") or "")[:7]
+
+
+def _nombre_mes_largo(mes: str) -> str:
+    """'2026-09' -> 'Septiembre 2026'."""
+    anio, mm = mes.split("-")
+    return f"{_MESES_NOMBRE[int(mm) - 1]} {anio}"
+
+
+def _totales_tipo(ts: list, tipo_busqueda: str) -> Dict[Any, float]:
+    """Suma POR moneda_id las transacciones de un tipo (no mezcla divisas)."""
+    acc: Dict[Any, float] = {}
+    for t in ts:
+        if t.get("tipo") == tipo_busqueda:
+            mid = t.get("moneda_id")
+            acc[mid] = round(acc.get(mid, 0.0) + t["cantidad"], 2)
+    return acc
+
+
+def _linea_totales(totales: Dict[Any, float], lookup: dict) -> Optional[str]:
+    """'100.00 (USD) · 50.00 (EUR)' — un bloque por moneda del usuario."""
+    if not totales:
+        return None
+    partes = []
+    for mid, monto in sorted(totales.items(), key=lambda kv: (kv[0] is None, str(kv[0]))):
+        m = lookup.get(mid) if mid is not None else None
+        if m:
+            partes.append(formato.fmt_moneda(monto, abrev=m.get("abreviatura"),
+                                             simbolo=m.get("simbolo", "$")))
+        else:
+            partes.append(formato.fmt_moneda(monto))
+    return " · ".join(partes)
+
+
+def _lineas_subtotal_mes(ts: list, lookup: dict, tipo: Optional[str]) -> list:
+    """Totales del mes listados POR MONEDA (cada divisa en su propio monto)."""
+    if tipo == "gasto":
+        linea = _linea_totales(_totales_tipo(ts, "gasto"), lookup)
+        return [f"    💸 **Total gastado:** {linea}"] if linea else []
+    if tipo == "ingreso":
+        linea = _linea_totales(_totales_tipo(ts, "ingreso"), lookup)
+        return [f"    💰 **Total recibido:** {linea}"] if linea else []
+    out = []
+    g = _linea_totales(_totales_tipo(ts, "gasto"), lookup)
+    i = _linea_totales(_totales_tipo(ts, "ingreso"), lookup)
+    if g:
+        out.append(f"    📉 **Gastos:** {g}")
+    if i:
+        out.append(f"    📈 **Ingresos:** {i}")
+    return out
+
+
+_MAX_FILAS_MES = 40
+
+
+def _lineas_un_mes(mes: str, ts: list, lookup: dict, tipo: Optional[str]) -> list:
+    """Pantalla de UN mes: cabecera + filas + subtotales por moneda."""
+    anio, mm = mes.split("-")
+    nombre = _MESES_NOMBRE[int(mm) - 1]
+    if mes == datetime.now().strftime("%Y-%m"):
+        suf = "" if anio == str(datetime.now().year) else f" {anio}"
+        cab = f"📅 **Este mes · {nombre}{suf}**"
+    else:
+        cab = f"🗓 **{nombre} {anio}**"
+    out = [cab]
+    for t in ts[:_MAX_FILAS_MES]:
+        out.append(_fila_transaccion(t, lookup))
+    if len(ts) > _MAX_FILAS_MES:
+        out.append(f"    …y {len(ts) - _MAX_FILAS_MES} más este mes")
+    out += _lineas_subtotal_mes(ts, lookup, tipo)
+    return out
+
+
 def _lineas_historial_agrupado(transacciones: list, lookup: dict, tipo: Optional[str]) -> list:
-    """Cabeceras por mes + filas + subtotal. Mes en curso resaltado al inicio;
-    meses anteriores agrupados bajo 'Meses anteriores'."""
+    """Cabeceras por mes + filas + subtotales POR MONEDA.
+
+    Mes en curso resaltado. Cuando la consulta abarca varios meses, los
+    anteriores van bajo 'Meses anteriores'. Los totales nunca mezclan divisas.
+    """
     hoy = datetime.now()
     mes_actual = hoy.strftime("%Y-%m")
     anio_actual = str(hoy.year)
@@ -828,19 +875,11 @@ def _lineas_historial_agrupado(transacciones: list, lookup: dict, tipo: Optional
         else:
             cab = f"🗓 *{nombre} {anio}*"
         out = [cab]
-        gasto_mes = ingreso_mes = 0.0
-        for t in ts:
+        for t in ts[:_MAX_FILAS_MES]:
             out.append(_fila_transaccion(t, lookup))
-            if t["tipo"] == "gasto":
-                gasto_mes += t["cantidad"]
-            else:
-                ingreso_mes += t["cantidad"]
-        if tipo == "gasto":
-            out.append(f"    💸 Total gastado: **{formato.fmt_moneda(gasto_mes)}**")
-        elif tipo == "ingreso":
-            out.append(f"    💰 Total recibido: **{formato.fmt_moneda(ingreso_mes)}**")
-        else:
-            out.append(f"    Gastos: **{formato.fmt_moneda(gasto_mes)}** · Ingresos: **{formato.fmt_moneda(ingreso_mes)}**")
+        if len(ts) > _MAX_FILAS_MES:
+            out.append(f"    …y {len(ts) - _MAX_FILAS_MES} más este mes")
+        out += _lineas_subtotal_mes(ts, lookup, tipo)
         return out
 
     insertado_anteriores = False
@@ -857,50 +896,85 @@ def _lineas_historial_agrupado(transacciones: list, lookup: dict, tipo: Optional
     return lineas
 
 
-def _procesar_transacciones_todas(usuario: Dict[str, Any], tipo: Optional[str] = None) -> str:
-    """Lista TODAS las transacciones agrupadas por mes (más reciente primero).
+def _texto_sin_transacciones(tipo: Optional[str]) -> str:
+    if tipo == "gasto":
+        return "📝 No tienes gastos registrados todavía."
+    if tipo == "ingreso":
+        return "📝 No tienes ingresos registrados todavía."
+    return "📝 No tienes transacciones registradas todavía."
 
-    Usado por el botón 'Ver todas' de la vista de transacciones/gastos/ingresos.
-    Si el historial es muy largo, se trunca a los meses más recientes.
+
+def _titulo_lista(tipo: Optional[str]) -> str:
+    if tipo == "gasto":
+        return "Tus gastos"
+    if tipo == "ingreso":
+        return "Tus ingresos"
+    return "Tus transacciones"
+
+
+def _vista_transacciones(usuario: Dict[str, Any], tipo: Optional[str] = None,
+                         mes: Optional[str] = None, fecha_inicio: Optional[str] = None,
+                         fecha_fin: Optional[str] = None, periodo_label: Optional[str] = None,
+                         limite: int = 10) -> Dict[str, Any]:
+    """Pantalla mensual de transacciones + metadatos para los botones.
+
+    Por defecto muestra SOLO el mes en curso (o el `mes` pedido al navegar el
+    historial): los anteriores NO se vuelcan en el texto; el menú ofrece un
+    botón para ir a ellos. Una consulta con período explícito agrupa los meses
+    del rango (reporte puntual).
+
+    Retorna {"texto", "meses" (con datos, más reciente primero), "mes_mostrado"}.
     """
     try:
-        transacciones = database.obtener_transacciones(usuario["id"], 1000, tipo)
-        if not transacciones:
-            if tipo == "gasto":
-                return "📝 No tienes gastos registrados todavía."
-            if tipo == "ingreso":
-                return "📝 No tienes ingresos registrados todavía."
-            return "📝 No tienes transacciones registradas todavía."
+        todas = database.obtener_transacciones(usuario["id"], 100000, tipo)
+        if fecha_inicio and fecha_fin:
+            todas = [
+                t for t in todas
+                if fecha_inicio <= (t.get("fecha", "") or "")[:10] <= fecha_fin
+            ][:limite]
 
+        if not todas:
+            return {"texto": _texto_sin_transacciones(tipo), "meses": [], "mes_mostrado": None}
+
+        por_mes = _agrupar_por_mes(todas)
+        meses = sorted(por_mes.keys(), reverse=True)
         emoji = {"gasto": formato.EMOJI_GASTO,
-                 "ingreso": formato.EMOJI_INGRESO}.get(tipo, "📂")
+                 "ingreso": formato.EMOJI_INGRESO}.get(tipo, "📋")
+        titulo = _titulo_lista(tipo)
+        if periodo_label:
+            titulo = f"{titulo} · {periodo_label}"
         lookup = _moneda_lookup_usuario(usuario)
-
-        titulo = "Todas tus transacciones"
-        if tipo == "gasto":
-            titulo = "Todos tus gastos"
-        elif tipo == "ingreso":
-            titulo = "Todos tus ingresos"
-
         lineas = [formato.header(emoji, titulo), formato.SEPARADOR]
-        lineas += _lineas_historial_agrupado(transacciones, lookup, tipo)
 
-        total_global = sum(t["cantidad"] for t in transacciones
-                           if t["tipo"] == "ingreso") - sum(
-                           t["cantidad"] for t in transacciones
-                           if t["tipo"] == "gasto")
-        lineas.append("")
-        lineas.append(f"{formato.EMOJI_INFO} Neto acumulado: **{formato.fmt_moneda(total_global)}**")
-        texto = "\n".join(lineas)
+        if fecha_inicio and fecha_fin:
+            # Reporte de período: todos los meses dentro del rango.
+            lineas += _lineas_historial_agrupado(todas, lookup, tipo)
+            return {"texto": "\n".join(lineas), "meses": meses, "mes_mostrado": meses[0]}
 
-        # Recorte de seguridad para el límite de Telegram (~4096 chars).
-        if len(texto) > 3800:
-            recorte = "📎 Historial muy largo: mostrando los meses más recientes. Usa /exportar para el completo."
-            texto = texto[:3800] + f"\n\n{recorte}"
-        return texto
+        # Vista por defecto / navegación por meses: UNA pantalla = UN mes.
+        mes_actual = datetime.now().strftime("%Y-%m")
+        objetivo = mes if (mes and mes in por_mes) else mes_actual
+        ts = por_mes.get(objetivo) or []
+        if objetivo == mes_actual and not ts:
+            # Este mes vacío: no volcar meses anteriores aquí (van por botón).
+            lineas.append(f"📅 **Este mes · {_nombre_mes_largo(mes_actual)}**")
+            lineas.append("_Todavía no hay movimientos este mes._")
+        else:
+            lineas += _lineas_un_mes(objetivo, ts, lookup, tipo)
+        return {"texto": "\n".join(lineas), "meses": meses, "mes_mostrado": objetivo}
     except Exception as e:
-        logger.error("Error al obtener todas las transacciones: %s", e)
-        return "❌ Ocurrió un error al obtener tus transacciones.\nIntenta de nuevo o escribe /help."
+        logger.error("Error al obtener transacciones: %s", e)
+        return {"texto": "❌ Ocurrió un error al obtener tus transacciones.\nIntenta de nuevo o escribe /help.",
+                "meses": [], "mes_mostrado": None}
+
+
+def _meses_historial(usuario: Dict[str, Any], tipo: Optional[str] = None) -> list:
+    """Meses con transacciones del usuario, más reciente primero."""
+    try:
+        todas = database.obtener_transacciones(usuario["id"], 100000, tipo)
+        return sorted({_fecha_mes(t) for t in todas if _fecha_mes(t)}, reverse=True)
+    except Exception:
+        return []
 
 
 def _procesar_gastos(usuario: Dict[str, Any], fecha_inicio: Optional[str] = None,

@@ -178,17 +178,27 @@ def menu_monedas(usuario: dict) -> Tuple[str, InlineKeyboardMarkup]:
     )
 
 
+def _cb_tipo(tipo: Optional[str]) -> str:
+    """Tipo de transacción para callback: None -> 'all'."""
+    return "all" if tipo is None else tipo
+
+
+def _hay_otros_meses(vista: dict) -> bool:
+    """¿Hay meses con datos distintos al mes mostrado? (ofrece el botón de anteriores)."""
+    m = vista.get("mes_mostrado")
+    if not m:
+        return False
+    return any(x != m for x in (vista.get("meses") or []))
+
+
 def menu_transacciones(usuario: dict) -> Tuple[str, InlineKeyboardMarkup]:
-    """Últimas transacciones + acciones."""
-    try:
-        total = len(database.obtener_transacciones(usuario["id"], 100000))
-    except Exception:
-        total = 0
+    """Mes en curso + acciones. Los meses anteriores van detrás de un botón."""
+    vista = knowledge._vista_transacciones(usuario)
     extras = []
-    if total > 10:
-        extras.append([("📂 Ver todas las transacciones", "ver_todas:all")])
+    if _hay_otros_meses(vista):
+        extras.append([("🗂 Ver meses anteriores", f"hist_meses:{_cb_tipo(None)}")])
     return _con_botones(
-        knowledge._procesar_transacciones(usuario),
+        vista["texto"],
         extras + [
             [("📉 Ver gastos", CB_TRANS_GASTOS), ("📈 Ver ingresos", CB_TRANS_INGRESOS)],
             [("➕ Registrar gasto", CB_TRANS_GASTO)],
@@ -198,19 +208,12 @@ def menu_transacciones(usuario: dict) -> Tuple[str, InlineKeyboardMarkup]:
 
 
 def _menu_ver_tipo(usuario: dict, tipo: str) -> Tuple[str, InlineKeyboardMarkup]:
-    """Vista 'Ver gastos' / 'Ver ingresos' del menú, con botón 'Ver todas' si hay más de 10."""
-    if tipo == "gasto":
-        texto = knowledge._procesar_gastos(usuario)
-    else:
-        texto = knowledge._procesar_ingresos(usuario)
+    """Vista 'Ver gastos' / 'Ver ingresos' del mes, con botón a meses anteriores."""
+    vista = knowledge._vista_transacciones(usuario, tipo)
     filas = []
-    try:
-        total = len(database.obtener_transacciones(usuario["id"], 100000, tipo))
-    except Exception:
-        total = 0
-    if total > 10:
-        filas.append([("📂 Ver todas las transacciones", f"ver_todas:{tipo}")])
-    return _con_botones(texto, filas, volver=CB_TRANS)
+    if _hay_otros_meses(vista):
+        filas.append([("🗂 Ver meses anteriores", f"hist_meses:{_cb_tipo(tipo)}")])
+    return _con_botones(vista["texto"], filas, volver=CB_TRANS)
 
 
 def menu_ayuda() -> Tuple[str, InlineKeyboardMarkup]:
