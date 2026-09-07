@@ -5,6 +5,7 @@ Maneja comandos y mensajes en lenguaje natural para gestión financiera.
 
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -953,26 +954,34 @@ async def anuncio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🚫 No tienes permiso para usar este comando.")
             return
 
+        # Capturar TODO el texto tras el comando, preservando saltos de línea,
+        # líneas en blanco y espacios tal como se escribieron (context.args los
+        # aplana a espacios simples y pierde la estructura).
+        texto_completo = update.message.text or ""
+        cuerpo = re.sub(r"^/\w+(?:@[\w]+)?", "", texto_completo, count=1).strip()
+
         # Verificar que haya mensaje
-        if not context.args:
+        if not cuerpo:
             await update.message.reply_text(
                 "Uso: `/anuncio Tu mensaje aquí`\n\n"
-                "Ejemplo: `/anuncio Mañana hay mantenimiento de 10 a 10:30`",
+                "Ejemplo: `/anuncio Mañana hay mantenimiento de 10 a 10:30`\n\n"
+                "Puedes usar **Enter** para saltos de línea y líneas en blanco; "
+                "el anuncio conserva exactamente esa estructura y los espacios.",
                 parse_mode="Markdown",
             )
             return
 
-        mensaje_anuncio = " ".join(context.args)
+        mensaje_anuncio = cuerpo
         total_usuarios = database.contar_usuarios()
 
         # Guardar en context para el preview
         context.user_data["anuncio_pendiente"] = mensaje_anuncio
 
-        # Mostrar preview con botones
+        # Vista previa en texto plano: conserva la estructura exacta del contenido
         preview = (
-            f"📢 **Vista previa del anuncio:**\n\n"
+            "📢 Vista previa del anuncio:\n\n"
             f"{mensaje_anuncio}\n\n"
-            f"👥 Enviado a: **{total_usuarios}** usuarios"
+            f"👥 Se enviará a {total_usuarios} usuarios"
         )
 
         botones = InlineKeyboardMarkup([
@@ -982,7 +991,7 @@ async def anuncio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         ])
 
-        await update.message.reply_text(preview, parse_mode="Markdown", reply_markup=botones)
+        await update.message.reply_text(preview, reply_markup=botones)
     except Exception as e:
         logger.error("Error en /anuncio: %s", e)
         await update.message.reply_text("⚠️ Ocurrió un error al procesar el anuncio.")
@@ -1494,10 +1503,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             fallidos = 0
             for u in usuarios:
                 try:
+                    # Texto plano: conserva saltos de línea, líneas en blanco y
+                    # espacios exactos; sin Markdown que pueda romper el envío.
                     await context.bot.send_message(
                         chat_id=u["telegram_user_id"],
-                        text=f"📢 **Anuncio:**\n\n{mensaje_anuncio}",
-                        parse_mode="Markdown",
+                        text=f"📢 Anuncio:\n\n{mensaje_anuncio}",
                     )
                     enviados += 1
                 except Exception as e:
