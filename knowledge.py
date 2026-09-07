@@ -6,7 +6,7 @@ Maneja la lógica de IA para preguntas en lenguaje natural relacionadas con fina
 import logging
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Tuple
 
 import config
@@ -709,7 +709,11 @@ def _procesar_balance(usuario: Dict[str, Any]) -> str:
 def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Optional[str] = None,
                             fecha_inicio: Optional[str] = None, fecha_fin: Optional[str] = None,
                             periodo_label: Optional[str] = None) -> str:
-    """Muestra las transacciones del usuario, opcionalmente filtradas por tipo y período."""
+    """Muestra las transacciones del usuario agrupadas por mes.
+
+    El mes en curso va primero y resaltado; los meses anteriores quedan en una
+    sección separada "Meses anteriores". Filtra por tipo y/o período.
+    """
     try:
         if fecha_inicio and fecha_fin:
             # Filtrado por fecha en memoria (ISO 'YYYY-MM-DD' compara lexicamente).
@@ -736,27 +740,11 @@ def _procesar_transacciones(usuario: Dict[str, Any], limite: int = 10, tipo: Opt
         if periodo_label:
             titulo = f"{titulo} ({periodo_label})"
 
-        emoji = {"gasto": formato.EMOJI_GASTO, "ingreso": formato.EMOJI_INGRESO}
+        emoji = {"gasto": formato.EMOJI_GASTO,
+                 "ingreso": formato.EMOJI_INGRESO}.get(tipo, "📋")
         lookup = _moneda_lookup_usuario(usuario)
-        lineas = [formato.header("📋", titulo), formato.SEPARADOR]
-        for t in transacciones:
-            icono = emoji.get(t["tipo"], "🔹")
-            tipo_label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
-            desc = _limpiar_descripcion(t.get("descripcion", "") or "")
-            fecha = t.get("fecha", "")[:10]
-            mid = t.get("moneda_id")
-            moneda = lookup.get(mid) if mid else None
-            abrev = moneda.get("abreviatura") if moneda else None
-            monto = formato.fmt_moneda(t["cantidad"], abrev=abrev)
-            lineas.append(f"{icono} {monto} - {tipo_label}: {desc} ({fecha})")
-
-        total = sum(t["cantidad"] for t in transacciones)
-        lineas.append("")
-        if tipo:
-            label = "Total gastado" if tipo == "gasto" else "Total recibido"
-            lineas.append(f"{emoji[tipo]} **{label}:** {formato.fmt_moneda(total)} · {len(transacciones)} registros")
-        else:
-            lineas.append(f"{formato.EMOJI_INFO} {len(transacciones)} registros")
+        lineas = [formato.header(emoji, titulo), formato.SEPARADOR]
+        lineas += _lineas_historial_agrupado(transacciones, lookup, tipo)
         return "\n".join(lineas)
     except Exception as e:
         logger.error("Error al obtener transacciones: %s", e)
@@ -767,6 +755,106 @@ _MESES_NOMBRE = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 ]
+
+_MESES_CORTO = [
+    "ene", "feb", "mar", "abr", "may", "jun",
+    "jul", "ago", "sep", "oct", "nov", "dic",
+]
+
+
+def _agrupar_por_mes(transacciones: list) -> Dict[str, list]:
+    """Agrupa transacciones por mes ('YYYY-MM'); preserva el orden de cada grupo."""
+    por_mes: Dict[str, list] = {}
+    for t in transacciones:
+        mes = (t.get("fecha") or "")[:7]
+        if mes:
+            por_mes.setdefault(mes, []).append(t)
+    return por_mes
+
+
+def _fecha_corta(iso: str) -> str:
+    """Formatea 'YYYY-MM-DD' a algo legible: 'hoy', 'ayer' o '5 sep' (+año si difiere)."""
+    if not iso:
+        return "s.f."
+    iso = iso[:10]
+    hoy = datetime.now()
+    if iso == hoy.strftime("%Y-%m-%d"):
+        return "hoy"
+    desde_hoy = (hoy - timedelta(days=1))
+    if iso == desde_hoy.strftime("%Y-%m-%d"):
+        return "ayer"
+    try:
+        d = datetime.strptime(iso, "%Y-%m-%d")
+    except ValueError:
+        return iso
+    sufijo = "" if d.year == hoy.year else f" {str(d.year)[2:]}"
+    return f"{d.day} {_MESES_CORTO[d.month - 1]}{sufijo}"
+
+
+def _fila_transaccion(t: Dict[str, Any], lookup: dict) -> str:
+    """Una línea legible de transacción: icono, descripción, monto con signo y fecha corta."""
+    if t["tipo"] == "gasto":
+        icono = formato.EMOJI_GASTO
+        signo = "-"
+    else:
+        icono = formato.EMOJI_INGRESO
+        signo = "+"
+    desc = _limpiar_descripcion(t.get("descripcion", "") or "").strip() or "Sin descripción"
+    mid = t.get("moneda_id")
+    moneda = lookup.get(mid) if mid else None
+    abrev = moneda.get("abreviatura") if moneda else None
+    monto = formato.fmt_moneda(t["cantidad"], abrev=abrev)
+    fecha = _fecha_corta((t.get("fecha") or "")[:10])
+    return f"{icono} {desc} — {signo}{monto} · {fecha}"
+
+
+def _lineas_historial_agrupado(transacciones: list, lookup: dict, tipo: Optional[str]) -> list:
+    """Cabeceras por mes + filas + subtotal. Mes en curso resaltado al inicio;
+    meses anteriores agrupados bajo 'Meses anteriores'."""
+    hoy = datetime.now()
+    mes_actual = hoy.strftime("%Y-%m")
+    anio_actual = str(hoy.year)
+
+    por_mes = _agrupar_por_mes(transacciones)
+    lineas: list = []
+    primero = True
+
+    def _bloque(mes: str, ts: list) -> list:
+        anio, mm = mes.split("-")
+        es_mes_actual = mes == mes_actual
+        nombre = _MESES_NOMBRE[int(mm) - 1]
+        if es_mes_actual:
+            cab = f"📅 **Este mes · {nombre}**" if anio == anio_actual else f"📅 **Este mes · {nombre} {anio}**"
+        else:
+            cab = f"🗓 *{nombre} {anio}*"
+        out = [cab]
+        gasto_mes = ingreso_mes = 0.0
+        for t in ts:
+            out.append(_fila_transaccion(t, lookup))
+            if t["tipo"] == "gasto":
+                gasto_mes += t["cantidad"]
+            else:
+                ingreso_mes += t["cantidad"]
+        if tipo == "gasto":
+            out.append(f"    💸 Total gastado: **{formato.fmt_moneda(gasto_mes)}**")
+        elif tipo == "ingreso":
+            out.append(f"    💰 Total recibido: **{formato.fmt_moneda(ingreso_mes)}**")
+        else:
+            out.append(f"    Gastos: **{formato.fmt_moneda(gasto_mes)}** · Ingresos: **{formato.fmt_moneda(ingreso_mes)}**")
+        return out
+
+    insertado_anteriores = False
+    for mes in sorted(por_mes.keys(), reverse=True):
+        es_mes_actual = mes == mes_actual
+        if not es_mes_actual and not insertado_anteriores:
+            lineas.append("")
+            lineas.append("🗂 **Meses anteriores**")
+            insertado_anteriores = True
+        if not primero:
+            lineas.append("")
+        primero = False
+        lineas += _bloque(mes, por_mes[mes])
+    return lineas
 
 
 def _procesar_transacciones_todas(usuario: Dict[str, Any], tipo: Optional[str] = None) -> str:
@@ -784,42 +872,23 @@ def _procesar_transacciones_todas(usuario: Dict[str, Any], tipo: Optional[str] =
                 return "📝 No tienes ingresos registrados todavía."
             return "📝 No tienes transacciones registradas todavía."
 
-        por_mes: Dict[str, list] = {}
-        for t in transacciones:
-            mes = (t.get("fecha") or "")[:7]
-            if mes:
-                por_mes.setdefault(mes, []).append(t)
-
-        emoji = {"gasto": formato.EMOJI_GASTO, "ingreso": formato.EMOJI_INGRESO}
+        emoji = {"gasto": formato.EMOJI_GASTO,
+                 "ingreso": formato.EMOJI_INGRESO}.get(tipo, "📂")
         lookup = _moneda_lookup_usuario(usuario)
 
-        lineas = [formato.header("📂", "Todas tus transacciones"), formato.SEPARADOR]
-        total_global = 0.0
-        for mes in sorted(por_mes.keys(), reverse=True):
-            anio, mm = mes.split("-")
-            nombre_mes = f"{_MESES_NOMBRE[int(mm) - 1]} {anio}"
-            lineas.append("")
-            lineas.append(f"**{nombre_mes}**")
-            gasto_mes = ingreso_mes = 0.0
-            for t in por_mes[mes]:
-                icono = emoji.get(t["tipo"], "🔹")
-                tipo_label = "Ingreso" if t["tipo"] == "ingreso" else "Gasto"
-                desc = _limpiar_descripcion(t.get("descripcion", "") or "")
-                fecha = t.get("fecha", "")[:10]
-                mid = t.get("moneda_id")
-                moneda = lookup.get(mid) if mid else None
-                abrev = moneda.get("abreviatura") if moneda else None
-                monto = formato.fmt_moneda(t["cantidad"], abrev=abrev)
-                lineas.append(f"{icono} {monto} - {tipo_label}: {desc} ({fecha})")
-                if t["tipo"] == "gasto":
-                    gasto_mes += t["cantidad"]
-                else:
-                    ingreso_mes += t["cantidad"]
-            lineas.append(
-                f"  • Gastos: {formato.fmt_moneda(gasto_mes)} · Ingresos: {formato.fmt_moneda(ingreso_mes)}"
-            )
-            total_global += ingreso_mes - gasto_mes
+        titulo = "Todas tus transacciones"
+        if tipo == "gasto":
+            titulo = "Todos tus gastos"
+        elif tipo == "ingreso":
+            titulo = "Todos tus ingresos"
 
+        lineas = [formato.header(emoji, titulo), formato.SEPARADOR]
+        lineas += _lineas_historial_agrupado(transacciones, lookup, tipo)
+
+        total_global = sum(t["cantidad"] for t in transacciones
+                           if t["tipo"] == "ingreso") - sum(
+                           t["cantidad"] for t in transacciones
+                           if t["tipo"] == "gasto")
         lineas.append("")
         lineas.append(f"{formato.EMOJI_INFO} Neto acumulado: **{formato.fmt_moneda(total_global)}**")
         texto = "\n".join(lineas)
