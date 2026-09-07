@@ -165,6 +165,15 @@ class AIResponder:
 
     def _procesar_ayuda(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa una solicitud de ayuda o una pregunta del usuario."""
+        # Soporte/contacto: responder SIEMPRE con los datos reales de config,
+        # nunca con lo que la IA pudiera inventar (correos/teléfonos falsos).
+        try:
+            from knowledge import _es_pregunta_contacto, _responder_contacto_soporte
+            if _es_pregunta_contacto(mensaje):
+                return _responder_contacto_soporte()
+        except Exception:
+            pass
+
         # Si la IA generó una respuesta contextual, usarla (preguntas/consejos).
         respuesta_ia = resultado.get("respuesta")
         if respuesta_ia:
@@ -886,6 +895,15 @@ class AIResponder:
 
     def _procesar_general(self, resultado: dict, usuario: Dict[str, Any], mensaje: str) -> str:
         """Procesa un mensaje general (saludos, no entendido, etc.)."""
+        # Soporte/contacto: responder SIEMPRE con los datos reales de config,
+        # nunca con lo que la IA pudiera inventar.
+        try:
+            from knowledge import _es_pregunta_contacto, _responder_contacto_soporte
+            if _es_pregunta_contacto(mensaje):
+                return _responder_contacto_soporte()
+        except Exception:
+            pass
+
         # Si la IA generó una respuesta, usarla
         respuesta_ia = resultado.get("respuesta")
         if respuesta_ia:

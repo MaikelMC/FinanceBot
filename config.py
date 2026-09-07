@@ -25,6 +25,12 @@ ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 # /soporte ofrece un botón "Escribir al admin directo" (t.me/<usuario>).
 ADMIN_TELEGRAM_USERNAME = os.getenv("ADMIN_TELEGRAM_USERNAME", "").strip().lstrip("@")
 
+# Datos reales de contacto que el bot muestra cuando el usuario pregunta por
+# soporte (la IA NUNCA debe inventar correos ni teléfonos).
+# Vienen del .env (NO hardcodear aquí: el repo es público).
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "")
+SUPPORT_PHONE = os.getenv("SUPPORT_PHONE", "")
+
 # Backend de base de datos: "sqlite" (default) o "gsheets"
 DB_BACKEND = os.getenv("DB_BACKEND", "sqlite").lower()
 

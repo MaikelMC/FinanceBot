@@ -8,6 +8,8 @@ import re
 from collections import defaultdict
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
+
+import config
 import time
 
 import database
@@ -2623,10 +2625,67 @@ _MODIFICACION = [
 ]
 
 
+def _es_pregunta_contacto(mensaje: str) -> bool:
+    """True si el usuario pide contacto humano / soporte (no sobre finanzas).
+
+    Sirve para NO dejar que la IA invente correos/teléfonos falsos: cuando el
+    usuario pide soporte se responde con los datos reales de config.
+    """
+    m = mensaje.lower()
+
+    # Palabras/frases inequívocamente de soporte
+    fuertes = [
+        "soporte", "contactar", "contactarte", "contactarme", "contacto",
+        "hablar con un humano", "hablar con alguien", "un humano", "con un humano",
+        "persona real", "alguien real", "ser humano", "atención al cliente",
+        "atencion al cliente", "atención humana", "atencion humana",
+        "servicio al cliente", "asistencia", "ayuda humana", "ayuda real",
+        "escribir al admin", "escribir al administrador", "escribir a soporte",
+        "escribirle a soporte", "escribirle al soporte", "mensaje al admin",
+        "mensaje al administrador", "contactar al admin", "reclamación", "reclamacion",
+        "reclamar", "queja", "quejas", "reportar un problema", "reportar problema",
+        "reportarte un problema", "whatsapp",
+    ]
+    if any(w in m for w in fuertes):
+        return True
+
+    # Canal de contacto solo cuando se pregunta a dónde escribir/llamar
+    canales = [
+        "a que correo", "a qué correo", "que correo", "cuál correo", "cual correo",
+        "correo de contacto", "correo del soporte", "email de contacto",
+        "email del soporte", "a que email", "a qué email", "a que número",
+        "a qué número", "numero de contacto", "número de contacto",
+        "numero del soporte", "número del soporte", "correo electronico de contacto",
+        "correo electrónico de contacto",
+    ]
+    return any(w in m for w in canales)
+
+
+def _responder_contacto_soporte() -> str:
+    """Respuesta con los datos REALES de contacto del soporte (nunca inventados).
+
+    Los datos vienen de SUPPORT_EMAIL/SUPPORT_PHONE del .env (config). Si no
+    están configurados, se remite al comando /soporte en lugar de inventar.
+    """
+    lineas = ["📩 **Contacto de soporte:**"]
+    if config.SUPPORT_EMAIL:
+        lineas += ["", f"• ✉️ Correo: `{config.SUPPORT_EMAIL}`"]
+    if config.SUPPORT_PHONE:
+        lineas += ["", f"• 📞 Teléfono / WhatsApp: `{config.SUPPORT_PHONE}`"]
+    if len(lineas) > 1:
+        lineas += ["", "Escríbeme cuando quieras y te atiendo lo antes posible. 😊"]
+        return "\n".join(lineas)
+    return "📩 Para contactar al soporte usa el comando `/soporte`."
+
+
 def _responder_ayuda_uso(mensaje: str) -> str:
     """Responde con ayuda contextual según lo que el usuario pregunte."""
     m = mensaje.lower()
     nombre = "amigo"
+
+    # 0. Soporte / contacto humano (usa datos reales de config, no inventados)
+    if _es_pregunta_contacto(m):
+        return _responder_contacto_soporte()
 
     # Detectar INTENCIÓN de la pregunta (cualquier forma)
     # 1. Registrar gasto
