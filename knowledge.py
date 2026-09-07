@@ -427,7 +427,9 @@ def _procesar_gasto(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Dict
                 raise Exception(f"No se pudo crear/asociar la categoría '{categoria}'")
 
         gastado_antes = float(presupuesto.get("cantidad_gastada", 0)) if presupuesto else 0
-        descripcion, _err_desc = validators.validar_descripcion(mensaje)
+        descripcion, _err_desc = validators.validar_descripcion(
+            _extraer_descripcion_limpia(mensaje, str(cantidad))
+        )
         txn = database.agregar_transaccion(usuario["id"], categoria_id, "gasto", cantidad,
                                     descripcion or mensaje, moneda_id=moneda_id,
                                     es_presupuesto=(presupuesto is not None))
@@ -661,7 +663,9 @@ def _procesar_ingreso(mensaje: str, usuario: Dict[str, Any], moneda: Optional[Di
         if categoria_id is None:
             raise Exception(f"No se pudo crear/asociar la categoría '{categoria}'")
 
-        descripcion, _err_desc = validators.validar_descripcion(mensaje)
+        descripcion, _err_desc = validators.validar_descripcion(
+            _extraer_descripcion_limpia(mensaje, str(cantidad))
+        )
         database.agregar_transaccion(usuario["id"], categoria_id, "ingreso", cantidad,
                                    descripcion or mensaje, moneda_id=moneda_id)
         metricas.registrar_transaccion()
@@ -2156,14 +2160,20 @@ def _extraer_descripcion_limpia(texto: str, cantidad_texto: str = "") -> str:
     # Remover conectores al final (y recibi, y gaste, luego, despues, etc.)
     desc = re.sub(r'\s*,?\s*\by\s+(?:recib[íi]|gast[ée]|compr[ée]|pag[ué]|cobr[éi]|gan[éi]|ingres[éi]|perdí|costó|cobro|salio|salimos)\b.*$', '', desc, flags=re.IGNORECASE)
     desc = re.sub(r'\s*,?\s*(?:luego|después|despues|además|ademas)\s+.*$', '', desc, flags=re.IGNORECASE)
-    # Remover símbolos de moneda y palabras de moneda
+    # Remover símbolos de moneda
     desc = re.sub(r'[\$\€\£\¥\¢]', '', desc)
-    desc = re.sub(r'\b(dólares?|dolares?|pesos?|bs?\.?)\b', '', desc, flags=re.IGNORECASE)
-    # Remover números (el monto ya se extrajo)
-    desc = re.sub(r'\b\d+(?:[.,]\d+)?\b', '', desc)
+    # Remover números (el monto ya se extrajo): incluye enteros, decimales y con separadores de miles
+    desc = re.sub(r'\b\d+(?:[.,]\d+)*\b', '', desc)
+    # Quitar residuos de separadores decimales sueltos tras quitar el número
+    desc = re.sub(r'\s*\.\s*', ' ', desc)
+    # Remover palabras de moneda (nombres y abreviaturas)
+    desc = re.sub(
+        r'\b(d[oó]lares?|dolares?|pesos?|bs?\.?|cup|usd|usdt|mlc|mex|eur|mn|money)\b',
+        '', desc, flags=re.IGNORECASE,
+    )
     # Remover espacios dobles y puntuación suelta al inicio/final
     desc = re.sub(r'\s+', ' ', desc).strip()
-    desc = re.sub(r'^[,;\s]+|[,;\s]+$', '', desc)
+    desc = re.sub(r'^[,;\s.\-—–]+|[,;\s.\-—–]+$', '', desc)
     # Limpiar palabras de relleno al inicio
     palabras = desc.split()
     relleno = {"el", "la", "los", "las", "un", "una", "unas", "unos", "de", "del", "en", "por",
